@@ -30,6 +30,7 @@ not be root anyway.
 | bridge `/opt/bridge/dieter_bridge.py` | `0.0.0.0:8099` (Ingress port); REST + SSE API, serves the page, `/api/ha` for sensors |
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the bridge on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR` |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |
+| `ha` 5.6.0 (Supervisor CLI), `hass-cli` 1.0.0 (HA core REST API) | `/usr/local/bin`; authenticated with the add-on's Supervisor token, see below |
 | runtime sources of the same build (`/opt/dieter-runtime`, from the fork tag, checksum-verified) | `runner.mjs` + adapters incl. **Antigravity**, laid over the archive's `node_modules` |
 | project checkouts | `/data/projects/<name>` |
 
@@ -124,6 +125,19 @@ should reach, for example a Git remote over SSH or another machine with the Diet
 `ssh` inside the container pick the key up through `/data/.ssh/config` (first connections record the
 host key, later ones verify it). The test runs `ssh -o BatchMode=yes <target> uname -n` and prints
 the host name on success.
+
+## Home Assistant from the agent
+
+The agents can drive Home Assistant: `hass-cli` (REST API of HA core through the Supervisor's proxy,
+`HASS_SERVER=http://supervisor/core`, `HASS_TOKEN` = the add-on's Supervisor token) and `ha` (the
+Supervisor CLI, `SUPERVISOR_TOKEN`). Examples: `hass-cli state list`, `hass-cli state get sensor.x`,
+`hass-cli service call light.turn_on --arguments entity_id=light.x`, `ha core info`, `ha apps logs <slug>`,
+`ha core check`. WebSocket commands of hass-cli (`hass-cli raw ws …`) do not work through the proxy.
+The bridge forwards the three variables to the harness workers (`DIETER_HARNESS_ENV`), so every agent
+inherits them; Claude Code additionally gets a note in `/data/.claude/CLAUDE.md` (written once, edit or
+empty it as you like). The token has the add-on's `hassio_role: manager`: the agent can restart Home
+Assistant, manage add-ons and call every service, so word your tasks accordingly. Home Assistant's
+`/config` is not mounted in the container; edit configuration through another machine (SSH) or the API.
 
 ## Backups
 

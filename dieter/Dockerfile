@@ -1,5 +1,5 @@
 # Multi-arch HA base image (glibc, see below); the Supervisor's local build and CI both pass BUILD_ARCH.
-ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:bookworm
+ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
 FROM ${BUILD_FROM}
 ARG BUILD_ARCH
 # Dieter comes from the fork JustinNeumann/dieter (upstream 0.6.429 + the Antigravity harness), whose
@@ -15,10 +15,11 @@ ARG DIETER_COMMIT=f65a42843da6eae2247d1d38eee981b6e6416ee2
 ARG RUNTIME_SOURCES_SHA=d68763f51e2656dff84e6f3d5753183050cb23e0ccf4e3bfc559004efa16dbe2
 ARG NODE_VERSION=22.23.4
 
-# glibc base (musl breaks the OMP harness); git, tmux and python3 for the daemon and the bridge,
-# openssh-client for Git over SSH and for reaching other machines with the add-on's key (/data/.ssh)
+# glibc base (musl breaks the OMP harness; trixie for Python 3.13, which hass-cli needs); git, tmux and
+# python3 for the daemon and the bridge, openssh-client for Git over SSH and for reaching other machines
+# with the add-on's key (/data/.ssh), python3-venv for hass-cli
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git tmux python3 xz-utils procps openssh-client \
+    && apt-get install -y --no-install-recommends git tmux python3 python3-venv xz-utils procps openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eu; \
@@ -65,6 +66,23 @@ RUN set -eu; \
     tar -xzf /tmp/agy.tar.gz -C /tmp antigravity && install -m 755 /tmp/antigravity /usr/local/bin/agy; \
     rm -f /tmp/agy.tar.gz /tmp/antigravity; \
     claude --version && codex --version && agy --version
+
+# Home Assistant CLIs for the agents: `ha` (the Supervisor CLI, hassio_api in config.yaml, token from
+# SUPERVISOR_TOKEN) and `hass-cli` (REST API of HA core; the bridge sets HASS_SERVER to the Supervisor's
+# core proxy and HASS_TOKEN). ha: github.com/home-assistant/cli releases; hass-cli: PyPI, version-pinned.
+ARG HA_CLI_VERSION=5.6.0
+ARG HASS_CLI_VERSION=1.0.0
+RUN set -eu; \
+    case "${BUILD_ARCH}" in \
+      aarch64) HSHA=4ecdbd67002defbf96e4668e62f631e9767b92d18e1ce54bfee6ddd040c20e73 ;; \
+      amd64)   HSHA=9d259c700bfcd45b6a793709e1fcfd304a595624dda10cfa5edde66f0b8a9656 ;; \
+    esac; \
+    curl -fsSL -o /usr/local/bin/ha "https://github.com/home-assistant/cli/releases/download/${HA_CLI_VERSION}/ha_${BUILD_ARCH}"; \
+    echo "${HSHA}  /usr/local/bin/ha" | sha256sum -c -; chmod 755 /usr/local/bin/ha; \
+    python3 -m venv /opt/hass-cli; \
+    /opt/hass-cli/bin/pip install --no-cache-dir --disable-pip-version-check "homeassistant-cli==${HASS_CLI_VERSION}"; \
+    ln -s /opt/hass-cli/bin/hass-cli /usr/local/bin/hass-cli; \
+    ha --help >/dev/null && hass-cli --version
 
 # The daemon and its agents run as this user, not as root (Claude Code refuses
 # --dangerously-skip-permissions as root); /data is handed to it at start.

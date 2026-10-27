@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.8 (2026-10-27)
+
+- Home Assistant CLIs for the agents: `ha` 5.6.0 (Supervisor CLI, `hassio_api: true`, role manager)
+  and `hass-cli` 1.0.0 (HA core REST API) are in the image; the bridge hands the workers
+  `SUPERVISOR_TOKEN`, `HASS_SERVER` and `HASS_TOKEN`, and writes a note for Claude Code to
+  `/data/.claude/CLAUDE.md` once. Base image Debian trixie (Python 3.13 for hass-cli).
+
 ## 0.6.429.7 (2026-10-27)
 
 - Questions reach the bridge: the daemon forwards only whitelisted variables to its harness workers,

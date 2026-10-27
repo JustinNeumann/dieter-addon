@@ -347,7 +347,14 @@ class Daemon:
             # harness workers relay the agents' questions here; the daemon forwards only whitelisted
             # variables to its workers, DIETER_HARNESS_ENV names the extra ones
             env["DIETER_QUESTIONS_URL"] = f"http://127.0.0.1:{PORT}/api/questions"
-            env["DIETER_HARNESS_ENV"] = ",".join(x for x in [env.get("DIETER_HARNESS_ENV", ""), "DIETER_QUESTIONS_URL"] if x)
+            extra = ["DIETER_QUESTIONS_URL"]
+            if ADDON and SUPERVISOR_TOKEN:
+                # Home Assistant for the agents: `ha` reads SUPERVISOR_TOKEN itself (hassio_api in
+                # config.yaml), hass-cli takes HASS_SERVER/HASS_TOKEN (core's REST API via the Supervisor)
+                env["HASS_SERVER"] = f"{SUPERVISOR}/core"
+                env["HASS_TOKEN"] = SUPERVISOR_TOKEN
+                extra += ["SUPERVISOR_TOKEN", "HASS_SERVER", "HASS_TOKEN"]
+            env["DIETER_HARNESS_ENV"] = ",".join(x for x in [env.get("DIETER_HARNESS_ENV", "")] + extra if x)
             if os.path.exists(os.path.join(RUNTIME_DIR, "runner.mjs")):
                 env["DIETER_HARNESS_RUNTIME_DIR"] = RUNTIME_DIR
             if os.path.exists(ENV_FILE):
@@ -883,6 +890,35 @@ def pending_questions():
 SSH_DIR = "/data/.ssh"                                   # HOME=/data: ssh and git find it without any env
 SSH_KEY = os.path.join(SSH_DIR, "id_ed25519")
 SSH_TARGET_RE = re.compile(r"^(?:[A-Za-z0-9._-]{1,64}@)?[A-Za-z0-9][A-Za-z0-9.:-]{0,253}(?::\d{1,5})?$")
+
+
+CLAUDE_HINT = os.path.join(DIETER_HOME if not ADDON else "/data", ".claude", "CLAUDE.md")
+CLAUDE_HINT_TEXT = """# Home Assistant
+
+This container is the Dieter add-on inside Home Assistant. Two authenticated CLIs are installed:
+
+- `hass-cli` talks to Home Assistant core (REST API; `HASS_SERVER`/`HASS_TOKEN` are set):
+  `hass-cli state list`, `hass-cli state get sensor.x`, `hass-cli service call light.turn_on --arguments entity_id=light.x`,
+  `hass-cli raw get /api/config`. WebSocket commands are not available through this proxy.
+- `ha` is the Supervisor CLI (`SUPERVISOR_TOKEN` is set): `ha core info`, `ha apps logs <slug>`, `ha core check`,
+  `ha core restart` (restarts Home Assistant: only when asked).
+
+Home Assistant's own config files are not mounted here; use the APIs above, or SSH to another machine.
+"""
+
+
+def write_claude_hint():
+    """Tell Claude Code (global memory ~/.claude/CLAUDE.md, HOME=/data) that the HA CLIs exist. Only
+    once: the user may edit or empty the file afterwards."""
+    if not (ADDON and SUPERVISOR_TOKEN) or os.path.exists(CLAUDE_HINT):
+        return
+    try:
+        os.makedirs(os.path.dirname(CLAUDE_HINT), mode=0o700, exist_ok=True)
+        with open(CLAUDE_HINT, "w") as f:
+            f.write(CLAUDE_HINT_TEXT)
+        log("wrote", CLAUDE_HINT)
+    except Exception as e:
+        log("claude hint", e)
 
 
 def setup_ssh():
@@ -1701,6 +1737,7 @@ def main():
             log("setup:", e)
         try:
             setup_ssh()
+            write_claude_hint()
         except Exception as e:
             log("ssh: setup failed:", e)
         try:

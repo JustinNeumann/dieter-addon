@@ -1,6 +1,7 @@
 // End-to-end tests of the Dieter page behind an Ingress-like proxy, against the add-on image with
 // Dieter's mock harness (DIETER_ENABLE_MOCK_HARNESS=1). Started by tests/run.sh.
 import { test, expect } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 
 test.describe.configure({ mode: "serial" });
 
@@ -285,4 +286,12 @@ test("the HA summary endpoint stays consistent", async ({ request }) => {
   expect(ha.addon).toBe(true);
   expect(ha.projects).toContain("Hello-World");
   expect(ha.last_finished?.title).toContain("E2E");
+});
+
+test("the Home Assistant CLIs are in the image", async () => {
+  // tests/run.sh starts the container as dieter-e2e; outside an add-on no token is set, so only the binaries are checked
+  const ha = execFileSync("docker", ["exec", "dieter-e2e", "ha", "--help"]).toString(); // the CLI has no --version
+  expect(ha).toContain("Home Assistant Supervisor");
+  const hass = execFileSync("docker", ["exec", "dieter-e2e", "hass-cli", "--version"]).toString();
+  expect(hass).toContain("1.0.0");
 });
