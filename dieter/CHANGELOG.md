@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.15 (2026-10-28)
+
+- Dieter from fork release `v0.6.429-antigravity.3`: the daemon reports its version as
+  `0.6.429+antigravity.3` (build metadata) instead of the pre-release `0.6.429-antigravity.N`, which a
+  gateway with minimum 0.6.429 refused ("Dieter client update required"); after enrolling, the add-on's
+  daemon applied that refusal to the bridge as well ("Bridge offline"). A gateway policy at 0.6.429 now
+  admits the add-on without exceptions.
+
 ## 0.6.429.14 (2026-10-27)
 
 - Gateway enrollment: Tools → Machines → Gateway enrolls the add-on's daemon with your Dieter gateway

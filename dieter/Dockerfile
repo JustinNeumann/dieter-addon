@@ -10,8 +10,8 @@ ARG BUILD_ARCH
 # The harness runtime *sources* (runner.mjs + adapters) are taken from the same tag's source tree and
 # checked against RUNTIME_SOURCES_SHA (sha256 of the `sha256sum` lines of the LC_ALL=C-sorted files); the bridge lays
 # them over the release's node_modules archive at start. Node checksums: nodejs.org/dist/vX/SHASUMS256.txt.
-ARG DIETER_VERSION=0.6.429-antigravity.2
-ARG DIETER_COMMIT=f65a42843da6eae2247d1d38eee981b6e6416ee2
+ARG DIETER_VERSION=0.6.429-antigravity.3
+ARG DIETER_COMMIT=52d32ec3d033d9934c7bad02c17a8f9b6d76ae87
 ARG RUNTIME_SOURCES_SHA=d68763f51e2656dff84e6f3d5753183050cb23e0ccf4e3bfc559004efa16dbe2
 ARG NODE_VERSION=22.23.4
 
@@ -24,9 +24,9 @@ RUN apt-get update \
 
 RUN set -eu; \
     case "${BUILD_ARCH}" in \
-      aarch64) D=arm64; DSHA=64afc8f021c3f37c4206a509922479e7fe42a17774eb712763f831aead28b8b0; \
+      aarch64) D=arm64; DSHA=fd1ab24b932ece3489416703c24522f569cfa17348bc1daeaea028775fff1af9; \
                N=arm64; NSHA=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b ;; \
-      amd64)   D=amd64; DSHA=ce5903831b73388da797dba37af94220840e2968ceb5c11500853147d6a0ca0b; \
+      amd64)   D=amd64; DSHA=d2f3682e85621f902c137dd3dfa3b911833ecdde6836e7e7f53ec5a1b21dd96a; \
                N=x64;   NSHA=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce ;; \
       *) echo "unsupported BUILD_ARCH ${BUILD_ARCH}" >&2; exit 1 ;; \
     esac; \

@@ -98,7 +98,7 @@ ENV_FILE = "/data/dieter.env"                    # provider credentials for the 
 # node_modules (+ Bun); the runtime sources of the same build are in the image (/opt/dieter-runtime,
 # from the fork tag, see Dockerfile) and are laid over it.
 HARNESS_REPO = "JustinNeumann/dieter"
-HARNESS_VERSION = os.environ.get("DIETER_VERSION", "0.6.429-antigravity.2")
+HARNESS_VERSION = os.environ.get("DIETER_VERSION", "0.6.429-antigravity.3")
 HARNESS_SHA = {"aarch64": "1a0615ef28fab530eeb2e54efcd348c87a83ec6c1731dc942929c1cc8d398822",
                "x86_64": "cfb22e380f648e40069b7b317c7ab0d3ae558dba427d84dd08bd4b74a4b74ef3"}
 HARNESS_ASSET = {"aarch64": "dieter-harness-runtime-linux-arm64.tar.gz", "x86_64": "dieter-harness-runtime-linux-amd64.tar.gz"}
@@ -1293,7 +1293,7 @@ def schedule_create(b):
     if b.get("mail"):
         args.append("--mail=true")
     out = run(args, timeout=60) or {}
-    STATE.touch()
+    STATE.poll_fast()   # the new card / schedule state must be in the next /api/state, not only after the next poll
     return {"ok": True, "schedule": norm_schedule(out.get("schedule") if isinstance(out, dict) and "schedule" in out else out)}
 
 
@@ -1301,7 +1301,7 @@ def schedule_action(sid, action):
     if not SCHEDULE_ID_RE.match(sid) or action not in SCHEDULE_ACTIONS:
         raise CliError("bad request")
     out = run(["schedule", action, sid], timeout=60)
-    STATE.touch()
+    STATE.poll_fast()   # the new card / schedule state must be in the next /api/state, not only after the next poll
     if action == "run":
         return {"ok": True, "run": norm_run(out if isinstance(out, dict) else {})}
     if action == "delete":
