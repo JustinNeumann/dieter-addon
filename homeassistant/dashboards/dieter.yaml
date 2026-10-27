@@ -1,0 +1,45 @@
+# Optional status dashboard for the Dieter add-on (needs homeassistant/packages/dieter.yaml).
+# The app itself is the add-on's sidebar panel; this dashboard only shows the sensors.
+# Install: copy to <config>/dashboards/dieter.yaml and register it in configuration.yaml:
+#   lovelace:
+#     dashboards:
+#       dieter-status:
+#         mode: yaml
+#         title: Dieter Status
+#         icon: mdi:robot
+#         filename: dashboards/dieter.yaml
+# The push's "Status" action in the package opens /dieter-status/status.
+# Replace 4d8f2a84_dieter with your add-on's slug (see the package header).
+title: Dieter Status
+views:
+  - title: Status
+    path: status
+    icon: mdi:chart-box-outline
+    cards:
+      - type: entities
+        title: Dieter
+        entities:
+          - entity: sensor.dieter
+            name: Bridge
+          - entity: sensor.dieter_running_tasks
+          - entity: sensor.dieter_waiting_for_you
+          - entity: sensor.dieter_claude_week
+          - entity: sensor.dieter_cpu
+            name: CPU (host)
+      - type: markdown
+        title: In progress
+        content: >-
+          {% set r = state_attr('sensor.dieter', 'running_titles') or [] %}{% set v = state_attr('sensor.dieter', 'review_titles') or [] %}
+          {% if r %}**Running**{% for t in r %}
+          - {{ t }}{% endfor %}{% endif %}
+          {% if v %}
+
+          **Ready for review**{% for t in v %}
+          - {{ t }}{% endfor %}{% endif %}
+          {% if not r and not v %}Nothing in progress.{% endif %}
+      - type: button
+        name: Open Dieter
+        icon: mdi:robot
+        tap_action:
+          action: navigate
+          navigation_path: /4d8f2a84_dieter

@@ -1,0 +1,25 @@
+configuration:
+  git_user:
+    name: Git user name
+    description: Commit author name used by the agents.
+  git_email:
+    name: Git e-mail
+    description: Commit author e-mail used by the agents.
+  github_token:
+    name: GitHub token
+    description: Fine-grained token with contents read/write on the project repositories (clone, push).
+  claude_code_oauth_token:
+    name: Claude Code token
+    description: Optional. Long-lived token from `claude setup-token`. Such tokens cannot read your quota; signing in on the Dieter page (Tools → Usage → Sign in) is the fuller alternative and takes precedence.
+  openai_api_key:
+    name: OpenAI API key
+    description: Used by the Codex harness (API-key mode).
+  antigravity_token:
+    name: Antigravity credentials
+    description: "Sign-in file of the Antigravity CLI (JSON). On a computer where `agy` is signed in, run: cat \"$HOME/.gemini/antigravity-cli/antigravity-oauth-token\" and paste the output here."
+  projects:
+    name: Projects
+    description: "Repositories to clone into /data/projects and register with Dieter: name, git_url, branch (optional)."
+  log_level:
+    name: Log level
+    description: Bridge log level.

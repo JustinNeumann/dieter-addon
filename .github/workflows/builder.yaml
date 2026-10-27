@@ -1,0 +1,114 @@
+# Builds the add-on image the Supervisor pulls (config.yaml: image: ghcr.io/justinneumann/dieter).
+# Pushes to main build aarch64 and amd64 on native runners, sign them with Cosign and publish the
+# multi-arch manifest ghcr.io/justinneumann/dieter:<version from dieter/config.yaml> (+ :latest);
+# pull requests only build. A version whose tag already exists is not pushed again, so bump
+# config.yaml + CHANGELOG.md for every release (DEPLOY.md). One-time after the first run: make the
+# packages dieter, aarch64-dieter and amd64-dieter public (GitHub → Packages → Package settings).
+# Uses the composite actions of home-assistant/builder (the old builder action is deprecated).
+name: Builder
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dieter/**"
+      - "!dieter/tests/**"
+      - "!dieter/DOCS.md"
+      - "!dieter/CHANGELOG.md"
+      - ".github/workflows/builder.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "dieter/**"
+      - "!dieter/tests/**"
+      - ".github/workflows/builder.yaml"
+  workflow_dispatch:
+
+env:
+  ARCHITECTURES: '["aarch64", "amd64"]'
+  IMAGE_NAME: dieter
+  REGISTRY_PREFIX: ghcr.io/justinneumann   # registries want lowercase; github.repository_owner is not
+  PUBLISH: ${{ github.event_name != 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    name: Initialize build
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get build matrix
+        id: matrix
+        uses: home-assistant/builder/actions/prepare-multi-arch-matrix@2026.09.0
+        with:
+          architectures: ${{ env.ARCHITECTURES }}
+          image-name: ${{ env.IMAGE_NAME }}
+          registry-prefix: ${{ env.REGISTRY_PREFIX }}
+
+      - name: Read the add-on version
+        id: version
+        run: |
+          version=$(python3 -c 'import yaml; print(yaml.safe_load(open("dieter/config.yaml"))["version"])')
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "add-on version ${version}"
+
+  build:
+    name: Build ${{ matrix.arch }} image
+    needs: init
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write   # Cosign signing
+      packages: write   # push to ghcr.io
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Passes BUILD_ARCH and BUILD_VERSION to the Dockerfile; BUILD_FROM keeps its default there.
+      - name: Build image
+        uses: home-assistant/builder/actions/build-image@2026.09.0
+        with:
+          arch: ${{ matrix.arch }}
+          context: dieter
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          image: ${{ matrix.image }}
+          image-tags: |
+            ${{ needs.init.outputs.version }}
+            latest
+          labels: |
+            io.hass.type=addon
+            io.hass.name=Dieter
+            io.hass.description=Dieter coding agents (daemon + page) behind Home Assistant Ingress
+            io.hass.url=https://github.com/JustinNeumann/dieter-addon
+          push: ${{ env.PUBLISH }}
+          skip-existing: ${{ needs.init.outputs.version }}
+          version: ${{ needs.init.outputs.version }}
+
+  manifest:
+    name: Publish multi-arch manifest
+    needs: [init, build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+    steps:
+      - name: Publish multi-arch manifest
+        uses: home-assistant/builder/actions/publish-multi-arch-manifest@2026.09.0
+        with:
+          architectures: ${{ env.ARCHITECTURES }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          image-name: ${{ env.IMAGE_NAME }}
+          registry-prefix: ${{ env.REGISTRY_PREFIX }}
+          image-tags: |
+            ${{ needs.init.outputs.version }}
+            latest
+          skip-existing: ${{ needs.init.outputs.version }}

@@ -1,0 +1,169 @@
+# =============================================================================
+# Home Assistant package for the Dieter add-on: status sensors, services that create
+# and steer tasks, and a push notification when an agent finishes.
+#
+# Install: copy to <config>/packages/dieter.yaml and make sure configuration.yaml has
+#   homeassistant:
+#     packages: !include_dir_named packages
+# then restart Home Assistant (or reload YAML).
+#
+# The add-on is optional without this file (the page works from the sidebar); the
+# package adds sensor.dieter and the push.
+#
+# Host name: HA core reaches the add-on at http://<slug with _ replaced by ->:8099.
+# The slug is in the add-on page's URL (/hassio/addon/<slug>):
+#   installed from https://github.com/JustinNeumann/dieter-addon → 4d8f2a84_dieter
+#     (hostname 4d8f2a84-dieter; the prefix is a hash of the repository URL exactly as
+#     you typed it, so a trailing slash or .git gives another prefix),
+#   local add-on in /addons/dieter                                 → local_dieter
+#     (hostname local-dieter).
+# Replace DIETER_HOST below accordingly; the panel URL for the push uses the slug.
+#
+#   http://DIETER_HOST:8099/api/ha             compact status for sensor.dieter (polled)
+#   events dieter_turn_finished / dieter_card_review   fired by the bridge via the Supervisor
+#                                              as soon as an agent finishes / a card hits Review
+# Ingress URLs carry no deep link, so before a push HA tells the bridge which card to open
+# (rest_command.dieter_focus); the page asks /api/focus when it loads.
+# =============================================================================
+
+rest:
+  - resource: http://4d8f2a84-dieter:8099/api/ha
+    scan_interval: 30
+    timeout: 10
+    sensor:
+      - name: "Dieter"
+        unique_id: dieter_status
+        icon: mdi:robot
+        value_template: "{{ 'online' if value_json.ok else 'offline' }}"
+        json_attributes:
+          - lanes
+          - running
+          - needs_you
+          - running_titles
+          - review_titles
+          - quota
+          - machine
+          - last_finished
+          - last_review
+          - projects
+          - daemon
+          - error
+
+template:
+  - sensor:
+      - name: "Dieter running tasks"
+        unique_id: dieter_running
+        icon: mdi:robot-happy
+        state_class: measurement
+        state: "{{ state_attr('sensor.dieter', 'running') | int(0) }}"
+        attributes:
+          titles: "{{ state_attr('sensor.dieter', 'running_titles') or [] }}"
+      - name: "Dieter waiting for you"
+        unique_id: dieter_needs_you
+        icon: mdi:account-clock
+        state_class: measurement
+        state: "{{ state_attr('sensor.dieter', 'needs_you') | int(0) }}"
+        attributes:
+          titles: "{{ state_attr('sensor.dieter', 'review_titles') or [] }}"
+      - name: "Dieter Claude week"
+        unique_id: dieter_claude_week_used
+        icon: mdi:gauge
+        unit_of_measurement: "%"
+        state_class: measurement
+        availability: "{{ (state_attr('sensor.dieter', 'quota') or {}).get('anthropic_claude') is not none }}"
+        state: "{{ (state_attr('sensor.dieter', 'quota') or {}).get('anthropic_claude', {}).get('week_used', 0) | int(0) }}"
+        attributes:
+          five_hour_percent: "{{ (state_attr('sensor.dieter', 'quota') or {}).get('anthropic_claude', {}).get('five_hour_used') }}"
+          week_resets_at: "{{ (state_attr('sensor.dieter', 'quota') or {}).get('anthropic_claude', {}).get('week_resets_at') }}"
+          five_hour_resets_at: "{{ (state_attr('sensor.dieter', 'quota') or {}).get('anthropic_claude', {}).get('five_hour_resets_at') }}"
+          plan: "{{ (state_attr('sensor.dieter', 'quota') or {}).get('anthropic_claude', {}).get('plan') }}"
+      - name: "Dieter CPU"
+        unique_id: dieter_cpu
+        icon: mdi:cpu-64-bit
+        unit_of_measurement: "%"
+        state_class: measurement
+        availability: "{{ (state_attr('sensor.dieter', 'machine') or {}).get('cpu_percent') is not none }}"
+        state: "{{ (state_attr('sensor.dieter', 'machine') or {}).get('cpu_percent', 0) | round(0) }}"
+      - name: "Dieter GPU"
+        unique_id: dieter_gpu
+        icon: mdi:expansion-card
+        unit_of_measurement: "%"
+        state_class: measurement
+        availability: "{{ ((state_attr('sensor.dieter', 'machine') or {}).get('gpu') or {}).get('util') is not none }}"
+        state: "{{ ((state_attr('sensor.dieter', 'machine') or {}).get('gpu') or {}).get('util', 0) | int(0) }}"
+        attributes:
+          temperature: "{{ ((state_attr('sensor.dieter', 'machine') or {}).get('gpu') or {}).get('temp') }}"
+          name: "{{ ((state_attr('sensor.dieter', 'machine') or {}).get('gpu') or {}).get('name') }}"
+
+rest_command:
+  # Fields: project (id), board (id), title, prompt, provider, model, effort, workspace (project|worktree), start (bool)
+  dieter_create_task:
+    url: "http://4d8f2a84-dieter:8099/api/card"
+    method: POST
+    content_type: "application/json"
+    timeout: 60
+    payload: >-
+      {{ {"project": project, "board": board, "title": title | default(''), "prompt": prompt,
+          "provider": provider | default('claude-code'), "model": model | default(''), "effort": effort | default(''),
+          "workspace": workspace | default('project'), "start": start | default(true)} | to_json }}
+  # Fields: card (id), message, kind (card|chat)
+  dieter_send_message:
+    url: "http://4d8f2a84-dieter:8099/api/{{ kind | default('card') }}/{{ card }}/send"
+    method: POST
+    content_type: "application/json"
+    timeout: 60
+    payload: '{{ {"message": message} | to_json }}'
+  # Fields: card (id), lane (todo|running|review|done)
+  dieter_move_card:
+    url: "http://4d8f2a84-dieter:8099/api/card/{{ card }}/move"
+    method: POST
+    content_type: "application/json"
+    timeout: 30
+    payload: '{{ {"lane": lane} | to_json }}'
+  # card the Dieter panel opens on its next load (15 min), used before a push
+  dieter_focus:
+    url: "http://4d8f2a84-dieter:8099/api/focus"
+    method: POST
+    content_type: "application/json"
+    timeout: 10
+    payload: '{{ {"id": card} | to_json }}'
+
+automation:
+  - id: dieter_turn_finished_push
+    alias: "Dieter: agent finished or card ready for review (push)"
+    description: >-
+      Push to the phone as soon as a Dieter agent ends its turn (event dieter_turn_finished) or a card
+      moves to Review (dieter_card_review). Tapping opens the Dieter panel on that card.
+    mode: queued
+    triggers:
+      - trigger: event
+        event_type: dieter_turn_finished
+        id: finished
+      - trigger: event
+        event_type: dieter_card_review
+        id: review
+    actions:
+      - variables:
+          ev: "{{ trigger.event.data }}"
+          url: /4d8f2a84_dieter
+      - action: rest_command.dieter_focus
+        continue_on_error: true
+        data:
+          card: "{{ ev.id }}"
+      # replace with your Companion app's notify service (Settings → Companion app → device name)
+      - action: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "{{ 'Dieter: ready for review' if trigger.id == 'review' else 'Dieter: agent finished' }}"
+          message: "{{ ev.title }}{{ (' · ' ~ ev.project) if ev.project else '' }}"
+          data:
+            tag: "dieter-{{ ev.id }}"
+            clickAction: "{{ url }}"
+            url: "{{ url }}"
+            actions:
+              - action: URI
+                title: "Open"
+                uri: "{{ url }}"
+              # the optional status dashboard, see homeassistant/dashboards/dieter.yaml
+              - action: URI
+                title: "Status"
+                uri: "/dieter-status/status"
