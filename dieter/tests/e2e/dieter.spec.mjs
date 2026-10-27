@@ -364,3 +364,28 @@ test("Schedules: create with the mock agent, run now, pause, history, delete", a
   const bad = await request.post("api/schedules/nope/run", { data: {} });
   expect(bad.ok()).toBe(false);
 });
+
+test("the most recently used project is listed first, preselected in New task and opened from the Projects tab", async ({ page }) => {
+  await page.goto("");
+  await page.locator('#rail [data-act="tab"][data-tab="projects"]').click();
+  await page.locator('[data-act="project"]').filter({ hasText: "Second-Repo" }).click();
+  await expect(page.locator("#list")).toContainText("Checkouts");
+  await page.reload(); // c) a wide screen opens the recent project at start…
+  await expect(page.locator("#list")).toContainText("Second-Repo", { timeout: 15_000 });
+  await expect(page.locator("#list")).toContainText("Checkouts");
+  await page.locator('#rail [data-act="tab"][data-tab="inbox"]').click();
+  await page.locator('#rail [data-act="tab"][data-tab="projects"]').click(); // …and the Projects tab shows it too
+  await expect(page.locator("#list")).toContainText("Checkouts");
+  await expect(page.locator("#list")).toContainText("Second-Repo");
+  await page.locator('#list [data-act="back"]').click(); // a) back on the list it is first
+  await expect(page.locator('[data-act="project"]').first()).toContainText("Second-Repo");
+  await page.locator('[data-act="new"]').first().click(); // b) preselected in New task
+  await expect(page.locator('[data-act="picker"][data-key="project"]')).toContainText("Second-Repo");
+  await page.locator('#modal [data-act="cancel-modal"]').click();
+  // using another project moves it to the top
+  await page.locator('[data-act="project"]').filter({ hasText: "Hello-World" }).click();
+  await page.reload();
+  await expect(page.locator("#list")).toContainText("Hello-World", { timeout: 15_000 });
+  await page.locator('#list [data-act="back"]').click();
+  await expect(page.locator('[data-act="project"]').first()).toContainText("Hello-World");
+});

@@ -47,7 +47,7 @@ agents run arbitrary tooling under `/data`.
 | `git_user`, `git_email` | commit identity for the agents (written to `/data/.gitconfig`) |
 | `github_token` | token for github.com (fine-grained with *All repositories* or the repos you want, permission Contents read/write; or classic `repo`); stored in `/data/.git-credentials` and used for every clone and push |
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
-| `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **+** → *Add repository* (Git URL, optional name and base branch); *New folder* creates an empty Git repository `/data/projects/<name>` without a remote and registers it (an existing folder there is adopted) |
+| `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **+** → *Add repository* (Git URL, optional name and base branch); *New folder* creates an empty Git repository `/data/projects/<name>` without a remote and registers it (an existing folder there is adopted). The page lists the most recently used project first, preselects it in New task and opens it when the Projects tab is tapped |
 | `log_level` | bridge log level |
 
 Agents work in `/data/projects/*` on branches; publishing means push branch + pull request. The

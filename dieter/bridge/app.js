@@ -48,6 +48,9 @@
   TABS.forEach(([t]) => (S.stacks[t] = [{ kind: "root", tab: t }]));
   function load(k, d) { try { return JSON.parse(localStorage.getItem("dieter-" + k)) ?? d; } catch (e) { return d; } }
   function save(k, v) { try { localStorage.setItem("dieter-" + k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } }
+  // most recently used project: first in the list, preselected for new tasks and when the Projects tab is tapped
+  const mruProject = () => { const id = load("mru-project", ""); return (S.data?.projects || []).find((p) => p.id === id) || null; };
+  const touchProject = (id) => { if (id && load("mru-project", "") !== id) save("mru-project", id); };
 
   // theme: the app follows the system unless overridden (?theme=dark|light)
   function applyTheme() {
@@ -171,9 +174,13 @@
     S.stacks[S.tab] = base && base.kind !== "root" ? [root, base, route] : [root, route];
     render();
   }
-  function selectTab(t) { if (S.tab === t) { S.stacks[t] = [{ kind: "root", tab: t }]; } S.tab = t; render(); }
+  function selectTab(t) {
+    if (S.tab === t) { S.stacks[t] = [{ kind: "root", tab: t }]; }
+    if (t === "projects" && (S.stacks[t] || []).length <= 1) { const m = mruProject(); if (m) S.stacks[t] = [{ kind: "root", tab: t }, { kind: "project", id: m.id }]; }
+    S.tab = t; render();
+  }
   function openConversation(id) {
-    const c = conv(id); const kind = c?.kind === "chat" ? "chat" : "card";
+    const c = conv(id); const kind = c?.kind === "chat" ? "chat" : "card"; touchProject(c?.project_id);
     const st = stack(); const listIdx = st.map(isList).lastIndexOf(true);
     S.stacks[S.tab] = [...st.slice(0, listIdx + 1), { kind: "conversation", id, convKind: kind }];
     render();
@@ -352,7 +359,7 @@
     const projects = S.data.projects || [];
     const query = (S.search.projects || "").trim().toLowerCase();
     const matches = (p) => !query || p.name.toLowerCase().includes(query) || (S.data.boards || []).some((b) => b.project_id === p.id && b.name.toLowerCase().includes(query));
-    const list = projects.filter(matches);
+    const mru = mruProject(); const list = projects.filter(matches).sort((a, b) => (b.id === mru?.id) - (a.id === mru?.id));
     const body = list.length ? list.map(projectGroup).join("") : projects.length ? emptyState("search", "No results", `No projects or boards match “${S.search.projects}”.`)
       : emptyState("create_new_folder", "No projects yet", "Add a Git repository with the + button; it is cloned on this machine.");
     return `<div class="screen">${appbar({ title: "Projects", subtitle: projects.length ? counts(projects.length, "project") : "", large: true, back: opts.back, actions: iconAction("add", "menu", `data-menu="projects-add"`, "Add") })}
@@ -592,7 +599,7 @@
   }
   function openScheduleForm(projectId) {
     S.sch ||= { list: {}, detail: {}, form: null, preview: {} };
-    const p = project(projectId) || (S.data.projects || [])[0]; const harness = (S.data.harnesses || []).find((h) => h.id === load("provider", "claude-code")) || (S.data.harnesses || [])[0];
+    const p = project(projectId) || mruProject() || (S.data.projects || [])[0]; const harness = (S.data.harnesses || []).find((h) => h.id === load("provider", "claude-code")) || (S.data.harnesses || [])[0];
     S.sch.form = { project_id: p?.id || "", board_id: (S.data.boards || []).find((b) => b.project_id === p?.id)?.id || "", name: "", cron: "0 7 * * 1-5", timezone: browserTz(), title: "", prompt: "",
       action: "run", workspace: "project", provider: harness?.id || "", model: harness?.default_model || harness?.models?.[0]?.id || "", effort: "", enabled: true, vault: false, mail: false };
     push({ kind: "tool", page: "schedules", create: true, projectId: p?.id });
@@ -1060,7 +1067,7 @@
 
   // ---- Creation (CreationScreen.kt)
   function newConversation(chat) {
-    const projects = S.data?.projects || []; const first = projects.find((p) => p.id === S.creation?.project_id) || projects[0];
+    const projects = S.data?.projects || []; const first = projects.find((p) => p.id === S.creation?.project_id) || mruProject() || projects[0];
     const harness = (S.data?.harnesses || []).find((h) => h.id === "claude-code") || S.data?.harnesses?.[0];
     S.creation = { chat, title: "", prompt: "", runNow: true, project_id: first?.id || "", board_id: (S.data?.boards || []).find((b) => b.project_id === first?.id)?.id || "",
       checkout_id: first?.checkouts?.[0]?.id || "", provider: load("provider", harness?.id || "claude-code"), model: "", effort: "", workspace: "project", branch: "", base: "", vault: false, mail: false };
@@ -1098,7 +1105,7 @@
     try {
       const body = { project: c.project_id, title: c.title.trim(), prompt: c.prompt.trim(), provider: c.provider, model: c.model, effort: c.effort, workspace: c.workspace, start: c.chat || c.runNow, checkout: c.checkout_id };
       if (!c.chat) body.board = c.board_id; if (c.workspace === "worktree" && c.branch) body.branch = c.branch;
-      save("provider", c.provider); save("model-" + c.provider, c.model);
+      save("provider", c.provider); save("model-" + c.provider, c.model); touchProject(c.project_id);
       if (S.files.length) body.attachments = await uploadFiles("form");
       const r = await api(c.chat ? "api/chat" : "api/card", body);
       clearFiles("form");
@@ -1275,8 +1282,8 @@
       case "new-chat": newConversation(true); break;
       case "cancel-modal": S.modal = null; S.creation = null; S.repo = null; clearFiles("form"); render(); break;
       case "open": openConversation(id); break;
-      case "project": showFrom(null, { kind: "project", id }); break;
-      case "board": { const base = top().kind === "project" ? top() : null; showFrom(base, { kind: "board", id }); break; }
+      case "project": touchProject(id); showFrom(null, { kind: "project", id }); break;
+      case "board": { touchProject(board(id)?.project_id); const base = top().kind === "project" ? top() : null; showFrom(base, { kind: "board", id }); break; }
       case "lane": S.lanePage[el.dataset.board] = el.dataset.lane; render(); break;
       case "sort": { const k = el.dataset.board + ":" + el.dataset.lane; S.boardSort[k] = !(S.boardSort[k] ?? true); render(); break; }
       case "inbox-filter": S.inboxFilter = el.dataset.filter; render(); break;
@@ -1375,5 +1382,5 @@
   const startCard = q.get("card");
   if (startCard) openAtStart(startCard);
   else if (!startTab && !SNAP) api("api/focus?consume=1").then((f) => { if (f && f.id) openAtStart(f.id); }).catch(() => {});
-  if (!startCard && !startTab && S.data === null) { const once = setInterval(() => { if (S.data) { clearInterval(once); const b = S.data.boards?.[0]; if (b && twoPane() && (S.stacks.projects || []).length <= 1) { S.stacks.projects = [{ kind: "root", tab: "projects" }, { kind: "board", id: b.id }]; render(); } } }, 150); } // default board on wide screens, unless something was opened already
+  if (!startCard && !startTab && S.data === null) { const once = setInterval(() => { if (S.data) { clearInterval(once); const m = mruProject(); const b = S.data.boards?.[0]; if ((m || b) && twoPane() && (S.stacks.projects || []).length <= 1) { S.stacks.projects = [{ kind: "root", tab: "projects" }, m ? { kind: "project", id: m.id } : { kind: "board", id: b.id }]; render(); } } }, 150); } // default board on wide screens, unless something was opened already
 })();

@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.11 (2026-10-27)
+
+- The page remembers the most recently used project (opened, a board or card of it opened, a task
+  created in it; stored in the browser): it is listed first under Projects, preselected in New task
+  and New schedule, and opened when the Projects tab is tapped or the page starts on a wide screen.
+
 ## 0.6.429.10 (2026-10-27)
 
 - Files: Tools → Files (or Workspace → Files on a project, Files in a conversation's menu) browses the
