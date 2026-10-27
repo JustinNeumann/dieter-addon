@@ -67,22 +67,16 @@ RUN set -eu; \
     rm -f /tmp/agy.tar.gz /tmp/antigravity; \
     claude --version && codex --version && agy --version
 
-# Home Assistant CLIs for the agents: `ha` (the Supervisor CLI, hassio_api in config.yaml, token from
-# SUPERVISOR_TOKEN) and `hass-cli` (REST API of HA core; the bridge sets HASS_SERVER to the Supervisor's
-# core proxy and HASS_TOKEN). ha: github.com/home-assistant/cli releases; hass-cli: PyPI, version-pinned.
-ARG HA_CLI_VERSION=5.6.0
+# hass-cli for the agents (REST API of HA core; the bridge sets HASS_SERVER to the Supervisor's core
+# proxy and HASS_TOKEN to the add-on's token, homeassistant_api in config.yaml). PyPI, version-pinned.
+# The Supervisor CLI `ha` is deliberately not included: it would need hassio_api and hand the agents
+# add-on/host management.
 ARG HASS_CLI_VERSION=1.0.0
 RUN set -eu; \
-    case "${BUILD_ARCH}" in \
-      aarch64) HSHA=4ecdbd67002defbf96e4668e62f631e9767b92d18e1ce54bfee6ddd040c20e73 ;; \
-      amd64)   HSHA=9d259c700bfcd45b6a793709e1fcfd304a595624dda10cfa5edde66f0b8a9656 ;; \
-    esac; \
-    curl -fsSL -o /usr/local/bin/ha "https://github.com/home-assistant/cli/releases/download/${HA_CLI_VERSION}/ha_${BUILD_ARCH}"; \
-    echo "${HSHA}  /usr/local/bin/ha" | sha256sum -c -; chmod 755 /usr/local/bin/ha; \
     python3 -m venv /opt/hass-cli; \
     /opt/hass-cli/bin/pip install --no-cache-dir --disable-pip-version-check "homeassistant-cli==${HASS_CLI_VERSION}"; \
     ln -s /opt/hass-cli/bin/hass-cli /usr/local/bin/hass-cli; \
-    ha --help >/dev/null && hass-cli --version
+    hass-cli --version
 
 # The daemon and its agents run as this user, not as root (Claude Code refuses
 # --dangerously-skip-permissions as root); /data is handed to it at start.

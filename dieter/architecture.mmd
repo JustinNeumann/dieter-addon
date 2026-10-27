@@ -17,7 +17,7 @@ flowchart LR
       B["bridge · dieter_bridge.py\n0.0.0.0:8099 · REST + SSE\nserves the page · /api/ha · /api/focus · /api/project\n/api/questions (agent questions) · /api/upload (attachments)"]
       D["dieter daemon 0.6.429-antigravity.1\n(fork release: upstream + Antigravity)\n127.0.0.1:4242 · unenrolled · DIETER_HOME=/data/dieter"]
       HR["staged harness runtime\n/data/dieter/harness-staged/0.6.429-antigravity.2\n(node_modules + Bun from the fork release, sha256-pinned;\nsources from the image)"]
-      CLI["claude 2.1.311 · codex 0.163.0 · agy\nha 5.6.0 · hass-cli 1.0.0\n/usr/local/bin"]
+      CLI["claude 2.1.311 · codex 0.163.0 · agy\nhass-cli 1.0.0\n/usr/local/bin"]
       R["project checkouts\n/data/projects/*"]
       ENV["/data/dieter.env\nCLAUDE_CODE_OAUTH_TOKEN · OPENAI_API_KEY\n/data/.git-credentials (GitHub token)"]
     end

@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.9 (2026-10-27)
+
+- The Supervisor CLI `ha` and `hassio_api` are gone again (0.6.429.8 gave the agents add-on, restart
+  and host management). `hass-cli` stays; HA events for the notifications and hass-cli only need the
+  core proxy (`homeassistant_api`). The note in `/data/.claude/CLAUDE.md` is replaced while it is still
+  the add-on's own text.
+
 ## 0.6.429.8 (2026-10-27)
 
 - Home Assistant CLIs for the agents: `ha` 5.6.0 (Supervisor CLI, `hassio_api: true`, role manager)

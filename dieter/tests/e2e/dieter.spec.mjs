@@ -288,10 +288,9 @@ test("the HA summary endpoint stays consistent", async ({ request }) => {
   expect(ha.last_finished?.title).toContain("E2E");
 });
 
-test("the Home Assistant CLIs are in the image", async () => {
-  // tests/run.sh starts the container as dieter-e2e; outside an add-on no token is set, so only the binaries are checked
-  const ha = execFileSync("docker", ["exec", "dieter-e2e", "ha", "--help"]).toString(); // the CLI has no --version
-  expect(ha).toContain("Home Assistant Supervisor");
+test("hass-cli is in the image, the Supervisor CLI is not", async () => {
+  // tests/run.sh starts the container as dieter-e2e; outside an add-on no token is set, so only the binary is checked
+  expect(() => execFileSync("docker", ["exec", "dieter-e2e", "sh", "-c", "command -v ha"], { stdio: "pipe" })).toThrow();
   const hass = execFileSync("docker", ["exec", "dieter-e2e", "hass-cli", "--version"]).toString();
   expect(hass).toContain("1.0.0");
 });
