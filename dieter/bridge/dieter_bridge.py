@@ -344,7 +344,10 @@ class Daemon:
             started = time.time()
             args = [DIETER, "--store", DIETER_HOME, "daemon", "start", "--addr", DAEMON_ADDR]
             env = dict(os.environ)
-            env["DIETER_QUESTIONS_URL"] = f"http://127.0.0.1:{PORT}/api/questions"   # harness workers relay questions here
+            # harness workers relay the agents' questions here; the daemon forwards only whitelisted
+            # variables to its workers, DIETER_HARNESS_ENV names the extra ones
+            env["DIETER_QUESTIONS_URL"] = f"http://127.0.0.1:{PORT}/api/questions"
+            env["DIETER_HARNESS_ENV"] = ",".join(x for x in [env.get("DIETER_HARNESS_ENV", ""), "DIETER_QUESTIONS_URL"] if x)
             if os.path.exists(os.path.join(RUNTIME_DIR, "runner.mjs")):
                 env["DIETER_HARNESS_RUNTIME_DIR"] = RUNTIME_DIR
             if os.path.exists(ENV_FILE):

@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.7 (2026-10-27)
+
+- Questions reach the bridge: the daemon forwards only whitelisted variables to its harness workers,
+  so `DIETER_QUESTIONS_URL` is now named in `DIETER_HARNESS_ENV`. In 0.6.429.6 every question was
+  declined at once.
+
 ## 0.6.429.6 (2026-10-27)
 
 - Dieter from fork release `v0.6.429-antigravity.2`: the harness worker relays the agent's questions
