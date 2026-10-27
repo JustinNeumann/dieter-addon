@@ -44,6 +44,7 @@ rest:
           - quota
           - machine
           - last_finished
+          - questions
           - last_review
           - projects
           - daemon
@@ -142,6 +143,9 @@ automation:
       - trigger: event
         event_type: dieter_card_review
         id: review
+      - trigger: event
+        event_type: dieter_question
+        id: question
     actions:
       - variables:
           ev: "{{ trigger.event.data }}"
@@ -149,14 +153,14 @@ automation:
       - action: rest_command.dieter_focus
         continue_on_error: true
         data:
-          card: "{{ ev.id }}"
+          card: "{{ ev.card_id if trigger.id == 'question' else ev.id }}"
       # replace with your Companion app's notify service (Settings → Companion app → device name)
       - action: notify.mobile_app_YOUR_PHONE
         data:
-          title: "{{ 'Dieter: ready for review' if trigger.id == 'review' else 'Dieter: agent finished' }}"
-          message: "{{ ev.title }}{{ (' · ' ~ ev.project) if ev.project else '' }}"
+          title: "{{ 'Dieter asks' if trigger.id == 'question' else 'Dieter: ready for review' if trigger.id == 'review' else 'Dieter: agent finished' }}"
+          message: "{{ (ev.question ~ ' — ' ~ ev.title) if trigger.id == 'question' else ev.title ~ ((' · ' ~ ev.project) if ev.project else '') }}"
           data:
-            tag: "dieter-{{ ev.id }}"
+            tag: "dieter-{{ ev.card_id if trigger.id == 'question' else ev.id }}"
             clickAction: "{{ url }}"
             url: "{{ url }}"
             actions:

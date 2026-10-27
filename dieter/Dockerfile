@@ -10,9 +10,9 @@ ARG BUILD_ARCH
 # The harness runtime *sources* (runner.mjs + adapters) are taken from the same tag's source tree and
 # checked against RUNTIME_SOURCES_SHA (sha256 of the `sha256sum` lines of the LC_ALL=C-sorted files); the bridge lays
 # them over the release's node_modules archive at start. Node checksums: nodejs.org/dist/vX/SHASUMS256.txt.
-ARG DIETER_VERSION=0.6.429-antigravity.1
-ARG DIETER_COMMIT=a955b2a1d5429ec531fb3945600e6c67197550e8
-ARG RUNTIME_SOURCES_SHA=8d2cf0cb4126a682fe660bfa55d3449078019c6f12416cdf92a21e99b4cae10d
+ARG DIETER_VERSION=0.6.429-antigravity.2
+ARG DIETER_COMMIT=f65a42843da6eae2247d1d38eee981b6e6416ee2
+ARG RUNTIME_SOURCES_SHA=d68763f51e2656dff84e6f3d5753183050cb23e0ccf4e3bfc559004efa16dbe2
 ARG NODE_VERSION=22.23.4
 
 # glibc base (musl breaks the OMP harness); git, tmux and python3 for the daemon and the bridge,
@@ -23,9 +23,9 @@ RUN apt-get update \
 
 RUN set -eu; \
     case "${BUILD_ARCH}" in \
-      aarch64) D=arm64; DSHA=ab83b38fe69f315d8b4b08a2f591fb789427d0137b79771a399889a32dcc2903; \
+      aarch64) D=arm64; DSHA=64afc8f021c3f37c4206a509922479e7fe42a17774eb712763f831aead28b8b0; \
                N=arm64; NSHA=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b ;; \
-      amd64)   D=amd64; DSHA=51b94a700a0993f0e56c16bdda0693dfe4727265a8868fea19653ee04c5c0a9f; \
+      amd64)   D=amd64; DSHA=ce5903831b73388da797dba37af94220840e2968ceb5c11500853147d6a0ca0b; \
                N=x64;   NSHA=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce ;; \
       *) echo "unsupported BUILD_ARCH ${BUILD_ARCH}" >&2; exit 1 ;; \
     esac; \

@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.6 (2026-10-27)
+
+- Dieter from fork release `v0.6.429-antigravity.2`: the harness worker relays the agent's questions
+  to the bridge, so Claude Code's AskUserQuestion is answered on the page instead of hanging the turn.
+- Home Assistant package: the notification automation also fires on the event `dieter_question`.
+
 ## 0.6.429.5 (2026-10-27)
 
 - The add-on has its own SSH key (ed25519, generated in `/data/.ssh` on first start). Tools → Machines
