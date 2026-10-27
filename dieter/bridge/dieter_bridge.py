@@ -633,7 +633,9 @@ def local_quota():
         try:
             p = subprocess.run(["node", probe], capture_output=True, text=True, timeout=40, env=env, cwd=os.path.dirname(probe))
             a = json.loads(p.stdout.strip() or "{}")
-            if not a.get("windows"):
+            if p.returncode != 0 or not p.stdout.strip():
+                log("quota: claude probe exited", p.returncode, (p.stderr.strip().splitlines() or ["(no output)"])[-1][:160])
+            if not a.get("windows") and not claude_credentials():
                 # setup-token logins are "unsupported" for Dieter's probe: fetch the usage API directly
                 p = subprocess.run(["node", os.path.join(HERE, "quota_claude_token.mjs"), probe], capture_output=True, text=True, timeout=40, env=env, cwd=HERE)
                 err = next((l for l in p.stderr.splitlines() if "Error" in l), (p.stderr.strip().splitlines() or ["?"])[-1])
@@ -645,7 +647,9 @@ def local_quota():
                                            "remaining": w.get("remainingPercent"), "resets_at": w.get("resetsAt")} for w in a["windows"]],
                               "refreshed_at": datetime_now()})
             elif a.get("availability"):
-                log("quota: claude:", a.get("availability"))
+                log("quota: claude:", a.get("availability"), "" if not a.get("displayEmail") else f"({a.get('displayEmail')})")
+            elif claude_credentials():
+                log("quota: claude: the probe returned no windows for the page sign-in")
         except Exception as e:
             log("quota: claude probe:", e)
     if os.path.exists(ANTIGRAVITY_TOKEN_FILE):
