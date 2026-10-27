@@ -133,7 +133,12 @@ test("Usage offers the Claude sign-in: link to claude.com, Cancel aborts, a wron
   await expect(page.locator("[data-claude-error]")).not.toBeEmpty({ timeout: 60_000 });
   await page.keyboard.press("Escape");
   await expect(page.locator("#overlay")).toHaveClass(/hidden/);
-  expect((await (await request.get("api/state")).json()).claude_auth.signed_in).toBe(false);
+  const st = await (await request.get("api/state")).json();
+  expect(st.claude_auth.signed_in).toBe(false);
+  expect(Array.isArray(st.backends)).toBe(true); // one Inbox usage bar per configured backend; none configured here
+  expect(st.backends).toEqual([]);
+  await page.locator('#rail [data-act="tab"][data-tab="inbox"]').click();
+  await expect(page.locator(".usage-strip")).toHaveCount(0);
 });
 
 test("a push deep link (api/focus) opens the card on the next load", async ({ page, request }) => {

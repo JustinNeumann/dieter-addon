@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.3 (2026-10-27)
+
+- Inbox usage strip: one bar per configured LLM backend (Claude Code, Antigravity, OpenAI), showing the
+  tightest window by name; backends without quota data show an empty bar instead of disappearing.
+- Claude quota after a page sign-in no longer waits for a stale 5-minute cache (a poll that started before
+  the sign-in could refill it).
+
 ## 0.6.429.2 (2026-10-27)
 
 - Dieter now comes from the fork's own release `v0.6.429-antigravity.1` (github.com/JustinNeumann/dieter,

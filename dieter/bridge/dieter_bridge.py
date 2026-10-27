@@ -424,7 +424,8 @@ def setup_antigravity():
     log("env: Antigravity credentials installed")
 
 
-QUOTA_CACHE = {"at": 0, "items": []}
+QUOTA_CACHE = {"at": 0, "items": [], "gen": 0}
+QUOTA_GEN = [0]   # bumped when provider credentials change: a poll that started earlier must not refill the cache
 QUOTA_TTL_S = 300
 
 
@@ -596,10 +597,11 @@ def on_claude_login_changed():
         setup_env_file()
     except Exception as e:
         log("env:", e)
+    QUOTA_GEN[0] += 1
     QUOTA_CACHE["at"] = 0
     if Daemon.instance:
         Daemon.instance.restart()
-    threading.Thread(target=lambda: (Daemon.wait_healthy(), STATE.poll_slow()), daemon=True).start()
+    threading.Thread(target=lambda: (time.sleep(3), Daemon.wait_healthy(), STATE.poll_slow()), daemon=True).start()
 
 
 def claude_logout():
@@ -617,7 +619,8 @@ def local_quota():
     """Provider quotas without a gateway (the daemon's `quota list` is gateway-scoped): Claude via Dieter's
     probe quota-claude.mjs (reads CLAUDE_CODE_OAUTH_TOKEN), Antigravity via `agy --print=/quota`."""
     now = time.time()
-    if now - QUOTA_CACHE["at"] < QUOTA_TTL_S:
+    gen = QUOTA_GEN[0]
+    if now - QUOTA_CACHE["at"] < QUOTA_TTL_S and QUOTA_CACHE.get("gen") == gen:
         return QUOTA_CACHE["items"]
     items = []
     env = {**os.environ, **env_file_vars(), "HOME": "/data"}
@@ -663,8 +666,21 @@ def local_quota():
                 log("quota: agy:", (p.stderr or p.stdout).strip()[-160:])
         except Exception as e:
             log("quota: agy:", e)
-    QUOTA_CACHE.update(at=now, items=items)
+    if QUOTA_GEN[0] == gen:
+        QUOTA_CACHE.update(at=now, items=items, gen=gen)
     return items
+
+
+def configured_backends():
+    """The LLM backends this add-on has credentials for (the Inbox shows one usage bar per backend)."""
+    out = []
+    if claude_auth_status()["signed_in"]:
+        out.append({"id": "anthropic_claude", "name": "Claude Code"})
+    if os.path.exists(ANTIGRAVITY_TOKEN_FILE):
+        out.append({"id": "antigravity", "name": "Antigravity"})
+    if (OPTS.get("openai_api_key") or "").strip():
+        out.append({"id": "openai_codex", "name": "OpenAI"})
+    return out
 
 
 def datetime_now():
@@ -765,7 +781,7 @@ class State:
         self.cond = threading.Condition(self.lock)
         self.rev = 0
         self.data = {"ok": False, "error": "noch nicht geladen"}
-        self.slow = {"machine": None, "quota": [], "harnesses": [], "machines": [], "claude_auth": None, "at": 0}
+        self.slow = {"machine": None, "quota": [], "harnesses": [], "machines": [], "claude_auth": None, "backends": [], "at": 0}
         self.runtime_seen = {}       # card id -> runtime, to detect finished turns
         self.last_finished = None    # {"id","title","at","kind"}
         self.last_review = None
@@ -828,7 +844,7 @@ class State:
                         "workflow": b.get("workflow"), "lanes": [l.get("id") for l in b.get("lanes", []) or []]} for b in boards],
             "cards": cards, "chats": chats,
             "machine": self.slow["machine"], "quota": self.slow["quota"], "harnesses": self.slow["harnesses"],
-            "machines": self.slow["machines"], "claude_auth": self.slow.get("claude_auth"),
+            "machines": self.slow["machines"], "claude_auth": self.slow.get("claude_auth"), "backends": self.slow.get("backends", []),
         }
         if finished:
             ha_event("dieter_turn_finished", finished)
@@ -889,10 +905,11 @@ class State:
             machines = [{"id": "local", "name": "Home Assistant" if ADDON else (machine.get("hostname") or "local"), "online": True,
                          "last_seen_at": machine.get("collected_at"), "version": machine.get("daemon_version"), "route": "local"}]
         claude_auth = claude_auth_status() if ADDON else None
+        backends = configured_backends() if ADDON else [{"id": q["provider"], "name": q["provider"]} for q in quota]
         with self.lock:
-            self.slow = {"machine": machine, "quota": quota, "harnesses": harnesses, "machines": machines, "claude_auth": claude_auth, "at": time.time()}
+            self.slow = {"machine": machine, "quota": quota, "harnesses": harnesses, "machines": machines, "claude_auth": claude_auth, "backends": backends, "at": time.time()}
             if self.data.get("ok"):
-                self.data = {**self.data, "machine": machine, "quota": quota, "harnesses": harnesses, "machines": machines, "claude_auth": claude_auth}
+                self.data = {**self.data, "machine": machine, "quota": quota, "harnesses": harnesses, "machines": machines, "claude_auth": claude_auth, "backends": backends}
                 self.rev += 1
                 self.cond.notify_all()
 

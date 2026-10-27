@@ -303,10 +303,15 @@
     const running = items.filter((i) => i.running).length, attention = items.filter((i) => i.needsYou).length;
     const subtitle = attention > 0 && running > 0 ? `${attention} need you · ${running} running` : attention > 0 ? `${attention} need you` : running > 0 ? `${running} running` : "All caught up";
     const filters = [["all", "All"], ["needs", "Needs you"], ["running", "Running"], ["review", "Review"]].map(([f, t]) => chip(f === "all" || count(f) === 0 ? t : `${t} ${count(f)}`, S.inboxFilter === f, "inbox-filter", `data-filter="${f}"`)).join("");
+    // one bar per configured LLM backend (Claude Code, Antigravity, OpenAI): the tightest window, named
     const quota = (S.data.quota || []).filter((a) => a.windows.length);
-    const usage = quota.length ? `<div class="usage-strip" data-act="tool" data-page="usage">${ico("speed", 20)}<div class="cols">${quota.slice(0, 3).map((a) => {
-      const lowest = Math.min(...a.windows.map((w) => w.remaining ?? 100));
-      return `<div class="col"><div class="nm">${esc(providerName(a.provider))}</div>${progress(lowest / 100, lowest < 20 ? "var(--warning)" : "var(--success)")}<div class="lf">${lowest}% left</div></div>`;
+    const backends = (S.data.backends || []).length ? S.data.backends : quota.map((a) => ({ id: a.provider, name: providerName(a.provider) }));
+    const usage = backends.length ? `<div class="usage-strip" data-act="tool" data-page="usage">${ico("speed", 20)}<div class="cols">${backends.slice(0, 3).map((b) => {
+      const a = quota.find((q) => q.provider === b.id);
+      if (!a) return `<div class="col"><div class="nm">${esc(b.name)}</div>${progress(0, "var(--outline)")}<div class="lf c-secondary">no quota data</div></div>`;
+      const low = a.windows.reduce((m, w) => ((w.remaining ?? 100) < (m.remaining ?? 100) ? w : m), a.windows[0]);
+      const r = low.remaining ?? 100;
+      return `<div class="col"><div class="nm">${esc(b.name)}</div>${progress(r / 100, r < 20 ? "var(--warning)" : "var(--success)")}<div class="lf">${r}% left${a.windows.length > 1 ? ` <span class="c-secondary">· ${esc(String(low.label || "").replace(/ Limit Remaining| Limit/g, ""))}</span>` : ""}</div></div>`;
     }).join("")}</div></div>` : "";
     const sections = [["pinned", "Pinned"], ["attention", "Needs you"], ["running", "Running"], ["recent", "Recent"]].map(([sec, title]) => {
       const list = rows.filter((i) => (sec === "pinned" ? i.pinned : !i.pinned && i.section === sec));
