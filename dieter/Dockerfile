@@ -84,6 +84,7 @@ RUN useradd --uid 1000 --user-group --home-dir /data --no-create-home --shell /b
 
 # Harness runtime sources of exactly this Dieter build (the fork's internal/harness/runtime without
 # tests and node_modules); the bridge combines them with the release's node_modules archive.
+COPY patches/patch_runtime.py /tmp/patch_runtime.py
 RUN set -eu; \
     curl -fsSL -o /tmp/src.tar.gz "https://github.com/JustinNeumann/dieter/archive/${DIETER_COMMIT}.tar.gz"; \
     mkdir -p /tmp/src /opt/dieter-runtime; \
@@ -93,6 +94,8 @@ RUN set -eu; \
     echo "${RUNTIME_SOURCES_SHA}  /tmp/sources.sha" | sha256sum -c -; \
     cut -c67- /tmp/sources.sha | xargs -I{} cp {} /opt/dieter-runtime/; \
     cp /tmp/src/LICENSE /opt/dieter-runtime/LICENSE; \
+    python3 /tmp/patch_runtime.py /opt/dieter-runtime; \
+    rm /tmp/patch_runtime.py; \
     rm -rf /tmp/src /tmp/src.tar.gz /tmp/sources.sha; \
     ls /opt/dieter-runtime | wc -l
 

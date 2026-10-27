@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.12 (2026-10-27)
+
+- Antigravity: a card with an effort other than its model's own level (e.g. Gemini 3.8 Flash (High) with
+  "Extra high") no longer fails with `--model … conflicts with --effort=…`. agy's model ids already carry the
+  level (`-low`/`-medium`/`-high`) and agy rejects any other `--effort`, so the runtime now omits the flag for
+  those models. Applied as a build-time patch (`patches/patch_runtime.py`) on the pinned fork sources until the
+  fork release contains it.
+
 ## 0.6.429.11 (2026-10-27)
 
 - The page remembers the most recently used project (opened, a board or card of it opened, a task
