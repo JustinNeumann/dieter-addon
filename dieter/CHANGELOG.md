@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.14 (2026-10-27)
+
+- Gateway enrollment: Tools → Machines → Gateway enrolls the add-on's daemon with your Dieter gateway
+  (`dieter daemon enroll`, sign-in link shown, daemon restarted afterwards), so the Dieter apps list
+  the add-on as a machine with its projects. Options `gateway_url`, `gateway_host_ip` (hosts entry for a
+  name the container cannot resolve, e.g. Tailscale) and `machine_name`. Bridge `/api/gateway`.
+
 ## 0.6.429.13 (2026-10-27)
 
 - Devices: Tools → Devices shows the trust state of the add-on's daemon, the account's devices, the

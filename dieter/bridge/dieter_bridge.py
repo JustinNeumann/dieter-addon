@@ -624,6 +624,92 @@ class ClaudeLogin:
                 "auth": claude_auth_status()}
 
 
+class Enroll:
+    """Drives `dieter daemon enroll` (blocks until the user authorizes the daemon with GitHub at the
+    gateway): prints the verification URL and user code, then "Enrolled NAME as ID.". One at a time;
+    on success the daemon is restarted so it connects to the gateway."""
+    lock = threading.Lock()
+    proc = None
+    url = None
+    code = None
+    output = ""
+    done = None
+    started = 0
+    gateway = ""
+
+    @classmethod
+    def start(cls, gateway, name):
+        gateway = (gateway or "").strip().rstrip("/")
+        name = re.sub(r"[^A-Za-z0-9 ._-]", "", (name or "").strip())[:40] or "home-assistant"
+        if not re.match(r"^https://[A-Za-z0-9.-]+(:\d{2,5})?$", gateway):
+            raise CliError("the gateway must be an https origin such as https://gateway.example.net:4443")
+        with cls.lock:
+            if cls.proc is not None and cls.done is None:
+                return cls.status()
+            cls.url, cls.code, cls.output, cls.done, cls.started, cls.gateway = None, None, "", None, time.time(), gateway
+            cls.proc = subprocess.Popen([DIETER, "--store", DIETER_HOME, "daemon", "enroll", "--gateway", gateway, "--name", name, "--no-open"],
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env={**os.environ, "HOME": "/data"})
+            threading.Thread(target=cls._reader, args=(cls.proc,), daemon=True).start()
+        end = time.time() + 25
+        while time.time() < end and not cls.url and cls.done is None:
+            time.sleep(0.2)
+        return cls.status()
+
+    @classmethod
+    def _reader(cls, proc):
+        for line in proc.stdout:
+            cls.output += line
+            if not cls.url:
+                m = re.search(r"(https://\S+)", cls.output.split("Authorize this daemon with GitHub:")[-1]) if "Authorize this daemon" in cls.output else None
+                if m:
+                    cls.url = m.group(1)
+            if not cls.code:
+                m = re.search(r"Code:\s*([A-Za-z0-9-]{4,})", cls.output)
+                if m:
+                    cls.code = m.group(1)
+        rc = proc.wait()
+        ok = rc == 0 and "Enrolled " in cls.output
+        m = re.search(r"Enrolled (.+?) as (\S+?)\.", cls.output)
+        tail = " ".join(l.strip() for l in cls.output.splitlines()[-3:] if l.strip())[-300:]
+        cls.done = {"ok": ok, "error": None if ok else (tail or f"enroll exited with {rc}"), "daemon_name": m.group(1) if m else "", "daemon_id": m.group(2) if m else ""}
+        with cls.lock:
+            if cls.proc is proc:
+                cls.proc = None
+        if ok:
+            log("gateway: enrolled as", cls.done["daemon_id"], "at", cls.gateway)
+            if Daemon.instance:
+                Daemon.instance.restart()
+            threading.Thread(target=lambda: (time.sleep(3), Daemon.wait_healthy(), STATE.touch()), daemon=True).start()
+
+    @classmethod
+    def cancel(cls):
+        if cls.proc is not None:
+            try:
+                cls.proc.kill()
+            except OSError:
+                pass
+
+    @classmethod
+    def status(cls):
+        return {"running": cls.proc is not None and cls.done is None, "url": cls.url, "code": cls.code, "done": cls.done, "gateway": cls.gateway}
+
+
+def gateway_status():
+    """Enrollment of the add-on's daemon: from `dieter daemon status --format json`, plus the options."""
+    out = {"option_url": (OPTS.get("gateway_url") or "").strip(), "host_ip": (OPTS.get("gateway_host_ip") or "").strip(),
+           "name": (OPTS.get("machine_name") or "home-assistant").strip() or "home-assistant", "enrolled": False}
+    try:
+        st = run(["--store", DIETER_HOME, "daemon", "status", "--format", "json"], timeout=20) or {}
+        if isinstance(st, dict):
+            out.update({"enrolled": bool(st.get("enrolled")), "daemon_id": st.get("daemonId") or "", "daemon_name": st.get("daemonName") or "",
+                        "url": st.get("gatewayUrl") or "", "state": st.get("gatewayState") or "", "last_error": st.get("gatewayLastError") or "",
+                        "connected_at": st.get("gatewayConnectedAt")})
+    except CliError as e:
+        out["error"] = str(e)
+    out["enroll"] = Enroll.status()
+    return out
+
+
 def on_claude_login_changed():
     """After a sign-in or sign-out: rewrite the env file (the login takes precedence over the option
     token), restart the daemon so the harness picks it up, refresh the quota."""
@@ -1650,6 +1736,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(schedule_list(q.get("project", [""])[0]))
             if parts[1:] == ["devices"]:
                 return self.send_json(device_status())
+            if parts[1:] == ["gateway"] and ADDON:
+                return self.send_json(gateway_status())
             if parts[1:] == ["schedules", "preview"]:
                 return self.send_json(schedule_preview(q.get("cron", [""])[0], q.get("tz", ["UTC"])[0]))
             if len(parts) == 3 and parts[1] == "schedules":
@@ -1728,6 +1816,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.create(parts[1], body))
             if parts[1:] == ["schedules"]:
                 return self.send_json(schedule_create(body))
+            if parts[1:] == ["gateway", "enroll"] and ADDON:
+                return self.send_json(Enroll.start(body.get("url") or OPTS.get("gateway_url"), body.get("name") or OPTS.get("machine_name")))
+            if parts[1:] == ["gateway", "enroll", "cancel"] and ADDON:
+                Enroll.cancel()
+                return self.send_json({"ok": True})
             if parts[1:] == ["devices", "approve"]:
                 return self.send_json(device_approve(body.get("code")))
             if len(parts) == 4 and parts[1] == "devices" and parts[3] == "revoke":

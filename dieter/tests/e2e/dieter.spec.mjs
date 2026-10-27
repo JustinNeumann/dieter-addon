@@ -410,3 +410,20 @@ test("Devices shows the daemon's trust state and refuses a code it cannot approv
     await expect(page.locator("#dev-code")).toBeDisabled();
   }
 });
+
+test("Gateway: the Machines page offers enrollment; a non-https gateway is refused", async ({ page, request }) => {
+  const g = await (await request.get("api/gateway")).json();
+  expect(g.enrolled).toBe(false);
+  expect(g.name).toBe("home-assistant");
+  const bad = await request.post("api/gateway/enroll", { data: { url: "http://gateway.example.net" } });
+  expect(bad.ok()).toBe(false);
+  await page.goto("");
+  await page.locator('#rail [data-act="tab"][data-tab="tools"]').click();
+  await page.locator('[data-act="tool"][data-page="machines"]').click();
+  await expect(page.locator("[data-gateway-enroll]")).toBeVisible({ timeout: 30_000 });
+  await page.locator("#gw-url").fill("https://127.0.0.1:1");
+  await page.locator('[data-act="gw-enroll"]').click();
+  await expect(page.locator("[data-gw-dialog]")).toContainText(/begin enrollment|refused|connect|enroll/i, { timeout: 60_000 });
+  await page.locator('[data-act="gw-enroll-cancel"]').click();
+  await expect(page.locator("#overlay")).toHaveClass(/hidden/);
+});

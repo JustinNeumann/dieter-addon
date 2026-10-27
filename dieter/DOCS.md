@@ -47,6 +47,7 @@ agents run arbitrary tooling under `/data`.
 | `git_user`, `git_email` | commit identity for the agents (written to `/data/.gitconfig`) |
 | `github_token` | token for github.com (fine-grained with *All repositories* or the repos you want, permission Contents read/write; or classic `repo`); stored in `/data/.git-credentials` and used for every clone and push |
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
+| `gateway_url`, `gateway_host_ip`, `machine_name` | enroll the add-on's daemon with your Dieter gateway so the apps see it (see Gateway below); `gateway_host_ip` adds a hosts entry for the gateway's name |
 | `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **+** → *Add repository* (Git URL, optional name and base branch); *New folder* creates an empty Git repository `/data/projects/<name>` without a remote and registers it (an existing folder there is adopted). The page lists the most recently used project first, preselects it in New task and opens it when the Projects tab is tapped |
 | `log_level` | bridge log level |
 
@@ -122,6 +123,19 @@ directory, and the vault/mail access of the cards. The detail page runs the sche
 resumes it, lists the occurrence history (each entry opens its card) and deletes the definition (cards
 and history stay). The scheduler runs inside the add-on's daemon, so schedules fire while Home
 Assistant is up. Agents themselves can also create schedules and cards with the CLI inside a turn.
+
+## Gateway: show the add-on in the Dieter apps
+
+The Dieter apps (Android, iPhone, Mac) talk to a **gateway**, and a gateway lists the machines
+enrolled with it. The add-on's daemon is not enrolled by default, so the apps do not see its projects.
+**Tools → Machines → Gateway → Enroll** runs `dieter daemon enroll` against your gateway (the URL the
+apps use, HTTPS): open the sign-in link, authorize with GitHub, and the add-on appears as the machine
+`machine_name` (default `home-assistant`) after its daemon restarts. Then approve the daemon's pairing
+code, shown under **Tools → Devices**, in an app (Devices → Add a device) or on a trusted machine
+(`dieter device approve CODE`). Options: `gateway_url` prefills the URL; `gateway_host_ip` pins the
+gateway's host name in the container's `/etc/hosts` when it cannot be resolved there, for example a
+Tailscale name (`https://host.tailnet.ts.net:4443` with the host's Tailscale IP); the certificate is
+still verified against the name. Enrollment is kept in `/data/dieter/daemon`.
 
 ## Devices
 

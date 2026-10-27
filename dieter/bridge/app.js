@@ -495,7 +495,7 @@
     if (page === "machines") {
       const ms = S.data.machines || []; const online = ms.filter((m) => m.online).length;
       const rows = ms.map((m, i) => listRow({ title: m.name, subtitle: [m.online ? "Online" : "Offline", m.route].filter(Boolean).join(" · "), glyph: "dns", tile: m.online ? "#0A84FF" : "#8E8E93", position: pos(i, ms.length), act: "machine", extra: `data-id="${m.id}"`, trailing: `<span class="dot" style="width:9px;height:9px;background:${m.online ? "var(--success)" : "var(--tertiary-label)"}"></span>` })).join("");
-      return `<div class="screen">${appbar({ title, subtitle: ms.length ? `${online} of ${ms.length} online` : "", back: opts.back, actions: iconAction("refresh", "refresh", "", "Reconnect") })}<div class="content" data-scroll="machines"><div style="height:8px"></div><div class="group">${rows || emptyState("computer", "No machines", "Enroll a computer with the Dieter daemon to run agents on it.")}</div>${sshKeySection()}</div></div>`;
+      return `<div class="screen">${appbar({ title, subtitle: ms.length ? `${online} of ${ms.length} online` : "", back: opts.back, actions: iconAction("refresh", "refresh", "", "Reconnect") })}<div class="content" data-scroll="machines"><div style="height:8px"></div><div class="group">${rows || emptyState("computer", "No machines", "Enroll a computer with the Dieter daemon to run agents on it.")}</div>${gatewaySection()}${sshKeySection()}</div></div>`;
     }
     if (page === "usage") {
       const quota = S.data.quota || [];
@@ -1228,6 +1228,46 @@
   }
   // ---- Claude Code sign-in (add-on): the bridge runs `claude auth login`, the user opens the link and pastes the code
   // ---- the add-on's own SSH key (generated in /data/.ssh on first start; authorize it on other machines)
+  // ---- Gateway: enroll the add-on's daemon with a Dieter gateway so the apps see it as a machine
+  function gatewaySection() {
+    if (!S.data.addon) return "";
+    if (!S.gw) { S.gw = { loading: true }; api("api/gateway").then((r) => { S.gw = r; render(); }).catch((e) => { S.gw = { error: e.message }; render(); }); }
+    const g = S.gw; let body;
+    if (g.loading) body = `<div class="t-body c-secondary" style="padding:12px 16px"><span class="spin"></span> Loading…</div>`;
+    else if (g.error) body = `<div class="t-body c-secondary" style="padding:12px 16px">${esc(g.error)}</div>`;
+    else if (g.enrolled) body = listRow({ title: g.daemon_name || "Enrolled", subtitle: [g.url, g.state ? g.state + (g.last_error ? ": " + g.last_error : "") : ""].filter(Boolean).join(" · "), glyph: "cloud_done", glyphTint: g.state === "connected" ? "var(--success)" : "var(--warning)", position: "single", trailing: `<button class="btn text" data-act="tool" data-page="devices">Devices</button>` });
+    else body = `<div style="padding:12px 16px;display:flex;flex-direction:column;gap:10px" data-gateway-enroll>
+        <div class="t-body c-secondary">Not enrolled: the Dieter apps cannot see this add-on. Enroll it with your gateway (the one the apps use); it then appears as the machine "${esc(g.name)}", and its code is approved under Devices.</div>
+        <div class="outlined-field"><label>Gateway</label><input id="gw-url" value="${esc(g.option_url || "")}" placeholder="https://gateway.example.net:4443" autocapitalize="off" spellcheck="false" ${g.option_url ? "readonly" : ""}></div>
+        ${g.option_url ? "" : `<div class="t-footnote c-secondary">Tip: set gateway_url (and gateway_host_ip for a Tailscale name this container cannot resolve) in the add-on options.</div>`}
+        <button class="btn filled with-icon" style="align-self:flex-end" data-act="gw-enroll">${ico("cloud_upload", 18)}Enroll</button></div>`;
+    return sectionHeader("Gateway") + `<div class="group" data-gateway>${body}</div>`;
+  }
+  async function gatewayEnroll() {
+    const url = ($("#gw-url")?.value || "").trim();
+    const el = $("#overlay"); S.dialog = { title: "Enroll" };
+    const box = (inner) => { el.innerHTML = `<div class="scrim" data-act="close-dialog"><div class="dialog" data-gw-dialog><div class="dt">Enroll with the gateway</div>${inner}</div></div>`; el.classList.remove("hidden"); };
+    const closeBtn = `<div class="acts"><button class="btn text" data-act="gw-enroll-cancel">Close</button></div>`;
+    box(`<div class="t-body" style="padding:8px 0"><span class="spin"></span> Contacting the gateway…</div>${closeBtn}`);
+    let st;
+    try { st = await api("api/gateway/enroll", { url }); } catch (e) { box(`<div class="t-body" style="padding:8px 0;color:var(--error,#d33)">${esc(e.message)}</div>${closeBtn}`); return; }
+    if (st.done && !st.done.ok) { box(`<div class="t-body" style="padding:8px 0;color:var(--error,#d33)">${esc(st.done.error)}</div>${closeBtn}`); return; }
+    if (!st.url) { box(`<div class="t-body" style="padding:8px 0;color:var(--error,#d33)">The daemon did not print a sign-in link.</div>${closeBtn}`); return; }
+    box(`<div class="t-body" style="padding:8px 0;display:flex;flex-direction:column;gap:12px">
+        <div>1. Open the gateway's sign-in page and authorize this daemon with GitHub.${st.code ? ` If it asks for a code, enter <b class="t-mono">${esc(st.code)}</b>.` : ""}</div>
+        <a class="btn filled with-icon" href="${esc(st.url)}" target="_blank" rel="noopener" style="text-decoration:none;justify-content:center">${ico("open_in_new", 18)}Open sign-in page</a>
+        <div data-gw-progress><span class="spin"></span> 2. Waiting for the authorization… the daemon restarts afterwards.</div></div>
+      <div class="acts"><button class="btn text" data-act="gw-enroll-cancel">Cancel</button></div>`);
+    for (let i = 0; i < 600; i++) {
+      await new Promise((f) => setTimeout(f, 2000));
+      if (!$("[data-gw-dialog]")) return;
+      let g; try { g = await api("api/gateway"); } catch (e) { continue; }
+      const d = g.enroll?.done; if (!d) continue;
+      if (d.ok) { closeDialog(); S.gw = null; S.dev = null; snackbar(`Enrolled as ${d.daemon_name || "machine"}. Approve its code under Devices.`); render(); return; }
+      box(`<div class="t-body" style="padding:8px 0;color:var(--error,#d33)">${esc(d.error || "enrollment failed")}</div>${closeBtn}`); return;
+    }
+  }
+  async function gatewayEnrollCancel() { closeDialog(); try { await api("api/gateway/enroll/cancel", {}); } catch (e) { /* ignore */ } S.gw = null; render(); }
   function sshKeySection() {
     if (!S.data.addon) return "";
     if (!S.ssh) { S.ssh = { loading: true }; api("api/ssh").then((r) => { S.ssh = r; render(); }).catch((e) => { S.ssh = { error: e.message }; render(); }); }
@@ -1391,6 +1431,8 @@
       case "submit-repo": submitRepository(); break;
       case "ssh-copy": sshCopy(); break;
       case "ssh-test": sshTest(); break;
+      case "gw-enroll": gatewayEnroll(); break;
+      case "gw-enroll-cancel": gatewayEnrollCancel(); break;
       case "claude-login": claudeLogin(); break;
       case "claude-login-code": claudeLoginCode(); break;
       case "claude-login-cancel": claudeLoginCancel(); break;
