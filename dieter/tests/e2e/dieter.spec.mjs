@@ -294,3 +294,73 @@ test("hass-cli is in the image, the Supervisor CLI is not", async () => {
   const hass = execFileSync("docker", ["exec", "dieter-e2e", "hass-cli", "--version"]).toString();
   expect(hass).toContain("1.0.0");
 });
+
+test("Files browses the project's checkout and shows a file", async ({ page, request }) => {
+  const st = await state(request);
+  const hello = st.projects.find((p) => p.name === "Hello-World");
+  expect(hello).toBeTruthy();
+  const list = await (await request.get(`api/project/${hello.id}/files?path=`)).json();
+  expect(list.entries.some((e) => e.name === "README" && e.kind === "file")).toBe(true);
+  const bad = await request.get(`api/project/${hello.id}/file?path=../etc/passwd`);
+  expect(bad.ok()).toBe(false);
+  await page.goto("");
+  await page.locator('#rail [data-act="tab"][data-tab="tools"]').click();
+  await page.locator('[data-act="tool"][data-page="files"]').click();
+  const pick = page.locator('[data-act="tool"][data-page="files"][data-project]').filter({ hasText: "Hello-World" });
+  if (await pick.count()) await pick.click(); // more than one project: the picker shows first
+  const readme = page.locator('[data-act="file-entry"][data-kind="file"]').filter({ hasText: "README" });
+  await expect(readme).toBeVisible({ timeout: 30_000 });
+  await readme.click();
+  await expect(page.locator("[data-file-content]")).toContainText("Hello World!", { timeout: 30_000 });
+  // the download icon is there for a text file; back returns to the folder listing
+  await expect(page.locator('[data-act="file-download"]')).toBeVisible();
+  await page.locator('[data-act="back"]').first().click();
+  await expect(readme).toBeVisible();
+});
+
+test("Schedules: create with the mock agent, run now, pause, history, delete", async ({ page, request }) => {
+  await page.goto("");
+  await page.locator('#rail [data-act="tab"][data-tab="tools"]').click();
+  await page.locator('[data-act="tool"][data-page="schedules"]').click();
+  await page.locator('[data-act="sched-new"]').first().click();
+  await expect(page.locator("[data-sfield=name]")).toBeVisible();
+  await page.locator("[data-sfield=name]").fill(`Nightly ${stamp}`);
+  await page.locator("[data-sfield=prompt]").fill(`scheduled probe ${stamp}`);
+  await page.locator("[data-sfield=cron]").fill("0 3 * * *");
+  await expect(page.locator("[data-sched-preview]")).toContainText("Next:", { timeout: 15_000 });
+  await page.locator('[data-act="sched-pick"][data-key="project"]').click();
+  await page.locator("#overlay .dialog .opt").filter({ hasText: "Hello-World" }).click();
+  await page.locator('[data-act="sched-pick"][data-key="provider"]').click();
+  await page.locator('#overlay .dialog .opt[data-value="mock"]').click();
+  await page.locator('[data-act="sched-seg"][data-field="action"][data-i="1"]').click(); // Add to Todo: deterministic, no agent run
+  await page.locator('[data-act="sched-submit"]').first().click();
+  // the detail page opens
+  await expect(page.locator("#panes")).toContainText(`Nightly ${stamp}`, { timeout: 30_000 });
+  await expect(page.locator("#panes")).toContainText("0 3 * * *");
+  const list = await (await request.get("api/schedules")).json();
+  const s = list.schedules.find((x) => x.name === `Nightly ${stamp}`);
+  expect(s).toBeTruthy();
+  expect(s.enabled).toBe(true);
+  // run now → a run in the history and a Todo card
+  await page.locator('[data-act="sched-run"]').click();
+  await expect(page.locator('[data-act="sched-card"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(page.locator("#panes")).toContainText("completed");
+  let card;
+  for (let i = 0; i < 20 && !card; i++) { const st = await state(request); card = st.cards.find((c) => c.title === `Nightly ${stamp}`); if (!card) await new Promise((f) => setTimeout(f, 1000)); }
+  expect(card).toBeTruthy();
+  expect(card.lane).toBe("todo");
+  // pause
+  await page.locator('[data-act="sched-toggle"]').click();
+  await expect(page.locator("[data-sched-paused]")).toBeVisible({ timeout: 15_000 });
+  const shown = await (await request.get(`api/schedules/${s.id}`)).json();
+  expect(shown.schedule.enabled).toBe(false);
+  expect(shown.runs.length).toBe(1);
+  expect(shown.runs[0].card_id).toBe(card.id);
+  // delete through the API; the list no longer has it
+  const del = await (await request.post(`api/schedules/${s.id}/delete`, { data: {} })).json();
+  expect(del.ok).toBe(true);
+  const after = await (await request.get("api/schedules")).json();
+  expect(after.schedules.some((x) => x.id === s.id)).toBe(false);
+  const bad = await request.post("api/schedules/nope/run", { data: {} });
+  expect(bad.ok()).toBe(false);
+});

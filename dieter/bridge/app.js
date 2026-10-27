@@ -224,6 +224,7 @@
     $("#modal").classList.toggle("hidden", !S.modal);
     const formState = S.modal === "repo" ? S.repo : S.creation;
     if (formState) $("#modal").querySelectorAll("[data-field]").forEach((f) => { const v = formState[f.dataset.field] ?? ""; if (f.value !== v) f.value = v; });
+    if (S.sch?.form) document.querySelectorAll("[data-sfield]").forEach((f) => { const v = S.sch.form[f.dataset.sfield] ?? ""; if (f.value !== v) f.value = v; });
     if (S.modal === "creation" && S.creation) { const c = S.creation; const ok = !!(c.prompt.trim() && c.project_id && (c.chat || c.board_id) && !S.busy); $("#modal").querySelectorAll('[data-act="submit-creation"]').forEach((b) => (b.disabled = !ok)); }
     if (S.modal === "repo" && S.repo) $("#modal").querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !repoReady(S.repo) || S.busy));
     syncConversation();
@@ -505,6 +506,16 @@
       }
       return changesScreen({ projectId: pid }, opts);
     }
+    if (page === "schedules") return schedulesScreen(route, opts);
+    if (page === "files") {
+      const projects = S.data.projects || [];
+      const pid = route.projectId || (projects.length === 1 ? projects[0].id : null);
+      if (!pid && !route.cardId) {
+        const rows = projects.map((p, i) => listRow({ title: p.name, subtitle: compactPath(p.path), glyph: "folder", tile: stableColor(p.id), position: pos(i, projects.length), act: "tool", extra: `data-page="files" data-project="${p.id}"` })).join("");
+        return `<div class="screen">${appbar({ title, subtitle: "Choose a project", back: opts.back })}<div class="content" data-scroll="files-pick">${rows ? `<div class="group">${rows}</div>` : emptyState("folder", "No projects", "Add a repository under Projects first.")}</div></div>`;
+      }
+      return filesScreen({ ...route, projectId: pid }, opts);
+    }
     const copy = { terminals: ["terminal", "No terminals", "Open a shell on a machine from the Dieter app."], screens: ["desktop_windows", "No screens", "Screen sharing is unavailable on this machine."],
       files: ["folder", "Files", "Browse a project's checkout in the Dieter app."], schedules: ["calendar_month", "No schedules", "Scheduled tasks run on a cron and appear here."],
       devices: ["smartphone", "Devices", "Pair and approve devices in the Dieter app."], settings: ["settings", "Settings", "Prompt and daemon settings live in the Dieter app."] }[page] || [glyph, title, ""];
@@ -525,6 +536,195 @@
     return `<div class="screen">${appbar({ title: m.name, subtitle: m.online ? "Online" : "Offline", back: opts.back })}<div class="content" data-scroll="machine">
       ${sectionHeader("Connection")}${kv([["Status", m.online ? "Online" : "Offline"], ["Route", m.route || "direct"], ["Dieter", m.version || ""]])}
       ${info && !info.error ? sectionHeader("System") + kv([["System", info.os], ["Model", info.cpu], ["Cores", String(info.cores || "")], ["Uptime", `${Math.floor((info.uptime_s || 0) / 86400)}d ${Math.floor(((info.uptime_s || 0) % 86400) / 3600)}h`]]) : ""}${load}</div></div>`;
+  }
+
+  // ---- Schedules: recurring tasks of the daemon's scheduler (dieter schedule …)
+  const CRON_PRESETS = [["0 7 * * 1-5", "Weekdays at 07:00"], ["0 8 * * *", "Every day at 08:00"], ["0 20 * * *", "Every day at 20:00"], ["0 9 * * 1", "Mondays at 09:00"], ["0 * * * *", "Every hour"], ["*/30 * * * *", "Every 30 minutes"]];
+  const fmtWhen = (iso) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? String(iso) : d.toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
+  const cronHuman = (cron) => CRON_PRESETS.find(([c]) => c === cron)?.[1] || cron;
+  const browserTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; } };
+  function schedulesScreen(route, opts) {
+    S.sch ||= { list: {}, detail: {}, form: null, preview: {} };
+    if (route.scheduleId) return scheduleDetail(route, opts);
+    if (route.create) return scheduleForm(route, opts);
+    const key = route.projectId || "*"; const data = S.sch.list[key]; const p = project(route.projectId);
+    if (data === undefined) loadSchedules(key, route.projectId);
+    const actions = iconAction("add", "sched-new", `data-project="${route.projectId || ""}"`, "New schedule") + iconAction("refresh", "sched-refresh", `data-key="${esc(key)}"`, "Reload");
+    let body;
+    if (!data) body = spinnerCenter();
+    else if (data.error) body = `<div class="banner warning" style="margin-top:12px">${ico("warning", 22)}<div><div class="t">Schedules unavailable</div><div class="m">${esc(data.error)}</div></div></div>`;
+    else {
+      const list = data.schedules || [];
+      body = list.length ? `<div style="height:8px"></div><div class="group">${list.map((s, i) => listRow({ title: s.name, subtitle: s.enabled ? [cronHuman(s.cron), s.next_runs?.[0] ? "next " + fmtWhen(s.next_runs[0]) : ""].filter(Boolean).join(" · ") : `Paused · ${cronHuman(s.cron)}`, glyph: "calendar_month", glyphTint: s.enabled ? "#FF453A" : undefined, position: pos(i, list.length), act: "schedule", extra: `data-id="${s.id}"`, trailing: (!route.projectId && project(s.project_id)) ? `<span class="t-footnote c-secondary">${esc(project(s.project_id).name)}</span>` : "" })).join("")}</div>`
+        : emptyState("calendar_month", "No schedules", "Scheduled tasks run on a cron and appear here.", `<button class="btn filled with-icon" data-act="sched-new" data-project="${route.projectId || ""}">${ico("add", 18)}New schedule</button>`);
+    }
+    return `<div class="screen">${appbar({ title: "Schedules", subtitle: p?.name || "", back: opts.back, actions })}<div class="content" data-scroll="schedules-${esc(key)}">${body}</div></div>`;
+  }
+  async function loadSchedules(key, projectId) {
+    S.sch.list[key] = null;
+    try { S.sch.list[key] = await api(`api/schedules${projectId ? "?project=" + encodeURIComponent(projectId) : ""}`); } catch (e) { S.sch.list[key] = { error: e.message }; }
+    render();
+  }
+  async function loadSchedule(id) {
+    S.sch.detail[id] = null;
+    try { S.sch.detail[id] = await api(`api/schedules/${encodeURIComponent(id)}`); } catch (e) { S.sch.detail[id] = { error: e.message }; }
+    render();
+  }
+  const invalidateSchedules = (id) => { S.sch.list = {}; if (id) delete S.sch.detail[id]; };
+  function scheduleDetail(route, opts) {
+    const d = S.sch.detail[route.scheduleId];
+    if (d === undefined) loadSchedule(route.scheduleId);
+    if (!d) return `<div class="screen">${appbar({ title: "Schedule", back: opts.back })}${spinnerCenter()}</div>`;
+    if (d.error) return `<div class="screen">${appbar({ title: "Schedule", back: opts.back })}<div class="content"><div class="banner warning" style="margin-top:12px">${ico("warning", 22)}<div><div class="t">Schedule unavailable</div><div class="m">${esc(d.error)}</div></div></div></div></div>`;
+    const s = d.schedule; const p = project(s.project_id); const b = board(s.board_id);
+    const harness = (S.data.harnesses || []).find((h) => h.id === s.provider);
+    const agent = [HARNESS_NAMES[s.provider] || harness?.name || s.provider, harness?.models.find((m) => m.id === s.model)?.name || s.model, s.effort && s.effort[0].toUpperCase() + s.effort.slice(1)].filter(Boolean).join(" · ");
+    const kv = (pairs) => `<div class="group">${pairs.map(([t, v], i) => listRow({ title: t, value: v, position: pos(i, pairs.length) })).join("")}</div>`;
+    const actions = iconAction("play_arrow", "sched-run", `data-id="${s.id}"`, "Run now") + iconAction(s.enabled ? "pause" : "play_circle", "sched-toggle", `data-id="${s.id}" data-enabled="${s.enabled ? 1 : 0}"`, s.enabled ? "Pause" : "Resume") + iconAction("more_vert", "menu", `data-menu="schedule" data-id="${s.id}"`);
+    const runs = d.runs || [];
+    const runRows = runs.map((r, i) => listRow({ title: `${fmtWhen(r.scheduled_for)}${r.manual ? " · manual" : ""}`, subtitle: [r.status, r.message].filter(Boolean).join(" · "), glyph: r.status === "completed" ? "check_circle" : /fail|error/.test(r.status) ? "error" : "schedule", glyphTint: r.status === "completed" ? "var(--success)" : /fail|error/.test(r.status) ? "var(--destructive)" : undefined, position: pos(i, runs.length), act: r.card_id ? "sched-card" : "", extra: `data-id="${esc(r.card_id)}"`, trailing: r.card_id ? ico("chevron_right", 18, "c-secondary") : "" })).join("");
+    return `<div class="screen">${appbar({ title: s.name, subtitle: [p?.name, b?.name].filter(Boolean).join(" · "), back: opts.back, actions })}<div class="content" data-scroll="schedule-${s.id}">
+      ${s.enabled ? "" : `<div class="banner" style="margin-top:12px" data-sched-paused>${ico("pause_circle", 22)}<div><div class="t">Paused</div><div class="m">No automatic runs until resumed. Run now still works.</div></div></div>`}
+      ${sectionHeader("When")}${kv([["Cron", s.cron], ["Timezone", s.timezone], ["Next run", s.enabled ? fmtWhen(s.next_runs?.[0]) || "—" : "—"], ["Then", s.enabled ? (s.next_runs || []).slice(1, 3).map(fmtWhen).join(", ") || "—" : "—"], ["Last run", fmtWhen(s.last_run_at) || "never"]])}
+      ${sectionHeader("Task")}${kv([["Card title", s.title || s.name], ["Agent", agent || "Project default"], ["Action", s.action === "run" ? "Start the agent" : "Add to Todo"], ["Workspace", s.workspace === "worktree" ? "New worktree" : "Project directory"], ["Access", [s.vault ? "vault" : "", s.mail ? "mail" : ""].filter(Boolean).join(", ") || "none"]])}
+      <div class="m16" style="padding-top:8px"><div class="ccard"><div class="t-footnote c-secondary" style="margin-bottom:6px">PROMPT</div><div class="rich">${richText(s.prompt || "")}</div></div></div>
+      ${sectionHeader("History")}<div class="group">${runRows || listRow({ title: "No runs yet", subtitle: "Run now creates the first card", glyph: "history" })}</div></div></div>`;
+  }
+  function openScheduleForm(projectId) {
+    S.sch ||= { list: {}, detail: {}, form: null, preview: {} };
+    const p = project(projectId) || (S.data.projects || [])[0]; const harness = (S.data.harnesses || []).find((h) => h.id === load("provider", "claude-code")) || (S.data.harnesses || [])[0];
+    S.sch.form = { project_id: p?.id || "", board_id: (S.data.boards || []).find((b) => b.project_id === p?.id)?.id || "", name: "", cron: "0 7 * * 1-5", timezone: browserTz(), title: "", prompt: "",
+      action: "run", workspace: "project", provider: harness?.id || "", model: harness?.default_model || harness?.models?.[0]?.id || "", effort: "", enabled: true, vault: false, mail: false };
+    push({ kind: "tool", page: "schedules", create: true, projectId: p?.id });
+    schedPreview();
+    setTimeout(() => $("[data-sfield=name]")?.focus(), 50);
+  }
+  const schedReady = (f) => !!(f && f.name.trim() && f.cron.trim() && f.prompt.trim() && f.project_id && f.board_id && !S.busy);
+  function schedFormSync() { const ok = schedReady(S.sch?.form); document.querySelectorAll('[data-act="sched-submit"]').forEach((b) => (b.disabled = !ok)); }
+  let schedPreviewTimer = null;
+  function schedPreviewDebounced() { clearTimeout(schedPreviewTimer); schedPreviewTimer = setTimeout(schedPreview, 500); }
+  async function schedPreview() {
+    const f = S.sch?.form; if (!f) return; const key = `${f.cron}|${f.timezone}`;
+    if (S.sch.preview[key] === undefined) {
+      S.sch.preview[key] = null;
+      try { S.sch.preview[key] = (await api(`api/schedules/preview?cron=${encodeURIComponent(f.cron)}&tz=${encodeURIComponent(f.timezone)}`)).times || []; } catch (e) { S.sch.preview[key] = { error: e.message }; }
+    }
+    const el = $("[data-sched-preview]"); if (el) el.textContent = schedPreviewText(f);
+  }
+  function schedPreviewText(f) {
+    const v = S.sch.preview[`${f.cron}|${f.timezone}`];
+    if (v === undefined || v === null) return "Checking the cron expression…";
+    if (v.error) return "Invalid cron expression: " + v.error;
+    return v.length ? "Next: " + v.slice(0, 3).map(fmtWhen).join(" · ") : "This expression never fires.";
+  }
+  function scheduleForm(route, opts) {
+    const f = S.sch.form; if (!f) return `<div class="screen">${appbar({ title: "New schedule", back: opts.back })}${spinnerCenter()}</div>`;
+    const p = project(f.project_id); const boards = (S.data.boards || []).filter((b) => b.project_id === f.project_id); const b = boards.find((x) => x.id === f.board_id);
+    const harness = (S.data.harnesses || []).find((h) => h.id === f.provider); const model = harness?.models.find((m) => m.id === f.model); const efforts = model?.efforts || [];
+    const picker = (title, value, key, glyph, position, enabled = true) => listRow({ title, value: value || "Choose", glyph, position, act: enabled ? "sched-pick" : "", extra: `data-key="${key}"`, trailing: ico("expand_more", 20, "c-secondary"), disabled: !enabled });
+    const seg = (opts2, on, field) => `<div class="seg">${opts2.map((o, i) => `<button class="${on === i ? "on" : ""}" data-act="sched-seg" data-field="${field}" data-i="${i}">${on === i ? ico("check", 18) : ""}${esc(o)}</button>`).join("")}</div>`;
+    const sw = (field) => `<button class="switch ${f[field] ? "on" : ""}" data-act="sched-toggle-field" data-field="${field}"></button>`;
+    return `<div class="screen">${appbar({ title: "New schedule", subtitle: p?.name || "", back: opts.back, actions: `<button class="btn filled with-icon" style="margin-right:8px" data-act="sched-submit" ${schedReady(f) ? "" : "disabled"}>${ico("check", 18)}Create</button>` })}
+      <div class="content" data-scroll="schedule-form" style="padding-top:8px;padding-bottom:24px">
+      <div class="compose-card"><input data-sfield="name" placeholder="Name of the schedule"><div class="hairline" style="margin:0 16px"></div>
+        <textarea data-sfield="prompt" placeholder="What should the agent do each time?"></textarea><div class="hairline" style="margin:0 16px"></div>
+        <input data-sfield="title" placeholder="Card title (optional, defaults to the name)"></div>
+      ${sectionHeader("When")}<div class="m16"><div class="ccard" style="border-radius:22px;padding:12px;display:flex;flex-direction:column;gap:10px">
+        <div class="outlined-field"><label>Cron expression</label><input data-sfield="cron" placeholder="minute hour day month weekday" spellcheck="false" autocapitalize="off"></div></div></div>
+      <div class="group" style="margin-top:8px">${picker("Preset", cronHuman(f.cron) !== f.cron ? cronHuman(f.cron) : "Custom", "preset", "schedule", "first")}${picker("Timezone", f.timezone, "timezone", "public", "last")}</div>
+      <div class="section-footer" data-sched-preview>${esc(schedPreviewText(f))}</div>
+      ${sectionHeader("Destination")}<div class="group">${picker("Project", p?.name, "project", "folder", "first")}${picker("Board", b?.name, "board", "view_kanban", "last", boards.length > 0)}</div>
+      ${sectionHeader("Agent")}<div class="group">${picker("Agent", HARNESS_NAMES[f.provider] || harness?.name || f.provider, "provider", "auto_awesome", "first")}${picker("Model", model?.name || f.model, "model", "memory", efforts.length ? "middle" : "last")}${efforts.length ? picker("Effort", f.effort ? f.effort[0].toUpperCase() + f.effort.slice(1) : "Default", "effort", "bolt", "last") : ""}</div>
+      ${sectionHeader("Each occurrence")}<div class="m16"><div class="ccard" style="border-radius:22px;padding:12px;display:flex;flex-direction:column;gap:10px">${seg(["Start the agent", "Add to Todo"], f.action === "run" ? 0 : 1, "action")}${seg(["New worktree", "Project directory"], f.workspace === "worktree" ? 0 : 1, "workspace")}</div></div>
+      ${sectionFooter(f.action === "run" ? "Every occurrence creates a card and starts the agent at once." : "Every occurrence adds a card to the board's Todo lane; you start it.")}
+      ${sectionHeader("Access")}<div class="group">${listRow({ title: "Enabled", subtitle: "Automatic occurrences on the cron", position: "first", trailing: sw("enabled") })}${listRow({ title: "Allow vault access", subtitle: "Cards may use the account's passwords and TOTP codes", position: "middle", trailing: sw("vault") })}${listRow({ title: "Allow mail to you", subtitle: "Cards may send you read-only reports in Mail", position: "last", trailing: sw("mail") })}</div>
+      <div class="m16" style="padding:16px 16px"><button class="btn filled large" style="width:100%;margin-top:8px" data-act="sched-submit" ${schedReady(f) ? "" : "disabled"}>${S.busy ? `<span class="spin"></span>` : ""}Create schedule</button></div></div></div>`;
+  }
+  function schedPick(key) {
+    const f = S.sch.form; let title, options, selected;
+    if (key === "preset") { title = "Preset"; options = CRON_PRESETS.map(([c, l]) => [c, l]); selected = f.cron; }
+    else if (key === "timezone") { title = "Timezone"; const tz = browserTz(); options = [...new Set([tz, "Europe/Berlin", "Europe/London", "UTC", "America/New_York", "Asia/Tokyo"])].map((z) => [z, z]); selected = f.timezone; }
+    else if (key === "project") { title = "Project"; options = (S.data.projects || []).map((p) => [p.id, p.name]); selected = f.project_id; }
+    else if (key === "board") { title = "Board"; options = (S.data.boards || []).filter((b) => b.project_id === f.project_id).map((b) => [b.id, b.name]); selected = f.board_id; }
+    else if (key === "provider") { title = "Agent"; options = (S.data.harnesses || []).map((h) => [h.id, h.name]); selected = f.provider; }
+    else if (key === "model") { title = "Model"; options = ((S.data.harnesses || []).find((h) => h.id === f.provider)?.models || []).map((m) => [m.id, m.name]); selected = f.model; }
+    else if (key === "effort") { title = "Effort"; const m = (S.data.harnesses || []).find((h) => h.id === f.provider)?.models.find((x) => x.id === f.model); options = [["", "Default"], ...(m?.efforts || []).map((e) => [e, e[0].toUpperCase() + e.slice(1)])]; selected = f.effort; }
+    else return;
+    showDialog(title, options, selected, (v) => {
+      if (key === "preset") { f.cron = v; schedPreview(); }
+      else if (key === "timezone") { f.timezone = v; schedPreview(); }
+      else if (key === "project") { f.project_id = v; f.board_id = (S.data.boards || []).find((b) => b.project_id === v)?.id || ""; }
+      else if (key === "provider") { f.provider = v; const h = (S.data.harnesses || []).find((x) => x.id === v); f.model = h?.default_model || h?.models?.[0]?.id || ""; f.effort = ""; }
+      else if (key === "model") { f.model = v; f.effort = ""; }
+      else f[key === "board" ? "board_id" : key] = v;
+      render();
+    });
+  }
+  async function submitSchedule() {
+    const f = S.sch?.form; if (!schedReady(f)) return;
+    S.busy = true; render();
+    try {
+      const r = await api("api/schedules", { project: f.project_id, board: f.board_id, name: f.name.trim(), cron: f.cron.trim(), timezone: f.timezone, title: f.title.trim(), prompt: f.prompt, action: f.action, workspace: f.workspace, provider: f.provider, model: f.model, effort: f.effort, enabled: f.enabled, vault: f.vault, mail: f.mail });
+      S.busy = false; S.sch.form = null; invalidateSchedules();
+      const st = stack(); S.stacks[S.tab] = [...st.slice(0, -1), { kind: "tool", page: "schedules", scheduleId: r.schedule.id, projectId: f.project_id }];
+      snackbar("Schedule created"); render();
+    } catch (e) { S.busy = false; snackbar("Could not create: " + e.message); render(); }
+  }
+  async function scheduleAction(id, action, done) {
+    S.busy = true; render();
+    try { const r = await api(`api/schedules/${encodeURIComponent(id)}/${action}`, {}); S.busy = false; invalidateSchedules(id); done?.(r); render(); }
+    catch (e) { S.busy = false; snackbar(`${action} failed: ${e.message}`); render(); }
+  }
+
+  // ---- Files: browse a checkout (project or card scope) and view one file
+  const fmtSize = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  const fileGlyph = (name) => { const x = (name.split(".").pop() || "").toLowerCase();
+    if (/^(png|jpe?g|gif|webp|svg|bmp|ico|heic)$/.test(x)) return "image"; if (/^(md|txt|rst|adoc)$/.test(x)) return "article";
+    if (/^(json|ya?ml|toml|ini|cfg|csv|xml|env)$/.test(x)) return "data_object"; if (/^(js|mjs|ts|py|go|rs|sh|c|h|cpp|java|kt|rb|php|css|html|sql)$/.test(x)) return "code";
+    if (/^(zip|gz|tar|xz|7z|pdf|mp4|mp3|wav)$/.test(x)) return "draft"; return "description"; };
+  const filesKey = (route) => `${route.cardId ? "card:" + route.cardId : "project:" + route.projectId}:${route.file ? "f:" + route.file : "d:" + (route.path || "")}:${S.showHidden ? 1 : 0}`;
+  const filesApi = (route) => route.cardId ? `api/${conv(route.cardId)?.kind === "chat" ? "chat" : "card"}/${route.cardId}` : `api/project/${route.projectId}`;
+  function filesScreen(route, opts) {
+    const c = route.cardId ? conv(route.cardId) : null; const p = project(route.projectId || c?.project_id);
+    const key = filesKey(route); const data = S.files?.[key];
+    if (data === undefined) loadFiles(key, route);
+    const scope = [p?.name, c ? (c.branch || workspaceBadge(c)) : ""].filter(Boolean).join(" · ");
+    const dirTitle = route.path ? route.path.split("/").pop() : (p?.name || "Files");
+    let body, title, subtitle, actions;
+    if (route.file) {
+      title = route.file.split("/").pop(); subtitle = data && !data.error ? [fmtSize(data.size || 0), data.mime].filter(Boolean).join(" · ") : scope;
+      actions = data && !data.error && !data.too_large ? iconAction("download", "file-download", `data-key="${esc(key)}"`, "Download") : "";
+      if (!data) body = spinnerCenter();
+      else if (data.error) body = `<div class="banner warning" style="margin-top:12px">${ico("warning", 22)}<div><div class="t">File unavailable</div><div class="m">${esc(data.error)}</div></div></div>`;
+      else if (data.too_large) body = emptyState("draft", "Too large to show", `${fmtSize(data.size)} · open it in the checkout.`);
+      else if (data.data != null && /^image\//.test(data.mime || "")) body = `<img class="filev-img" alt="${esc(title)}" src="data:${esc(data.mime)};base64,${data.data}">`;
+      else if (data.data != null) body = emptyState("draft", "Binary file", `${fmtSize(data.size)}${data.mime ? " · " + data.mime : ""}`);
+      else body = data.content ? `<pre class="filev t-mono" data-file-content>${esc(data.content)}</pre>` : emptyState("description", "Empty file", "");
+    } else {
+      title = dirTitle; subtitle = [scope, route.path].filter(Boolean).join(" · ");
+      actions = iconAction(S.showHidden ? "visibility_off" : "visibility", "files-hidden", "", S.showHidden ? "Hide dotfiles" : "Show dotfiles") + iconAction("refresh", "files-refresh", `data-key="${esc(key)}"`, "Reload");
+      if (!data) body = spinnerCenter();
+      else if (data.error) body = `<div class="banner warning" style="margin-top:12px">${ico("warning", 22)}<div><div class="t">Files unavailable</div><div class="m">${esc(data.error)}</div></div></div>`;
+      else {
+        const es = data.entries || [];
+        body = es.length ? `<div style="height:8px"></div><div class="group">${es.map((e, i) => listRow({ title: e.name, subtitle: e.kind === "dir" ? "Folder" : fmtSize(e.size), glyph: e.kind === "dir" ? "folder" : fileGlyph(e.name), glyphTint: e.kind === "dir" ? "#0A9EF5" : undefined, position: pos(i, es.length), act: "file-entry", extra: `data-path="${esc(e.path)}" data-kind="${e.kind}"`, trailing: e.kind === "dir" ? ico("chevron_right", 18, "c-secondary") : "" })).join("")}</div>`
+          : emptyState("folder_open", "Empty folder", "");
+      }
+    }
+    return `<div class="screen">${appbar({ title, subtitle, back: opts.back, actions })}<div class="content" data-scroll="files-${esc(key)}">${body}</div></div>`;
+  }
+  async function loadFiles(key, route) {
+    S.files ||= {}; S.files[key] = null;
+    try {
+      const qs = `path=${encodeURIComponent(route.file || route.path || "")}`;
+      S.files[key] = route.file ? await api(`${filesApi(route)}/file?${qs}`) : await api(`${filesApi(route)}/files?${qs}&hidden=${S.showHidden ? 1 : 0}`);
+    } catch (e) { S.files[key] = { error: e.message }; }
+    render();
+  }
+  function downloadFile(key) {
+    const d = S.files?.[key]; if (!d || d.error) return;
+    const blob = d.data != null ? new Blob([Uint8Array.from(atob(d.data), (ch) => ch.charCodeAt(0))], { type: d.mime || "application/octet-stream" }) : new Blob([d.content || ""], { type: d.mime || "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = d.name || "file"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
   // ---- Changes pane / project changes
@@ -1094,6 +1294,21 @@
       case "pane": push({ kind: "pane", id, pane: el.dataset.pane }); break;
       case "tool-page": case "tool": break;
       case "machine": push({ kind: "machine", id }); break;
+      case "file-entry": { const r = top(); if (r?.kind !== "tool") break; const dir = el.dataset.kind === "dir";
+        push({ kind: "tool", page: "files", projectId: r.projectId, cardId: r.cardId, path: dir ? el.dataset.path : r.path, file: dir ? undefined : el.dataset.path }); break; }
+      case "files-hidden": S.showHidden = !S.showHidden; render(); break;
+      case "schedule": { const r = top(); push({ kind: "tool", page: "schedules", scheduleId: id, projectId: r?.projectId }); break; }
+      case "sched-new": openScheduleForm(el.dataset.project || top()?.projectId); break;
+      case "sched-refresh": S.sch.list = {}; render(); break;
+      case "sched-pick": schedPick(el.dataset.key); break;
+      case "sched-seg": { const f = S.sch.form; if (!f) break; f[el.dataset.field] = el.dataset.field === "action" ? (el.dataset.i === "0" ? "run" : "draft") : (el.dataset.i === "0" ? "worktree" : "project"); render(); break; }
+      case "sched-toggle-field": { const f = S.sch.form; if (f) { f[el.dataset.field] = !f[el.dataset.field]; render(); } break; }
+      case "sched-submit": submitSchedule(); break;
+      case "sched-run": scheduleAction(id, "run", (r) => snackbar(r.run?.message ? `Run: ${r.run.message}` : "Run started")); break;
+      case "sched-toggle": scheduleAction(id, el.dataset.enabled === "1" ? "pause" : "resume", () => snackbar(el.dataset.enabled === "1" ? "Paused" : "Resumed")); break;
+      case "sched-card": refreshState().then(() => openConversation(id)); break;
+      case "files-refresh": if (S.files) delete S.files[el.dataset.key]; render(); break;
+      case "file-download": downloadFile(el.dataset.key); break;
       case "refresh": refreshState().then(render); break;
       case "agent-sheet": agentSheet(); break;
       case "attach": pickFiles(el.dataset.target || (S.modal ? "form" : "conv")); break;
@@ -1123,13 +1338,17 @@
   document.addEventListener("input", (e) => {
     const s = e.target.closest("[data-search]"); if (s) { S.search[s.dataset.search] = s.value; const f = e.target; render(); const n = $(`[data-search="${s.dataset.search}"]`); if (n && n !== f) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
     const qf = e.target.closest("[data-qfree]"); if (qf) { const q = (S.data.questions || []).find((z) => z.id === qf.dataset.qfree); if (q) { answerState(q)[qf.dataset.x].freeform = qf.value; const card = qf.closest("[data-question]"); const btn = card?.querySelector('[data-act="q-answer"]'); if (btn) btn.disabled = false; } return; }
+    const sf = e.target.closest("[data-sfield]"); if (sf && S.sch?.form) { S.sch.form[sf.dataset.sfield] = sf.value; schedFormSync(); if (sf.dataset.sfield === "cron") schedPreviewDebounced(); return; }
     const f = e.target.closest("[data-field]"); if (f && S.modal === "repo" && S.repo) { S.repo[f.dataset.field] = f.value; document.querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !repoReady(S.repo))); return; }
     if (f && S.creation) { S.creation[f.dataset.field] = f.value; const ready = S.creation.prompt.trim() && S.creation.project_id && (S.creation.chat || S.creation.board_id); document.querySelectorAll('[data-act="submit-creation"]').forEach((b) => (b.disabled = !ready)); }
   });
   function openMenu(el) {
     const menu = el.dataset.menu, id = el.dataset.id;
-    if (menu === "card" || menu === "conversation") { const c = conv(id); if (!c) return; showMenu(el, [...(menu === "conversation" ? [{ id: "changes", label: "Changes", icon: "difference", onClick: () => push({ kind: "pane", id, pane: "changes" }) }, { id: "refresh", label: "Refresh", icon: "refresh", onClick: () => { S.conv.id = null; syncConversation(); } }, "-"] : []), ...cardMenu(c)]); }
+    if (menu === "card" || menu === "conversation") { const c = conv(id); if (!c) return; showMenu(el, [...(menu === "conversation" ? [{ id: "changes", label: "Changes", icon: "difference", onClick: () => push({ kind: "pane", id, pane: "changes" }) }, { id: "files", label: "Files", icon: "folder", onClick: () => push({ kind: "tool", page: "files", cardId: id, projectId: c.project_id }) }, { id: "refresh", label: "Refresh", icon: "refresh", onClick: () => { S.conv.id = null; syncConversation(); } }, "-"] : []), ...cardMenu(c)]); }
     else if (menu === "board") { const b = board(id); const boards = (S.data.boards || []); showMenu(el, [{ title: "Switch board" }, ...boards.map((x) => ({ id: "b-" + x.id, label: x.name, sub: project(x.project_id)?.name, checked: x.id === id, onClick: () => { const st = stack(); S.stacks[S.tab] = st.map((r) => (r.kind === "board" ? { kind: "board", id: x.id } : r)); render(); } })), "-", { id: "archived", label: "Archived cards", icon: "archive", onClick: () => snackbar("Archived cards are listed in the Dieter app.") }]); }
+    else if (menu === "schedule") { const d = S.sch?.detail?.[id]; const s = d?.schedule; if (!s) return; showMenu(el, [{ id: "run", label: "Run now", icon: "play_arrow", onClick: () => scheduleAction(id, "run", (r) => snackbar(r.run?.message ? `Run: ${r.run.message}` : "Run started")) },
+      { id: "toggle", label: s.enabled ? "Pause" : "Resume", icon: s.enabled ? "pause" : "play_circle", onClick: () => scheduleAction(id, s.enabled ? "pause" : "resume") }, "-",
+      { id: "delete", label: "Delete schedule", icon: "delete", destructive: true, onClick: () => { if (!confirm(`Delete the schedule "${s.name}"? Its cards and history stay.`)) return; scheduleAction(id, "delete", () => { const st = stack(); S.stacks[S.tab] = st.slice(0, -1); snackbar("Schedule deleted"); }); } }]); }
     else if (menu === "project") showMenu(el, [{ id: "open", label: "Open project", icon: "folder_open", onClick: () => showFrom(null, { kind: "project", id }) }, { id: "copy", label: "Copy path", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(project(id)?.path || "") }]);
     else if (menu === "inbox-filter") showMenu(el, [{ title: "Project" }, { id: "all", label: "All projects", checked: !S.inboxProject, onClick: () => { S.inboxProject = ""; render(); } }, ...(S.data.projects || []).map((p) => ({ id: "p-" + p.id, label: p.name, checked: S.inboxProject === p.id, onClick: () => { S.inboxProject = p.id; render(); } })), "-", { id: "theme", label: "Theme: " + (load("theme", "system")), icon: "brightness_6", onClick: () => { const n = { system: "dark", dark: "light", light: "system" }[load("theme", "system")]; save("theme", n); applyTheme(); } }]);
     else if (menu === "projects-add") showMenu(el, [{ id: "np", label: "Add repository", icon: "create_new_folder", onClick: () => addRepository() }, { id: "nf", label: "New folder", icon: "folder", onClick: () => addFolder() }]);

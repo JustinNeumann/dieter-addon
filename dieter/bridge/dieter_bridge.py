@@ -56,6 +56,7 @@ import base64
 import concurrent.futures
 import hashlib
 import ipaddress
+import mimetypes
 import pty
 import json
 import os
@@ -1072,6 +1073,154 @@ def patch_counts(patch):
     return added, removed
 
 
+SCHEDULE_ID_RE = re.compile(r"^sch_[a-z0-9]{1,64}$")
+SCHEDULE_ACTIONS = ("run", "pause", "resume", "delete")
+
+
+def _pick(d, *keys):
+    for k in keys:
+        if d.get(k) is not None:
+            return d[k]
+    return None
+
+
+def norm_schedule(s):
+    """One schedule as the page shows it; the CLI answers camelCase (list, create) or snake_case (show)."""
+    s = s or {}
+    return {"id": s.get("id"), "project_id": _pick(s, "projectId", "project_id"), "board_id": _pick(s, "boardId", "board_id"),
+            "name": s.get("name") or "", "cron": s.get("cron") or "", "timezone": s.get("timezone") or "UTC",
+            "enabled": bool(s.get("enabled")), "action": s.get("action") or "draft",
+            "title": _pick(s, "titleTemplate", "title_template") or "", "prompt": _pick(s, "promptTemplate", "prompt_template") or "",
+            "provider": s.get("provider") or "", "model": s.get("model") or "", "effort": s.get("effort") or "",
+            "workspace": _pick(s, "workspaceMode", "workspace_mode") or "", "next_runs": _pick(s, "nextRuns", "next_runs") or [],
+            "next_run_at": _pick(s, "nextRunAt", "next_run_at"), "last_run_at": _pick(s, "lastRunAt", "last_run_at"),
+            "created_at": _pick(s, "createdAt", "created_at"), "open_card": _pick(s, "openCardPolicy", "open_card_policy") or "",
+            "vault": bool(_pick(s, "vaultAccess", "vault_access")), "mail": bool(_pick(s, "mailAccess", "mail_access"))}
+
+
+def norm_run(r):
+    r = r or {}
+    return {"id": r.get("id"), "card_id": _pick(r, "cardId", "card_id") or "", "scheduled_for": _pick(r, "scheduledFor", "scheduled_for"),
+            "manual": bool(r.get("manual")), "action": r.get("action") or "", "status": r.get("status") or "", "message": r.get("message") or "",
+            "started_at": _pick(r, "startedAt", "started_at"), "finished_at": _pick(r, "finishedAt", "finished_at"), "created_at": _pick(r, "createdAt", "created_at")}
+
+
+def schedule_list(project_id):
+    if project_id and not project_id.startswith("p_"):
+        raise CliError("bad project")
+    out = run(["schedule", "list", "--page-size", "100", "--format", "json"] + (["--project", project_id] if project_id else []), timeout=30) or {}
+    items = [norm_schedule(s) for s in unwrap(out, "schedules") if isinstance(s, dict)]
+    items.sort(key=lambda s: (not s["enabled"], s["name"].lower()))
+    return {"schedules": items}
+
+
+def schedule_show(sid):
+    if not SCHEDULE_ID_RE.match(sid):
+        raise CliError("bad id")
+    out = run(["schedule", "show", "--runs", "30", sid], timeout=30) or {}
+    sched = out.get("schedule") if isinstance(out, dict) and "schedule" in out else out
+    runs = [norm_run(r) for r in (out.get("runs") or []) if isinstance(r, dict)] if isinstance(out, dict) else []
+    runs.sort(key=lambda r: r["scheduled_for"] or "", reverse=True)
+    return {"schedule": norm_schedule(sched), "runs": runs}
+
+
+def schedule_preview(cron, tz):
+    if not cron or len(cron) > 100 or len(tz) > 64:
+        raise CliError("bad cron")
+    out = run(["schedule", "preview", "--cron", cron, "--timezone", tz or "UTC", "--count", "5"], timeout=20) or {}
+    return {"times": unwrap(out, "times")}
+
+
+def schedule_create(b):
+    for k in ("project", "board", "name", "cron", "prompt"):
+        if not str(b.get(k) or "").strip():
+            raise CliError(f"{k} required")
+    if not str(b["project"]).startswith("p_") or not str(b["board"]).startswith("b_"):
+        raise CliError("bad project or board")
+    args = ["schedule", "create", "--project", b["project"], "--board", b["board"], "--name", str(b["name"]).strip()[:120],
+            "--cron", str(b["cron"]).strip(), "--timezone", str(b.get("timezone") or "UTC")[:64],
+            "--title", str(b.get("title") or b["name"]).strip()[:200], "--prompt", str(b["prompt"]),
+            "--action", "run" if b.get("action") == "run" else "draft", "--workspace", "worktree" if b.get("workspace") == "worktree" else "project"]
+    for k in ("provider", "model", "effort"):
+        if b.get(k):
+            args += [f"--{k}", str(b[k])]
+    if b.get("enabled") is False:
+        args.append("--enabled=false")
+    if b.get("vault"):
+        args.append("--vault=true")
+    if b.get("mail"):
+        args.append("--mail=true")
+    out = run(args, timeout=60) or {}
+    STATE.touch()
+    return {"ok": True, "schedule": norm_schedule(out.get("schedule") if isinstance(out, dict) and "schedule" in out else out)}
+
+
+def schedule_action(sid, action):
+    if not SCHEDULE_ID_RE.match(sid) or action not in SCHEDULE_ACTIONS:
+        raise CliError("bad request")
+    out = run(["schedule", action, sid], timeout=60)
+    STATE.touch()
+    if action == "run":
+        return {"ok": True, "run": norm_run(out if isinstance(out, dict) else {})}
+    if action == "delete":
+        return {"ok": True}
+    return {"ok": True, "schedule": norm_schedule(out if isinstance(out, dict) else {})}
+
+
+FILE_READ_MAX = 5 * 1024 * 1024
+
+
+def file_scope(cid, project_id):
+    """`dieter file …` scope: a card (its project directory or worktree) or a project."""
+    if cid:
+        return ["--card", cid]
+    if not project_id or not project_id.startswith("p_"):
+        raise CliError("project required")
+    return ["--project", project_id]
+
+
+def file_path_ok(path):
+    return len(path) <= 1024 and "\0" not in path and ".." not in path.split("/")
+
+
+def file_list(cid, project_id, path, hidden):
+    """Entries of one directory of the checkout, directories first."""
+    if not file_path_ok(path):
+        raise CliError("bad path")
+    args = ["file", "list", *file_scope(cid, project_id), "--format", "json"] + (["--hidden"] if hidden else [])
+    out = run(args + ([path] if path else []), timeout=30) or {}
+    entries = []
+    for e in unwrap(out, "entries"):
+        if not isinstance(e, dict):
+            continue
+        entries.append({"name": e.get("name") or os.path.basename(e.get("path") or ""), "path": e.get("path") or e.get("name") or "",
+                        "kind": "dir" if (e.get("kind") or "").lower().startswith("dir") else "file",
+                        "size": int(e.get("size") or 0), "modified_at": e.get("modifiedAt")})
+    entries.sort(key=lambda e: (e["kind"] != "dir", e["name"].lower()))
+    return {"path": path, "entries": entries}
+
+
+def file_read(cid, project_id, path):
+    """One file: text content, or base64 data for binary files; large files are only described."""
+    if not path or not file_path_ok(path):
+        raise CliError("bad path")
+    scope = file_scope(cid, project_id)
+    st = run(["file", "stat", *scope, path], timeout=30) or {}
+    size = int(st.get("size") or 0)
+    if (st.get("kind") or "").lower().startswith("dir"):
+        raise CliError("that is a directory")
+    if size > FILE_READ_MAX:
+        return {"path": path, "name": os.path.basename(path), "size": size, "too_large": True}
+    out = run(["file", "read", *scope, "--format", "json", path], timeout=60) or {}
+    res = {"path": path, "name": out.get("name") or os.path.basename(path), "size": int(out.get("size") or size),
+           "mime": out.get("mimeType") or mimetypes.guess_type(path)[0] or "", "modified_at": out.get("modifiedAt")}
+    if out.get("binary"):
+        res["data"] = out.get("data") or ""   # base64 (protobuf JSON)
+    else:
+        res["content"] = out.get("content") or ""
+    return res
+
+
 def changeset(cid, project_id):
     """`workspace changes` plus additions/deletions per file: the CLI lists paths and statuses only, so the
     page showed +0 −0 for everything. The counts come from each file's patch at the changeset's revision
@@ -1441,6 +1590,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"machines": data.get("machines", [])})
             if len(parts) == 4 and parts[1] == "project" and parts[3] == "changes":
                 return self.send_json({"raw": changeset(None, parts[2])})
+            if parts[1:] == ["schedules"]:
+                return self.send_json(schedule_list(q.get("project", [""])[0]))
+            if parts[1:] == ["schedules", "preview"]:
+                return self.send_json(schedule_preview(q.get("cron", [""])[0], q.get("tz", ["UTC"])[0]))
+            if len(parts) == 3 and parts[1] == "schedules":
+                return self.send_json(schedule_show(parts[2]))
+            if len(parts) == 4 and parts[1] == "project" and parts[3] == "files":
+                return self.send_json(file_list(None, parts[2], q.get("path", [""])[0], q.get("hidden", ["0"])[0] == "1"))
+            if len(parts) == 4 and parts[1] == "project" and parts[3] == "file":
+                return self.send_json(file_read(None, parts[2], q.get("path", [""])[0]))
             if parts[1:] == ["state"]:
                 rev, data = STATE.snapshot()
                 return self.send_json({"rev": rev, **data})
@@ -1473,6 +1632,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.stream_conversation(kind, cid, q.get("after", [None])[0])
                 if parts[3] == "changes" and kind == "card":
                     return self.send_json(self.changes(cid))
+                if parts[3] == "files":
+                    return self.send_json(file_list(cid, None, q.get("path", [""])[0], q.get("hidden", ["0"])[0] == "1"))
+                if parts[3] == "file":
+                    return self.send_json(file_read(cid, None, q.get("path", [""])[0]))
                 if parts[3] == "diff" and kind == "card":
                     path = q.get("path", [""])[0]
                     if not path:
@@ -1505,6 +1668,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "not found"}, 404)
             if parts[1:] == ["card"] or parts[1:] == ["chat"]:
                 return self.send_json(self.create(parts[1], body))
+            if parts[1:] == ["schedules"]:
+                return self.send_json(schedule_create(body))
+            if len(parts) == 4 and parts[1] == "schedules":
+                return self.send_json(schedule_action(parts[2], parts[3]))
             if parts[1:] == ["project"]:
                 if not ADDON:
                     return self.send_json({"error": "adding repositories works in the add-on only"}, 400)

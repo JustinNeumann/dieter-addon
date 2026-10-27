@@ -2,6 +2,19 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.10 (2026-10-27)
+
+- Files: Tools → Files (or Workspace → Files on a project, Files in a conversation's menu) browses the
+  checkout: folders, file sizes, a dotfile toggle; text files are shown, images displayed, other
+  binaries and files above 5 MB described, every file downloadable (`dieter file list/stat/read`,
+  bridge `GET /api/project/<id>/files|file`, `GET /api/card/<id>/files|file`). Until now the page
+  pointed to the Dieter app.
+- Schedules: Tools → Schedules (or Workspace → Schedules on a project) lists the daemon's recurring
+  tasks, creates one (name, prompt, cron with presets and a live preview of the next times, timezone,
+  project, board, agent, start or Todo, worktree or directory, enabled, vault and mail), runs it now,
+  pauses and resumes it, shows the occurrence history with a link to each card, and deletes it
+  (`dieter schedule …`, bridge `/api/schedules`). Until now the pane was a placeholder.
+
 ## 0.6.429.9 (2026-10-27)
 
 - The Supervisor CLI `ha` and `hassio_api` are gone again (0.6.429.8 gave the agents add-on, restart

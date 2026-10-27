@@ -102,6 +102,27 @@ The harnesses run inside the container, so they need their own credentials:
 
 Restart the add-on after changing tokens.
 
+## Files
+
+**Tools → Files** (and **Workspace → Files** on a project, **Files** in a conversation's menu)
+browses a checkout through the daemon (`dieter file list`, `stat`, `read`): folders first, file sizes,
+an eye icon shows dotfiles. Text files are displayed, images rendered, other binaries and files above
+5 MB only described; the download icon saves the file. The conversation's menu uses the card's
+workspace (its worktree for worktree cards), the Tools and project entries the project directory.
+Browsing is read-only; editing stays with the agents.
+
+## Schedules
+
+**Tools → Schedules** (and **Workspace → Schedules** on a project) manages the daemon's recurring
+tasks (`dieter schedule …`): the list shows cron, next run and paused state; **+** creates one with a
+name, the prompt, a cron expression (presets: weekdays 07:00, daily, hourly, …; the next three times
+are previewed as you type), the timezone (defaults to the browser's), project and board, agent, model
+and effort, whether each occurrence starts the agent or only adds a Todo card, worktree or project
+directory, and the vault/mail access of the cards. The detail page runs the schedule now, pauses or
+resumes it, lists the occurrence history (each entry opens its card) and deletes the definition (cards
+and history stay). The scheduler runs inside the add-on's daemon, so schedules fire while Home
+Assistant is up. Agents themselves can also create schedules and cards with the CLI inside a turn.
+
 ## Questions from the agent and attachments
 
 Claude Code may ask the user a question with options (its AskUserQuestion tool). Dieter's daemon has
