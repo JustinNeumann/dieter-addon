@@ -390,3 +390,22 @@ body.has-bottombar #snackbar { bottom: 96px; }
 .folder-header .c { font: 400 14px/20px var(--body); color: var(--secondary-label); }
 .chev-disc { color: var(--secondary-label); transition: transform .15s; } .chev-disc.open { transform: rotate(90deg); }
 .hidden { display: none !important; }
+
+/* attachments */
+.att-img { display: block; max-width: min(280px, 100%); max-height: 280px; border-radius: 14px; margin: 0 0 6px auto; object-fit: cover; }
+.att-pill { height: auto; padding: 6px 10px; margin: 0 0 6px auto; }
+.files-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 6px; }
+.compose-card .files-row { padding: 8px 12px 0; }
+.fchip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px 0 6px; border-radius: 16px; background: var(--surface-container-high); color: var(--label); max-width: 100%; }
+.fchip img { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; }
+.fchip .txt { font: 400 13px/16px var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.fchip .x { width: 24px; height: 24px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; color: var(--on-surface-variant); }
+/* questions from the agent */
+.ccard.question { margin: 4px 16px; border: 1px solid var(--outline); }
+.ccard.question .hd { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ccard.question .hd .t { font: 600 15px/20px var(--body); }
+.qblock + .qblock { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--outline-variant, var(--outline)); }
+.qopts { display: flex; flex-direction: column; gap: 6px; }
+.qopt { display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 8px 10px; border-radius: 12px; background: var(--surface-container-high); color: var(--label); border: 1px solid transparent; }
+.qopt > span { display: flex; flex-direction: column; gap: 2px; }
+.qopt.on { border-color: var(--primary); background: var(--accent-container); }

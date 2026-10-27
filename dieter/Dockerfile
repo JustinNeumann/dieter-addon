@@ -15,9 +15,10 @@ ARG DIETER_COMMIT=a955b2a1d5429ec531fb3945600e6c67197550e8
 ARG RUNTIME_SOURCES_SHA=8d2cf0cb4126a682fe660bfa55d3449078019c6f12416cdf92a21e99b4cae10d
 ARG NODE_VERSION=22.23.4
 
-# glibc base (musl breaks the OMP harness); git, tmux and python3 for the daemon and the bridge
+# glibc base (musl breaks the OMP harness); git, tmux and python3 for the daemon and the bridge,
+# openssh-client for Git over SSH and for reaching other machines with the add-on's key (/data/.ssh)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git tmux python3 xz-utils procps \
+    && apt-get install -y --no-install-recommends git tmux python3 xz-utils procps openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eu; \

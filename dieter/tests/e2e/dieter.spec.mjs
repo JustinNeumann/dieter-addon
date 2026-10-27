@@ -43,6 +43,24 @@ test("a repository can be added from the Projects page (chunked POST through Ing
   expect(st.projects.some((p) => p.name === "Hello-World")).toBe(true);
 });
 
+test("a new folder becomes a project (empty Git repository under /data/projects)", async ({ page, request }) => {
+  await page.goto("");
+  await page.locator('[data-menu="projects-add"]').click();
+  await page.locator('[data-mi="nf"]').click();
+  await expect(page.locator('[data-act="submit-repo"]').first()).toBeDisabled();
+  await page.locator("#r-name").fill(`Scratch-${stamp}`);
+  await page.locator('[data-act="submit-repo"]').first().click();
+  await expect(page.locator("#snackbar")).toContainText(/added/, { timeout: 60_000 });
+  await page.locator('#rail [data-act="tab"][data-tab="projects"]').click();
+  await expect(page.locator("#list")).toContainText(`Scratch-${stamp}`);
+  const st = await state(request);
+  expect(st.projects.some((p) => p.name === `Scratch-${stamp}`)).toBe(true);
+  const again = await (await request.post("api/project", { data: { folder: `Scratch-${stamp}` } })).json();
+  expect(again.existed).toBe(true); // adopted, not duplicated
+  const bad = await request.post("api/project", { data: { folder: "../escape" } });
+  expect(bad.ok()).toBeFalsy();
+});
+
 test("a task runs on the mock harness and its conversation streams", async ({ page, request }) => {
   await page.goto("");
   await page.locator('[data-act="project"]').first().click();
@@ -103,6 +121,63 @@ test("typing in the chat field keeps the focus and sending gets a reply", async 
   await expect(page.locator(".sendbtn")).toBeEnabled();
   await page.keyboard.press("Enter");
   await expect(page.locator("#panes")).toContainText("Mock harness received: Hi da", { timeout: 90_000 });
+});
+
+test("an image attached in the chat reaches the conversation and shows in the sent message", async ({ page, request }) => {
+  await page.goto(`?card=${cardId || ""}`);
+  await expect(page.locator("#draft")).toBeVisible({ timeout: 30_000 });
+  // 1x1 PNG
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator('.composer [data-act="attach"]').click();
+  await (await chooser).setFiles({ name: "dot.png", mimeType: "image/png", buffer: png });
+  await expect(page.locator(".composer .fchip")).toContainText("dot.png");
+  await page.locator("#draft").fill(`look at the image ${stamp}`);
+  await page.locator('[data-act="send"]').click();
+  await expect(page.locator(".composer .fchip")).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.locator("#panes .msg-user").last()).toContainText(`look at the image ${stamp}`, { timeout: 60_000 });
+  await expect(page.locator("#panes .msg-user").last().locator(".att-img, .att-pill")).toHaveCount(1);
+  const conv = await (await request.get(`api/card/${cardId}`)).json();
+  const files = conv.messages.flatMap((m) => m.parts || []).filter((p) => (p.filename || p.name) === "dot.png");
+  expect(files.length).toBeGreaterThan(0);
+  await expect(page.locator("#panes")).toContainText("Mock harness received", { timeout: 90_000 });
+});
+
+test("a question from the agent is shown on the card; the answer and a decline reach the worker's poll", async ({ page, request }) => {
+  const ask = (id, extra = {}) => request.post("api/questions", { data: { id, session: cardId, input: { allowPartialAnswers: false, questions: [{ id: "question-1", question: "Which colour?", header: "Colour", options: [{ id: "red", label: "Red" }, { id: "blue", label: "Blue", description: "calm" }], allowFreeForm: true, ...extra }] } } });
+  expect((await ask(`q-${stamp}-1`)).ok()).toBeTruthy();
+  let st = await state(request);
+  expect(st.questions.map((q) => q.id)).toContain(`q-${stamp}-1`);
+  expect((await (await request.get(`api/questions/q-${stamp}-1`)).json()).done).toBe(false);
+  // the Inbox puts the card under attention
+  await page.goto("");
+  await page.locator('#rail [data-act="tab"][data-tab="inbox"]').click();
+  await expect(page.locator("#list")).toContainText("Waiting for your answer");
+  // the card shows the question; pick Blue, add a free-form note, answer
+  await page.goto(`?card=${cardId}`);
+  const card = page.locator(`[data-question="q-${stamp}-1"]`);
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card).toContainText("Which colour?");
+  await expect(card.locator('[data-act="q-answer"]')).toBeDisabled();
+  await card.locator('[data-act="q-opt"][data-o="blue"]').click();
+  await expect(card.locator('[data-act="q-answer"]')).toBeEnabled();
+  await card.locator("[data-qfree]").fill("and green");
+  await card.locator('[data-act="q-answer"]').click();
+  await expect(page.locator("#snackbar")).toContainText(/Answer sent/, { timeout: 15_000 });
+  const polled = await (await request.get(`api/questions/q-${stamp}-1`)).json();
+  expect(polled).toEqual({ done: true, output: { action: "answered", answers: { "question-1": { optionIds: ["blue"], freeform: "and green" } } } });
+  expect((await request.get(`api/questions/q-${stamp}-1`)).status()).toBe(404); // handed over once
+  await expect(card).toHaveCount(0);
+  // decline
+  expect((await ask(`q-${stamp}-2`)).ok()).toBeTruthy();
+  const second = page.locator(`[data-question="q-${stamp}-2"]`);
+  await expect(second).toBeVisible({ timeout: 30_000 });
+  await second.locator('[data-act="q-decline"]').click();
+  await expect.poll(async () => (await (await request.get(`api/questions/q-${stamp}-2`)).json()).output?.action, { timeout: 15_000 }).toBe("declined");
+  st = await state(request);
+  expect(st.questions.filter((q) => q.session === cardId)).toEqual([]);
+  // invalid registrations are rejected
+  expect((await request.post("api/questions", { data: { id: "bad id", session: cardId, input: { questions: [] } } })).ok()).toBeFalsy();
 });
 
 test("model and effort pickers in the conversation work", async ({ page }) => {
@@ -170,6 +245,22 @@ test("Usage offers the Claude sign-in: link to claude.com, Cancel aborts, a wron
   expect(st.backends).toEqual([]);
   await page.locator('#rail [data-act="tab"][data-tab="inbox"]').click();
   await expect(page.locator(".usage-strip")).toHaveCount(0);
+});
+
+test("Machines shows the add-on's own SSH key; the connection test reports a failure for an unreachable host", async ({ page, request }) => {
+  const k = await (await request.get("api/ssh")).json();
+  expect(k.public_key).toMatch(/^ssh-ed25519 [A-Za-z0-9+/=]+ dieter@home-assistant$/);
+  expect(k.fingerprint).toMatch(/^SHA256:/);
+  await page.goto("");
+  await page.locator('#rail [data-act="tab"][data-tab="tools"]').click();
+  await page.locator('[data-act="tool"][data-page="machines"]').click();
+  await expect(page.locator("#panes")).toContainText("SSH key of this add-on");
+  await expect(page.locator("[data-ssh-key]")).toHaveText(k.public_key);
+  await page.locator("#ssh-target").fill("nobody@127.0.0.1:1");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-ssh-result]")).toContainText(/Failed:/, { timeout: 40_000 });
+  const bad = await (await request.post("api/ssh/test", { data: { target: "no spaces allowed" } })).json();
+  expect(bad.ok).toBe(false);
 });
 
 test("a push deep link (api/focus) opens the card on the next load", async ({ page, request }) => {

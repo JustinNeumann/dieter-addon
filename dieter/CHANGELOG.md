@@ -2,6 +2,25 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.5 (2026-10-27)
+
+- The add-on has its own SSH key (ed25519, generated in `/data/.ssh` on first start). Tools → Machines
+  shows the public key with a copy button and a connection test (`ssh -o BatchMode=yes user@host`);
+  `openssh-client` is in the image, so Git remotes over SSH and other machines work with that key.
+- Projects → + → New folder creates an empty Git repository under `/data/projects/<name>` (an existing
+  folder there is adopted) and registers it as a project; until now only Git URLs could be added.
+- Questions from the agent (Claude Code's AskUserQuestion) are answered on the page. Until now such a
+  turn hung with the raw tool call shown. The fork release `v0.6.429-antigravity.2` relays the question
+  to the bridge (`/api/questions`), the card shows it with its options and a free-form field, the Inbox
+  lists the card under "Waiting for your answer", HA gets the event `dieter_question`, and the answer
+  (or a decline) continues the turn.
+- Attachments: images and files can be added to a message and to a new task or chat on the page
+  (up to four, 20 MB each; uploaded to the bridge and handed to the CLI with `--attach`). Sent images
+  show as previews in the conversation.
+- Bridge logs why the Claude quota probe returned nothing; no setup-token fallback after a page sign-in.
+- Wide screens: the default board shown at start no longer replaces a project or board opened in the
+  first moment after loading.
+
 ## 0.6.429.4 (2026-10-27)
 
 - Tasks and chats of every project are listed: the bridge asked the CLI for cards without a project, and

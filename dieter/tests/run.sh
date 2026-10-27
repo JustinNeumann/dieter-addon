@@ -13,7 +13,7 @@ docker build -q --build-arg BUILD_ARCH=amd64 -t "$IMAGE" .. >/dev/null
 docker rm -f dieter-e2e >/dev/null 2>&1 || true
 pkill -f '^node ingress-proxy.mjs' >/dev/null 2>&1 || true
 docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" "$IMAGE" >/dev/null
-cleanup() { kill "${PROXY:-}" 2>/dev/null || true; docker rm -f dieter-e2e >/dev/null 2>&1 || true; }
+cleanup() { kill "${PROXY:-}" 2>/dev/null || true; [ -n "${E2E_KEEP:-}" ] || docker rm -f dieter-e2e >/dev/null 2>&1 || true; }   # E2E_KEEP=1 leaves the container for `docker logs dieter-e2e`
 trap cleanup EXIT
 echo "waiting for the bridge and daemon (first run stages the harness runtime, ~800 MB)…"
 for i in $(seq 1 180); do

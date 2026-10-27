@@ -46,7 +46,7 @@ agents run arbitrary tooling under `/data`.
 | `git_user`, `git_email` | commit identity for the agents (written to `/data/.gitconfig`) |
 | `github_token` | token for github.com (fine-grained with *All repositories* or the repos you want, permission Contents read/write; or classic `repo`); stored in `/data/.git-credentials` and used for every clone and push |
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
-| `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **+** → *Add repository* (Git URL, optional name and base branch) |
+| `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **+** → *Add repository* (Git URL, optional name and base branch); *New folder* creates an empty Git repository `/data/projects/<name>` without a remote and registers it (an existing folder there is adopted) |
 | `log_level` | bridge log level |
 
 Agents work in `/data/projects/*` on branches; publishing means push branch + pull request. The
@@ -100,6 +100,30 @@ The harnesses run inside the container, so they need their own credentials:
   suspend/continue and compaction.
 
 Restart the add-on after changing tokens.
+
+## Questions from the agent and attachments
+
+Claude Code may ask the user a question with options (its AskUserQuestion tool). Dieter's daemon has
+no channel for that, so the fork's harness worker relays the question to the bridge
+(`DIETER_QUESTIONS_URL`), the card shows it with its options and a free-form field, the Inbox lists the
+card under "Waiting for your answer", and Home Assistant receives the event `dieter_question`
+(`card_id`, `title`, `question`, `count`) for a notification. The answer, or a decline, continues the
+turn. Unanswered questions expire after a day; cancelling the card cancels the question.
+
+Messages, new tasks and new chats take attachments: images and files, up to four, 20 MB each. The page
+uploads them to the bridge (`/data/dieter/uploads`, removed once sent) and passes them to the CLI with
+`--attach`; the harness saves them in the conversation's workspace and tells the agent where they are.
+Images up to about 450 KB show as previews in the conversation, larger ones as a pill with the name.
+
+## SSH key of the add-on
+
+On its first start the add-on generates an ed25519 key pair in `/data/.ssh` (it survives updates and
+is never part of the image or this repository). **Tools → Machines** shows the public key with a copy
+button and a connection test. Add the public key to `~/.ssh/authorized_keys` on the computers Dieter
+should reach, for example a Git remote over SSH or another machine with the Dieter daemon; `git` and
+`ssh` inside the container pick the key up through `/data/.ssh/config` (first connections record the
+host key, later ones verify it). The test runs `ssh -o BatchMode=yes <target> uname -n` and prints
+the host name on success.
 
 ## Backups
 

@@ -27,21 +27,29 @@ Endpoints:
   GET  /api/card/ID/diff?path=FILE
   GET  /api/machines          enrolled machines (also part of /api/state)
   GET  /app.css, /app.js      the page's assets
-  POST /api/card              create {project, board, title, prompt, provider, model, effort, workspace, lane}
+  POST /api/card              create {project, board, title, prompt, provider, model, effort, workspace, lane, attachments?}
   POST /api/chat              create {project, title, prompt, provider, model, effort}
-  POST /api/{card|chat}/ID/send   {message, model?, effort?}
+  POST /api/{card|chat}/ID/send   {message, model?, effort?, attachments?: [upload id]}
+  POST /api/upload            raw file body (Content-Type, X-Filename) -> {id, name, size}; up to 20 MB, kept until sent
   POST /api/card/ID/move      {lane}
   POST /api/card/ID/start
   POST /api/{card|chat}/ID/cancel     stop the running turn
   POST /api/{card|chat}/ID/archive
   POST /api/card/ID/read      {seq}  mark the displayed reply as seen (response_seq)
   POST /api/project           {git_url, name?, branch?}  add-on only: clone into /data/projects/<name> and register
+                              {folder}  new empty Git repository /data/projects/<folder> (existing folder adopted)
   POST /api/focus             {id}   remember which card the next page load should open (push deep link)
   GET  /api/focus?consume=1   {id|null} and forget it (valid 15 min)
   GET  /api/claude/login      add-on only: state of a running `claude auth login` {running, url, done, auth}
   POST /api/claude/login      start the sign-in; returns the link the user opens on claude.com
   POST /api/claude/login/code {code}  hand the code from claude.com to the CLI; writes /data/.claude/.credentials.json
   POST /api/claude/login/cancel, POST /api/claude/logout
+  GET  /api/questions         questions the agents wait on {questions: [{id, session, input, created_at}]} (also in /api/state)
+  POST /api/questions         {id, session, input}  the harness worker registers a question (DIETER_QUESTIONS_URL)
+  GET  /api/questions/ID      {done: false} | {done: true, output}  the worker polls for the answer
+  POST /api/questions/ID/answer  {action: answered|partially-answered|declined, answers: {qid: {optionIds, freeform?}}}
+  GET  /api/ssh               add-on only: the add-on's SSH public key {public_key, fingerprint}
+  POST /api/ssh/test          {target: "user@host"}  BatchMode ssh with that key; {ok, output|error}
 Only stdlib; no pip dependencies.
 """
 import base64
@@ -52,6 +60,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -106,6 +115,13 @@ TS_NETS = [ipaddress.ip_network(n) for n in ("100.64.0.0/10", "fd7a:115c:a1e0::/
 LANES = ["todo", "running", "review", "done"]
 FOCUS = {"id": None, "at": 0}                     # card the next page load should open (set by HA before a push)
 FOCUS_TTL_S = 900
+# Questions the agents ask the user (Claude Code's AskUserQuestion): the harness worker of the fork
+# release registers them here (DIETER_QUESTIONS_URL) and polls for the answer given on the page.
+QUESTIONS = {}                                    # tool call id -> {"id", "session", "input", "created_at", "output"}
+QUESTIONS_LOCK = threading.Lock()
+QUESTION_TTL_S = 24 * 3600
+QUESTION_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+QUESTION_ACTIONS = ("answered", "partially-answered", "declined", "cancelled")
 
 
 def log(*a):
@@ -266,7 +282,11 @@ def norm_conversation(snapshot):
             else:
                 slim = {}
                 for k, v in p.items():
-                    if isinstance(v, str):
+                    if k == "url" and isinstance(v, str) and v.startswith("data:"):
+                        # attachments: small images stay inline for the page's preview, larger ones show a pill
+                        slim[k] = v if v.startswith("data:image/") and len(v) <= 600_000 else ""
+                        slim["size"] = len(v) * 3 // 4
+                    elif isinstance(v, str):
                         slim[k] = v[:2000]
                     elif isinstance(v, (int, float, bool)) or v is None:
                         slim[k] = v
@@ -324,6 +344,7 @@ class Daemon:
             started = time.time()
             args = [DIETER, "--store", DIETER_HOME, "daemon", "start", "--addr", DAEMON_ADDR]
             env = dict(os.environ)
+            env["DIETER_QUESTIONS_URL"] = f"http://127.0.0.1:{PORT}/api/questions"   # harness workers relay questions here
             if os.path.exists(os.path.join(RUNTIME_DIR, "runner.mjs")):
                 env["DIETER_HARNESS_RUNTIME_DIR"] = RUNTIME_DIR
             if os.path.exists(ENV_FILE):
@@ -735,6 +756,180 @@ def setup_git():
         os.remove(cred)
 
 
+UPLOADS_DIR = os.path.join(DIETER_HOME, "uploads")      # files attached on the page, handed to the CLI with --attach
+UPLOAD_MAX = 20 * 1024 * 1024
+UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+
+
+def upload_store(name, data):
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "file").strip()).strip(".-") or "file"
+    uid = secrets.token_urlsafe(18)
+    folder = os.path.join(UPLOADS_DIR, uid)
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    path = os.path.join(folder, safe[:120])
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
+        f.write(data)
+    # forget uploads nobody sent (page closed) after a day
+    now = time.time()
+    for other in os.listdir(UPLOADS_DIR):
+        op = os.path.join(UPLOADS_DIR, other)
+        if other != uid and now - os.path.getmtime(op) > 86400:
+            shutil.rmtree(op, ignore_errors=True)
+    return {"id": uid, "name": os.path.basename(path), "size": len(data)}
+
+
+def upload_paths(ids):
+    """Upload ids from the page -> file paths for --attach (max four), or ValueError."""
+    ids = [str(x) for x in (ids or []) if x]
+    if len(ids) > 4:
+        raise ValueError("at most four attachments")
+    paths = []
+    for uid in ids:
+        if not UPLOAD_ID_RE.match(uid):
+            raise ValueError("invalid attachment id")
+        folder = os.path.join(UPLOADS_DIR, uid)
+        names = os.listdir(folder) if os.path.isdir(folder) else []
+        if not names:
+            raise ValueError("attachment expired, add it again")
+        paths.append(os.path.join(folder, names[0]))
+    return paths
+
+
+def upload_forget(paths):
+    for path in paths:
+        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+
+
+def question_register(body):
+    qid, session, inp = str(body.get("id") or ""), str(body.get("session") or ""), body.get("input")
+    if not QUESTION_ID_RE.match(qid):
+        raise ValueError("invalid question id")
+    if not re.match(r"^[A-Za-z0-9._-]{1,80}$", session):
+        raise ValueError("invalid session")
+    if not isinstance(inp, dict) or not isinstance(inp.get("questions"), list) or not inp["questions"]:
+        raise ValueError("input.questions required")
+    if len(json.dumps(inp)) > 64_000:
+        raise ValueError("question too large")
+    q = {"id": qid, "session": session, "input": inp, "created_at": datetime_now(), "created": time.time(), "output": None}
+    with QUESTIONS_LOCK:
+        QUESTIONS[qid] = q
+    rev, data = STATE.snapshot()
+    card = next((c for c in data.get("cards", []) + data.get("chats", []) if c.get("id") == session), None)
+    first = (inp["questions"][0] or {}).get("question") or ""
+    log(f"question {qid}: {session} asks: {first[:80]}")
+    STATE.touch()
+    ha_event("dieter_question", {"id": qid, "card_id": session, "title": (card or {}).get("title") or session,
+                                 "question": first[:300], "count": len(inp["questions"])})
+    return {"ok": True}
+
+
+def question_answer(qid, body):
+    action = str(body.get("action") or "")
+    if action not in QUESTION_ACTIONS:
+        raise ValueError("action must be one of " + ", ".join(QUESTION_ACTIONS))
+    output = {"action": action}
+    if action in ("answered", "partially-answered"):
+        answers = body.get("answers")
+        if not isinstance(answers, dict):
+            raise ValueError("answers required")
+        clean = {}
+        for key, a in answers.items():
+            if not isinstance(a, dict):
+                continue
+            ids = [str(x) for x in (a.get("optionIds") or []) if isinstance(x, (str, int))]
+            entry = {"optionIds": ids}
+            if isinstance(a.get("freeform"), str) and a["freeform"].strip():
+                entry["freeform"] = a["freeform"][:4000]
+            if ids or "freeform" in entry:
+                clean[str(key)] = entry
+        output["answers"] = clean
+    with QUESTIONS_LOCK:
+        q = QUESTIONS.get(qid)
+        if not q:
+            raise ValueError("no such question (the agent may have moved on)")
+        if q["output"] is not None:
+            raise ValueError("already answered")
+        q["output"] = output
+    log(f"question {qid}: {action}")
+    STATE.touch()
+    return {"ok": True}
+
+
+def question_poll(qid):
+    """The worker's poll: hands the answer over once and forgets the question."""
+    with QUESTIONS_LOCK:
+        q = QUESTIONS.get(qid)
+        if not q:
+            return None
+        if q["output"] is None:
+            return {"done": False}
+        del QUESTIONS[qid]
+    STATE.touch()
+    return {"done": True, "output": q["output"]}
+
+
+def pending_questions():
+    now = time.time()
+    with QUESTIONS_LOCK:
+        for qid, q in list(QUESTIONS.items()):
+            if now - q["created"] > QUESTION_TTL_S:
+                del QUESTIONS[qid]
+        return [{k: q[k] for k in ("id", "session", "input", "created_at")} for q in QUESTIONS.values() if q["output"] is None]
+
+
+SSH_DIR = "/data/.ssh"                                   # HOME=/data: ssh and git find it without any env
+SSH_KEY = os.path.join(SSH_DIR, "id_ed25519")
+SSH_TARGET_RE = re.compile(r"^(?:[A-Za-z0-9._-]{1,64}@)?[A-Za-z0-9][A-Za-z0-9.:-]{0,253}(?::\d{1,5})?$")
+
+
+def setup_ssh():
+    """One ed25519 key for this add-on in /data/.ssh (survives updates), generated on first start.
+    Users authorize its public key on the machines Dieter should reach (Git remotes, other daemons);
+    first connections record the host key (accept-new), later ones verify it."""
+    os.makedirs(SSH_DIR, mode=0o700, exist_ok=True)
+    os.chmod(SSH_DIR, 0o700)
+    if not os.path.exists(SSH_KEY):
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "dieter@home-assistant", "-f", SSH_KEY],
+                       check=True, capture_output=True, text=True, timeout=60)
+        log("ssh: generated", SSH_KEY)
+    cfg = os.path.join(SSH_DIR, "config")
+    want = ("# written by the Dieter add-on\n"
+            "Host *\n"
+            f"  IdentityFile {SSH_KEY}\n"
+            "  IdentitiesOnly yes\n"
+            "  StrictHostKeyChecking accept-new\n"
+            f"  UserKnownHostsFile {SSH_DIR}/known_hosts\n"
+            "  ServerAliveInterval 30\n")
+    if not os.path.exists(cfg) or open(cfg).read() != want:
+        with open(os.open(cfg, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            f.write(want)
+
+
+def ssh_public_key():
+    try:
+        key = open(SSH_KEY + ".pub").read().strip()
+    except FileNotFoundError:
+        return {"public_key": None, "fingerprint": None}
+    fp = subprocess.run(["ssh-keygen", "-l", "-f", SSH_KEY + ".pub"], capture_output=True, text=True, timeout=10)
+    return {"public_key": key, "fingerprint": (fp.stdout.split() + [None, None])[1] if fp.returncode == 0 else None}
+
+
+def ssh_test(target):
+    """`ssh -o BatchMode=yes target uname -n` with the add-on's key: tells whether the key is authorized."""
+    target = (target or "").strip()
+    if not SSH_TARGET_RE.match(target):
+        return {"ok": False, "error": "target must be user@host or host (optionally :port)"}
+    host, _, port = target.rpartition(":") if re.search(r":\d{1,5}$", target) else (target, "", "")
+    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", *(["-p", port] if port else []), host, "uname", "-n"]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env={**os.environ, "HOME": "/data"})
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "timeout after 30 s"}
+    if p.returncode == 0:
+        return {"ok": True, "output": p.stdout.strip()[:200]}
+    return {"ok": False, "error": (p.stderr.strip().splitlines() or ["ssh failed"])[-1][:300]}
+
+
 GIT_URL_RE = re.compile(r"^(https://[\w.\-]+(:\d+)?/[\w.\-/~]+|git@[\w.\-]+:[\w.\-/~]+|ssh://[\w.\-@]+(:\d+)?/[\w.\-/~]+)$")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -767,6 +962,31 @@ def add_project(url, name="", branch=""):
     out = run(args + [path], timeout=60)
     pid = (out.get("project") or out).get("id") if isinstance(out, dict) else out
     log(f"projects: registered {name} as {pid}")
+    return {"ok": True, "id": pid, "name": name, "existed": False}
+
+
+def add_folder(name):
+    """New project without a remote: an empty Git repository in /data/projects/<name> (an existing folder
+    there is adopted and initialised if it is no repository yet), registered with the daemon."""
+    name = (name or "").strip()
+    if not NAME_RE.match(name):
+        raise ValueError("name may contain letters, digits, . _ - (max 64)")
+    os.makedirs(PROJECTS_DIR, exist_ok=True)
+    path = os.path.join(PROJECTS_DIR, name)
+    os.makedirs(path, exist_ok=True)
+    if not os.path.isdir(os.path.join(path, ".git")):
+        log(f"projects: initialising {path}")
+        git(["init", "--quiet", "--initial-branch=main"], cwd=path)
+        ident = []
+        if not (OPTS.get("git_user") or "").strip():
+            ident = ["-c", "user.name=Dieter", "-c", "user.email=dieter@home-assistant.local"]
+        git([*ident, "commit", "--quiet", "--allow-empty", "-m", "Initial commit"], cwd=path)
+    known = {p.get("path"): p for p in unwrap(run(["project", "list", "--format", "json"], timeout=20), "projects")}
+    if path in known:
+        return {"ok": True, "id": known[path].get("id"), "name": known[path].get("name") or name, "existed": True}
+    out = run(["project", "create", "--name", name, "--format", "json", path], timeout=60)
+    pid = (out.get("project") or out).get("id") if isinstance(out, dict) else out
+    log(f"projects: registered folder {name} as {pid}")
     return {"ok": True, "id": pid, "name": name, "existed": False}
 
 
@@ -846,7 +1066,13 @@ class State:
 
     def snapshot(self):
         with self.lock:
-            return self.rev, dict(self.data)
+            return self.rev, {**self.data, "questions": pending_questions()}
+
+    def touch(self):
+        """Something outside the polls changed (a question arrived or was answered): push to the page."""
+        with self.lock:
+            self.rev += 1
+            self.cond.notify_all()
 
     def note(self, what, err):
         """Log a recurring poll error once per distinct message (unenrolled daemons have no quota/machines)."""
@@ -904,7 +1130,7 @@ class State:
                          for p in projects],
             "boards": [{"id": b.get("id"), "name": b.get("name"), "project_id": b.get("project_id") or b.get("projectId"),
                         "workflow": b.get("workflow"), "lanes": [l.get("id") for l in b.get("lanes", []) or []]} for b in boards],
-            "cards": cards, "chats": chats,
+            "cards": cards, "chats": chats, "addon": ADDON,
             "machine": self.slow["machine"], "quota": self.slow["quota"], "harnesses": self.slow["harnesses"],
             "machines": self.slow["machines"], "claude_auth": self.slow.get("claude_auth"), "backends": self.slow.get("backends", []),
         }
@@ -1111,6 +1337,25 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(f"event: {event}\ndata: {json.dumps(obj, ensure_ascii=False, default=str)}\n\n".encode())
         self.wfile.flush()
 
+    def read_raw(self, limit):
+        """Binary request body (uploads), chunked or with Content-Length, at most `limit` bytes."""
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            raw = b""
+            while True:
+                size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                if size == 0:
+                    while self.rfile.readline().strip():
+                        pass
+                    return raw
+                raw += self.rfile.read(size)
+                self.rfile.readline()
+                if len(raw) > limit:
+                    raise ValueError("file too large (20 MB at most)")
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > limit:
+            raise ValueError("file too large (20 MB at most)")
+        return self.rfile.read(n) if n else b""
+
     def read_body(self):
         # Supervisor Ingress forwards POST bodies chunked (no Content-Length)
         if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
@@ -1166,6 +1411,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.stream_events()
             if parts[1:] == ["claude", "login"]:
                 return self.send_json(ClaudeLogin.status())
+            if parts[1:] == ["ssh"] and ADDON:
+                return self.send_json(ssh_public_key())
+            if parts[1:] == ["questions"]:
+                return self.send_json({"questions": pending_questions()})
+            if len(parts) == 3 and parts[1] == "questions":
+                st = question_poll(parts[2])
+                return self.send_json(st if st else {"error": "no such question"}, 200 if st else 404)
             if len(parts) >= 3 and parts[1] in ("card", "chat"):
                 kind, cid = parts[1], parts[2]
                 if not cid.startswith("c_"):
@@ -1201,6 +1453,9 @@ class Handler(BaseHTTPRequestHandler):
             if not self.may_write():
                 return self.send_json({"error": "Aktionen nur von Home Assistant, vom eigenen Tailscale-Gerät oder mit API-Key"}, 403)
             parts = [p for p in urllib.parse.urlsplit(self.path).path.split("/") if p]
+            if parts == ["api", "upload"]:
+                name = urllib.parse.unquote(self.headers.get("X-Filename") or "file")
+                return self.send_json(upload_store(name, self.read_raw(UPLOAD_MAX)))
             body = self.read_body()
             if parts[:1] != ["api"]:
                 return self.send_json({"error": "not found"}, 404)
@@ -1209,7 +1464,10 @@ class Handler(BaseHTTPRequestHandler):
             if parts[1:] == ["project"]:
                 if not ADDON:
                     return self.send_json({"error": "adding repositories works in the add-on only"}, 400)
-                res = add_project(body.get("git_url") or "", body.get("name") or "", body.get("branch") or "")
+                if body.get("folder") and not body.get("git_url"):
+                    res = add_folder(body.get("folder"))
+                else:
+                    res = add_project(body.get("git_url") or "", body.get("name") or "", body.get("branch") or "")
                 STATE.poll_fast()
                 return self.send_json(res)
             if parts[1:] == ["focus"]:
@@ -1218,6 +1476,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({"error": "id required"}, 400)
                 FOCUS.update(id=fid, at=time.time())
                 return self.send_json({"ok": True})
+            if parts[1:] == ["questions"]:
+                return self.send_json(question_register(body))
+            if len(parts) == 4 and parts[1] == "questions" and parts[3] == "answer":
+                return self.send_json(question_answer(parts[2], body))
+            if parts[1:] == ["ssh", "test"] and ADDON:
+                return self.send_json(ssh_test(body.get("target") or ""))
             if parts[1:2] == ["claude"] and ADDON:
                 action = "/".join(parts[2:])
                 if action == "login":
@@ -1234,13 +1498,21 @@ class Handler(BaseHTTPRequestHandler):
                 kind, cid, action = parts[1], parts[2], parts[3]
                 if action == "send":
                     msg = (body.get("message") or "").strip()
+                    files = upload_paths(body.get("attachments"))
+                    if not msg and files:
+                        msg = "Please look at the attached file." if len(files) == 1 else "Please look at the attached files."
                     if not msg:
                         return self.send_json({"error": "message required"}, 400)
                     args = [kind, "send", "--message", msg]
                     for k in ("model", "effort"):
                         if body.get(k):
                             args += [f"--{k}", str(body[k])]
-                    out = run(args + [cid], timeout=60, parse=False)
+                    for path in files:
+                        args += ["--attach", path]
+                    try:
+                        out = run(args + [cid], timeout=120, parse=False)
+                    finally:
+                        upload_forget(files)
                     STATE.poll_fast()
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action == "move" and kind == "card":
@@ -1298,7 +1570,13 @@ class Handler(BaseHTTPRequestHandler):
         for k in ("provider", "model", "effort", "branch", "checkout"):
             if b.get(k):
                 args += [f"--{k}", str(b[k])]
-        out = run(args, timeout=60)
+        files = upload_paths(b.get("attachments"))
+        for path in files:
+            args += ["--attach", path]
+        try:
+            out = run(args, timeout=120)
+        finally:
+            upload_forget(files)
         STATE.poll_fast()
         c = out.get("card") if isinstance(out, dict) and "card" in out else out
         return {"ok": True, "id": (c or {}).get("id"), "card": norm_card(c or {}, kind)}
@@ -1334,6 +1612,7 @@ class Handler(BaseHTTPRequestHandler):
             "quota": q, "machine": {k: m.get(k) for k in ("cpu_percent", "mem_used", "mem_total", "gpu", "uptime_s")} if m else None,
             "last_finished": d.get("last_finished"), "last_review": d.get("last_review"),
             "projects": [p["name"] for p in d.get("projects", [])],
+            "questions": len(d.get("questions") or []),
             "addon": ADDON,
         }
 
@@ -1417,6 +1696,10 @@ def main():
             setup_git()
         except Exception as e:
             log("setup:", e)
+        try:
+            setup_ssh()
+        except Exception as e:
+            log("ssh: setup failed:", e)
         try:
             stage_harness_runtime()
             build_runtime_dir()

@@ -39,7 +39,9 @@
   // ------------------------------------------------------------------ state
   const S = {
     data: null, tab: "projects", stacks: {}, modal: null, dialog: null, menu: null,
-    conv: { id: null, kind: null, data: null, es: null, draft: "", following: true, expanded: {}, agent: null },
+    conv: { id: null, kind: null, data: null, es: null, draft: "", following: true, expanded: {}, agent: null, files: [] },
+    qa: {},        // answers being composed for the agents' questions, by question id
+    files: [],     // attachments picked for the New task/chat form
     seen: load("seen", {}), pins: load("pins", {}), lanePage: {}, search: {}, inboxFilter: "all", collapsed: load("collapsed", {}),
     boardSort: {}, creation: null, busy: false, scroll: {},
   };
@@ -112,7 +114,7 @@
   // Activity.classify / detail
   function classify(c) {
     const st = rtState(c.runtime);
-    if (st === "needs") return "ANSWER";
+    if (st === "needs" || (S.data.questions || []).some((q) => q.session === c.id)) return "ANSWER";
     if (st === "active" || st === "stopping") return "RUNNING";
     if (isUnread(c)) return "UNREAD";
     if (c.kind !== "chat" && c.lane === "review") return "REVIEW";
@@ -223,7 +225,7 @@
     const formState = S.modal === "repo" ? S.repo : S.creation;
     if (formState) $("#modal").querySelectorAll("[data-field]").forEach((f) => { const v = formState[f.dataset.field] ?? ""; if (f.value !== v) f.value = v; });
     if (S.modal === "creation" && S.creation) { const c = S.creation; const ok = !!(c.prompt.trim() && c.project_id && (c.chat || c.board_id) && !S.busy); $("#modal").querySelectorAll('[data-act="submit-creation"]').forEach((b) => (b.disabled = !ok)); }
-    if (S.modal === "repo" && S.repo) $("#modal").querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !S.repo.git_url.trim() || S.busy));
+    if (S.modal === "repo" && S.repo) $("#modal").querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !repoReady(S.repo) || S.busy));
     syncConversation();
     document.title = "Dieter";
   }
@@ -484,7 +486,7 @@
     if (page === "machines") {
       const ms = S.data.machines || []; const online = ms.filter((m) => m.online).length;
       const rows = ms.map((m, i) => listRow({ title: m.name, subtitle: [m.online ? "Online" : "Offline", m.route].filter(Boolean).join(" · "), glyph: "dns", tile: m.online ? "#0A84FF" : "#8E8E93", position: pos(i, ms.length), act: "machine", extra: `data-id="${m.id}"`, trailing: `<span class="dot" style="width:9px;height:9px;background:${m.online ? "var(--success)" : "var(--tertiary-label)"}"></span>` })).join("");
-      return `<div class="screen">${appbar({ title, subtitle: ms.length ? `${online} of ${ms.length} online` : "", back: opts.back, actions: iconAction("refresh", "refresh", "", "Reconnect") })}<div class="content" data-scroll="machines"><div style="height:8px"></div><div class="group">${rows || emptyState("computer", "No machines", "Enroll a computer with the Dieter daemon to run agents on it.")}</div></div></div>`;
+      return `<div class="screen">${appbar({ title, subtitle: ms.length ? `${online} of ${ms.length} online` : "", back: opts.back, actions: iconAction("refresh", "refresh", "", "Reconnect") })}<div class="content" data-scroll="machines"><div style="height:8px"></div><div class="group">${rows || emptyState("computer", "No machines", "Enroll a computer with the Dieter daemon to run agents on it.")}</div>${sshKeySection()}</div></div>`;
     }
     if (page === "usage") {
       const quota = S.data.quota || [];
@@ -584,8 +586,8 @@
       + (cv.pending_tools_summary ? `<span class="cchip">${ico("hourglass_empty", 13)}${esc(cv.pending_tools_summary)}</span>` : "");
     const draft = S.conv.draft; const showStop = canHalt && !draft.trim();
     const sendBtn = showStop ? `<button class="sendbtn stop" data-act="cancel" data-id="${route.id}" title="Stop agent">${ico("stop", 17)}</button>`
-      : `<button class="sendbtn" data-act="send" ${draft.trim() && !S.busy ? "" : "disabled"} title="Send message">${ico("arrow_upward", 22)}</button>`;
-    const composer = `<div class="composer"><div class="chips">${chips}</div><div class="row"><button class="attach" title="Attach images or files" data-act="attach">${ico("add")}</button>
+      : `<button class="sendbtn" data-act="send" ${(draft.trim() || S.conv.files.length) && !S.busy ? "" : "disabled"} title="Send message">${ico("arrow_upward", 22)}</button>`;
+    const composer = `<div class="composer"><div class="chips">${chips}</div>${filesRow("conv")}<div class="row"><button class="attach" title="Attach images or files" data-act="attach" data-target="conv">${ico("add")}</button>
       <div class="field"><textarea id="draft" rows="1" placeholder="${working ? "Queue a message…" : "Message"}">${esc(draft)}</textarea>${sendBtn}</div></div></div>`;
     return `<div class="screen">${appbar({ title, subtitle, back: opts.back, actions })}<div class="timeline" data-scroll="conv-${route.id}" id="timeline">${timeline(cv, c, canStart, working, runtime)}</div>${!S.conv.following ? `<button class="fab-small" style="bottom:${hasRail() ? 120 : 120}px" data-act="jump">${ico("arrow_downward")}</button>` : ""}${composer}</div>`;
   }
@@ -596,7 +598,7 @@
     const rows = buildTimeline(cv.messages);
     rows.forEach((row) => {
       if (row.type === "activity") { const open = !!S.conv.expanded[row.id]; out.push(`<div class="msg-assistant"><button class="activity-row ${open ? "open" : ""}" data-act="expand" data-id="${row.id}">${ico("auto_awesome", 15)}<span class="ellipsis">${esc(row.summary)}</span>${ico("chevron_right", 13, "chev")}</button>${open ? row.steps.map(stepHtml).join("") : ""}</div>`); return; }
-      if (row.user) { out.push(`<div class="msg-user"><div class="bubble rich">${richText(row.text)}</div>${row.delivery ? `<div class="t-caption c-secondary" style="padding:4px 6px 0">${esc(row.delivery)}</div>` : ""}</div>`); return; }
+      if (row.user) { out.push(`<div class="msg-user">${(row.files || []).map(attachmentHtml).join("")}${row.text ? `<div class="bubble rich">${richText(row.text)}</div>` : ""}${row.delivery ? `<div class="t-caption c-secondary" style="padding:4px 6px 0">${esc(row.delivery)}</div>` : ""}</div>`); return; }
       const groups = row.groups.map((g) => {
         if (g.activity) { const open = !!S.conv.expanded[g.id]; return `<button class="activity-row ${open ? "open" : ""}" data-act="expand" data-id="${g.id}">${ico("auto_awesome", 15)}<span class="ellipsis">${esc(g.summary)}</span>${ico("chevron_right", 13, "chev")}</button>${open ? g.steps.map(stepHtml).join("") : ""}`; }
         return g.steps.map(stepHtml).join("");
@@ -604,7 +606,9 @@
       out.push(`<div class="msg-assistant">${groups}${(row.plans || []).map(planCard).join("")}</div>`);
     });
     (cv.task_plans || []).filter((p) => !rows.some((r) => r.plans?.includes(p))).forEach((p) => out.push(planCard(p)));
-    if (working) out.push(`<div class="working"><span class="spinner s16"></span><span class="clamp2">${esc(liveActivity(cv, runtime))}</span></div>`);
+    const asks = c ? pendingQuestions(c.id) : [];
+    asks.forEach((q) => out.push(questionCard(q)));
+    if (working && !asks.length) out.push(`<div class="working"><span class="spinner s16"></span><span class="clamp2">${esc(liveActivity(cv, runtime))}</span></div>`);
     (cv.queue || []).forEach((qm) => out.push(`<div class="queued"><div class="bx t-body clamp2">${esc(qm.text || "")}</div><div class="t-footnote c-secondary" style="display:flex;align-items:center;gap:4px;padding-top:4px">${ico("schedule", 13)}Queued</div></div>`));
     return out.join("") + `<div style="height:1px"></div>`;
   }
@@ -643,7 +647,7 @@
       if (!user && !steps.length && !(m.plans || []).length) return;
       if (!user && steps.length && steps.every((s) => s.routine)) { run.push({ id: mid, steps }); return; }
       flush();
-      if (user) { rows.push({ type: "message", user: true, id: mid, text: steps.filter((s) => s.kind !== "attachment").map((s) => s.text || "").join("\n\n").trim(), delivery: m.delivery }); return; }
+      if (user) { rows.push({ type: "message", user: true, id: mid, text: steps.filter((s) => s.kind !== "attachment").map((s) => s.text || "").join("\n\n").trim(), files: steps.filter((s) => s.kind === "attachment").map((s) => s.part), delivery: m.delivery }); return; }
       const groups = []; steps.forEach((s) => { const last = groups[groups.length - 1]; if (s.routine && last?.activity) last.steps.push(s); else groups.push({ id: s.id, steps: [s], activity: s.routine }); });
       groups.forEach((g) => { if (g.activity) g.summary = summaryOf(g.steps); });
       rows.push({ type: "message", user: false, id: mid, groups, plans: m.plans || [] });
@@ -664,6 +668,88 @@
     if (s.kind === "attachment") return `<div class="mpill" style="height:auto;padding:8px 10px">${ico("insert_drive_file", 18)}<span>${esc(s.part.filename || "Attachment")}</span></div>`;
     return s.text ? `<div class="rich">${richText(s.text)}</div>` : "";
   }
+  function attachmentHtml(p) {
+    const name = p.filename || p.name || "Attachment"; const url = p.url || "";
+    if (url.startsWith("data:image/")) return `<img class="att-img" src="${esc(url)}" alt="${esc(name)}" title="${esc(name)}">`;
+    return `<div class="mpill att-pill" title="${esc(name)}">${ico((p.mediaType || p.media_type || "").startsWith("image/") ? "image" : "insert_drive_file", 18)}<span class="txt">${esc(name)}</span></div>`;
+  }
+  // ---- questions the agent asks (Claude Code's AskUserQuestion, relayed by the harness worker)
+  const pendingQuestions = (cardId) => (S.data.questions || []).filter((q) => q.session === cardId);
+  function answerState(q) {
+    if (!S.qa[q.id]) S.qa[q.id] = {};
+    (q.input.questions || []).forEach((x) => { if (!S.qa[q.id][x.id]) S.qa[q.id][x.id] = { optionIds: [], freeform: "" }; });
+    return S.qa[q.id];
+  }
+  function questionCard(q) {
+    const st = answerState(q); const qs = q.input.questions || [];
+    const blocks = qs.map((x) => {
+      const a = st[x.id]; const multi = !!x.allowMultiple;
+      const opts = (x.options || []).map((o) => `<button class="qopt ${a.optionIds.includes(o.id) ? "on" : ""}" data-act="q-opt" data-q="${esc(q.id)}" data-x="${esc(x.id)}" data-o="${esc(o.id)}">${ico(multi ? (a.optionIds.includes(o.id) ? "check_box" : "check_box_outline_blank") : (a.optionIds.includes(o.id) ? "radio_button_checked" : "radio_button_unchecked"), 18)}<span><span class="t-body-em">${esc(o.label)}</span>${o.description ? `<span class="t-footnote c-secondary">${esc(o.description)}</span>` : ""}</span></button>`).join("");
+      const free = x.allowFreeForm ? `<div class="outlined-field" style="margin-top:8px"><label>${(x.options || []).length ? "Or your own answer" : "Your answer"}</label><input data-qfree="${esc(q.id)}" data-x="${esc(x.id)}" id="qf-${esc(q.id)}-${esc(x.id)}" value="${esc(a.freeform)}" autocomplete="off"></div>` : "";
+      return `<div class="qblock">${x.header ? `<div class="t-footnote c-secondary" style="text-transform:uppercase;letter-spacing:.06em">${esc(x.header)}</div>` : ""}<div class="t-headline" style="margin:2px 0 8px">${esc(x.question)}</div><div class="qopts">${opts}</div>${free}</div>`;
+    }).join("");
+    const answered = qs.filter((x) => st[x.id].optionIds.length || st[x.id].freeform.trim()).length;
+    const ready = answered === qs.length || (q.input.allowPartialAnswers && answered > 0);
+    return `<div class="ccard question" data-question="${esc(q.id)}"><div class="hd">${ico("help", 18, "c-secondary")}<span class="t">The agent asks</span></div>${blocks}
+      <div class="acts" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn text" data-act="q-decline" data-q="${esc(q.id)}">Decline</button><button class="btn filled" data-act="q-answer" data-q="${esc(q.id)}" ${ready ? "" : "disabled"}>Answer</button></div></div>`;
+  }
+  function questionToggle(qid, xid, oid) {
+    const q = (S.data.questions || []).find((z) => z.id === qid); if (!q) return;
+    const x = (q.input.questions || []).find((z) => z.id === xid); const a = answerState(q)[xid]; if (!x || !a) return;
+    if (x.allowMultiple) a.optionIds = a.optionIds.includes(oid) ? a.optionIds.filter((z) => z !== oid) : [...a.optionIds, oid];
+    else a.optionIds = a.optionIds.includes(oid) ? [] : [oid];
+    render();
+  }
+  async function questionSubmit(qid, decline) {
+    const q = (S.data.questions || []).find((z) => z.id === qid); if (!q || S.busy) return;
+    const st = answerState(q); const qs = q.input.questions || [];
+    let body;
+    if (decline) body = { action: "declined" };
+    else {
+      const answers = {};
+      qs.forEach((x) => { const a = st[x.id]; if (a.optionIds.length || a.freeform.trim()) answers[x.id] = { optionIds: a.optionIds, ...(a.freeform.trim() ? { freeform: a.freeform.trim() } : {}) }; });
+      body = { action: Object.keys(answers).length === qs.length ? "answered" : "partially-answered", answers };
+    }
+    S.busy = true; render();
+    try { await api(`api/questions/${encodeURIComponent(qid)}/answer`, body); delete S.qa[qid]; S.conv.awaiting = true; snackbar(decline ? "Declined. The agent continues." : "Answer sent. The agent continues."); }
+    catch (e) { snackbar(e.message); }
+    finally { S.busy = false; await refreshState(); render(); }
+  }
+  // ---- attachments (uploaded to the bridge, handed to the CLI with --attach)
+  const MAX_FILES = 4, MAX_FILE_BYTES = 20 * 1024 * 1024;
+  function pickFiles(target) {
+    const input = document.createElement("input"); input.type = "file"; input.multiple = true; input.id = "file-in";
+    input.accept = "image/*,.pdf,.txt,.md,.csv,.json,.log,.yaml,.yml,.py,.js,.ts,.html,.css,.sh";
+    input.style.display = "none"; document.body.appendChild(input);
+    input.addEventListener("change", () => { addFiles(target, [...input.files]); input.remove(); });
+    input.click();
+  }
+  function fileList(target) { return target === "conv" ? S.conv.files : S.files; }
+  function addFiles(target, files) {
+    const list = fileList(target);
+    for (const f of files) {
+      if (list.length >= MAX_FILES) { snackbar(`At most ${MAX_FILES} attachments.`); break; }
+      if (f.size > MAX_FILE_BYTES) { snackbar(`${f.name} is larger than 20 MB.`); continue; }
+      list.push({ file: f, name: f.name, size: f.size, type: f.type || "application/octet-stream", preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : "" });
+    }
+    render();
+  }
+  function removeFile(target, i) { const list = fileList(target); const [f] = list.splice(i, 1); if (f?.preview) URL.revokeObjectURL(f.preview); render(); }
+  function filesRow(target) {
+    const list = fileList(target); if (!list.length) return "";
+    return `<div class="files-row" data-files="${target}">${list.map((f, i) => `<span class="fchip" title="${esc(f.name)}">${f.preview ? `<img src="${esc(f.preview)}" alt="">` : ico("insert_drive_file", 16)}<span class="txt">${esc(f.name)}</span><button class="x" data-act="rm-file" data-target="${target}" data-i="${i}" title="Remove">${ico("close", 14)}</button></span>`).join("")}</div>`;
+  }
+  async function uploadFiles(target) {
+    const ids = [];
+    for (const f of fileList(target)) {
+      const r = await fetch("api/upload", { method: "POST", headers: { "Content-Type": f.type, "X-Filename": encodeURIComponent(f.name) }, body: f.file });
+      const j = await r.json().catch(() => ({ error: r.statusText }));
+      if (!r.ok) throw new Error(j.error || `upload failed: ${r.statusText}`);
+      ids.push(j.id);
+    }
+    return ids;
+  }
+  function clearFiles(target) { fileList(target).forEach((f) => { if (f.preview) URL.revokeObjectURL(f.preview); }); fileList(target).length = 0; }
   function planCard(plan) {
     const tasks = (plan.phases || []).flatMap((ph) => ph.tasks || []); const done = tasks.filter((t) => ["completed", "abandoned"].includes(t.status)).length;
     return `<div class="ccard plan"><div class="hd">${ico("checklist", 18, "c-secondary")}<span class="t">Plan</span><span class="t-footnote c-secondary">${done} of ${tasks.length}</span></div><div style="height:10px"></div>${progress(tasks.length ? done / tasks.length : 0, "var(--success)")}<div style="height:6px"></div>
@@ -727,7 +813,8 @@
     if (S.conv.id === id) { bindComposer(); return; }
     if (S.conv.es) S.conv.es.close();
     const kind = route.convKind || (conv(id)?.kind === "chat" ? "chat" : "card");
-    S.conv = { ...S.conv, id, kind, data: null, draft: load("draft-" + id, ""), following: true, expanded: {}, agent: null, awaiting: false };
+    clearFiles("conv");
+    S.conv = { ...S.conv, id, kind, data: null, draft: load("draft-" + id, ""), following: true, expanded: {}, agent: null, awaiting: false, files: [] };
     api(`api/${kind}/${id}`).then((d) => { if (S.conv.id !== id) return; S.conv.data = d; markSeen(id); render(); scrollToEnd(); })
       .catch((e) => { if (S.conv.id === id) { S.conv.data = { messages: [], error: e.message }; render(); } });
     if (SNAP) return;
@@ -760,11 +847,13 @@
     const t = $("#timeline"); if (t && !t._bound) { t._bound = true; t.addEventListener("scroll", () => { const atEnd = t.scrollHeight - t.scrollTop - t.clientHeight < 40; if (S.conv.following !== atEnd) { S.conv.following = atEnd; const b = $(".fab-small"); if (!atEnd && !b) render(); if (atEnd && b) b.remove(); } }, { passive: true }); }
   }
   async function send() {
-    const text = (S.conv.draft || "").trim(); if (!text || !S.conv.id || S.busy) return;
+    const text = (S.conv.draft || "").trim(); if ((!text && !S.conv.files.length) || !S.conv.id || S.busy) return;
     S.busy = true; render();
     try {
       const body = { message: text }; if (S.conv.agent?.model) body.model = S.conv.agent.model; if (S.conv.agent?.effort) body.effort = S.conv.agent.effort;
+      if (S.conv.files.length) body.attachments = await uploadFiles("conv");
       await api(`api/${S.conv.kind}/${S.conv.id}/send`, body);
+      clearFiles("conv");
       S.conv.draft = ""; save("draft-" + S.conv.id, ""); S.conv.following = true; S.conv.awaiting = true;
     } catch (e) { snackbar(e.message); } finally { S.busy = false; render(); scrollToEnd(); }
   }
@@ -791,7 +880,7 @@
       <div class="content" data-scroll="creation" style="padding-top:8px;padding-bottom:24px">
       <div class="compose-card"><input id="c-title" placeholder="Title (optional)" data-field="title"><div class="hairline" style="margin:0 16px"></div>
         <textarea id="c-prompt" placeholder="${chat ? "What would you like to talk about?" : "What should we do?"}" data-field="prompt"></textarea><div class="hairline" style="margin:0 16px"></div>
-        <div class="attach-row"><button class="btn text with-icon" data-act="attach">${ico("attach_file", 18)}Attach</button><span class="hint">Up to 4 · 20 MB each</span></div></div>
+        ${filesRow("form")}<div class="attach-row"><button class="btn text with-icon" data-act="attach" data-target="form">${ico("attach_file", 18)}Attach</button><span class="hint">Up to 4 · 20 MB each</span></div></div>
       ${chat ? "" : `<div class="m16" style="padding-top:16px">${seg(["Start now", "Add to Todo"], c.runNow ? 0 : 1, "when")}</div>`}
       ${sectionHeader("Destination")}<div class="group">${picker("Project", p?.name, "project", "folder", chat ? "first" : "first")}${chat ? "" : picker("Board", b?.name, "board", "view_kanban", "middle", boards.length > 0)}${picker("Run on", co ? cardMachineName(co) : "", "checkout", "computer", "last", checkouts.length > 0)}</div>
       ${co ? sectionFooter("Checkout: " + co.name) : ""}
@@ -810,15 +899,26 @@
       const body = { project: c.project_id, title: c.title.trim(), prompt: c.prompt.trim(), provider: c.provider, model: c.model, effort: c.effort, workspace: c.workspace, start: c.chat || c.runNow, checkout: c.checkout_id };
       if (!c.chat) body.board = c.board_id; if (c.workspace === "worktree" && c.branch) body.branch = c.branch;
       save("provider", c.provider); save("model-" + c.provider, c.model);
+      if (S.files.length) body.attachments = await uploadFiles("form");
       const r = await api(c.chat ? "api/chat" : "api/card", body);
+      clearFiles("form");
       S.modal = null; S.creation = null; S.busy = false;
       if (r.id) { await refreshState(); openConversation(r.id); } else render();
     } catch (e) { S.busy = false; snackbar(e.message); render(); }
   }
   // ---- add a repository (clone + register on this machine; any number of repositories)
   function addRepository() { S.repo = { git_url: "", name: "", branch: "" }; S.modal = "repo"; render(); setTimeout(() => $("#r-url")?.focus(), 50); }
+  function addFolder() { S.repo = { kind: "folder", name: "" }; S.modal = "repo"; render(); setTimeout(() => $("#r-name")?.focus(), 50); }
+  const repoReady = (r) => !!r && (r.kind === "folder" ? r.name.trim() : r.git_url.trim());
   function repoScreen() {
     const r = S.repo; const ready = false; // toggled on the DOM after rendering
+    if (r.kind === "folder") return `<div class="screen">${appbar({ title: "New folder", cancel: true, confirm: `<button class="btn filled with-icon" style="margin-right:8px" data-act="submit-repo" ${ready ? "" : "disabled"}>${ico("create_new_folder", 18)}Create</button>` })}
+      <div class="content" data-scroll="repo" style="padding-top:8px;padding-bottom:24px">
+      <div class="m16" style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+        <div class="outlined-field"><label>Name</label><input id="r-name" data-field="name" placeholder="Folder name" autocapitalize="off" spellcheck="false"></div>
+      </div>
+      ${sectionFooter("Creates an empty Git repository in /data/projects/<name> on this machine and registers it as a project. A folder that already exists there is adopted. Letters, digits, . _ - only.")}
+      <div class="m16" style="padding:16px 16px"><button class="btn filled large" style="width:100%" data-act="submit-repo" ${ready ? "" : "disabled"}>${S.busy ? `<span class="spin"></span>` : ""}${S.busy ? "Creating…" : "Create folder"}</button></div></div></div>`;
     return `<div class="screen">${appbar({ title: "Add repository", cancel: true, confirm: `<button class="btn filled with-icon" style="margin-right:8px" data-act="submit-repo" ${ready ? "" : "disabled"}>${ico("download", 18)}Clone</button>` })}
       <div class="content" data-scroll="repo" style="padding-top:8px;padding-bottom:24px">
       <div class="m16" style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
@@ -830,10 +930,10 @@
       <div class="m16" style="padding:16px 16px"><button class="btn filled large" style="width:100%" data-act="submit-repo" ${ready ? "" : "disabled"}>${S.busy ? `<span class="spin"></span>` : ""}${S.busy ? "Cloning…" : "Clone and add"}</button></div></div></div>`;
   }
   async function submitRepository() {
-    const r = S.repo; if (!r || S.busy || !r.git_url.trim()) return;
+    const r = S.repo; if (!r || S.busy || !repoReady(r)) return;
     S.busy = true; render();
     try {
-      const res = await api("api/project", { git_url: r.git_url.trim(), name: r.name.trim(), branch: r.branch.trim() });
+      const res = await api("api/project", r.kind === "folder" ? { folder: r.name.trim() } : { git_url: r.git_url.trim(), name: r.name.trim(), branch: r.branch.trim() });
       S.modal = null; S.repo = null; S.busy = false;
       await refreshState(); render(); snackbar(res.existed ? `${res.name} was already registered.` : `${res.name} added.`);
     } catch (e) { S.busy = false; snackbar(e.message); render(); }
@@ -866,6 +966,35 @@
     });
   }
   // ---- Claude Code sign-in (add-on): the bridge runs `claude auth login`, the user opens the link and pastes the code
+  // ---- the add-on's own SSH key (generated in /data/.ssh on first start; authorize it on other machines)
+  function sshKeySection() {
+    if (!S.data.addon) return "";
+    if (!S.ssh) { S.ssh = { loading: true }; api("api/ssh").then((r) => { S.ssh = r; render(); }).catch((e) => { S.ssh = { error: e.message }; render(); }); }
+    const k = S.ssh;
+    let body;
+    if (k.loading) body = `<div class="t-body c-secondary" style="padding:12px 16px"><span class="spin"></span> Loading…</div>`;
+    else if (k.error || !k.public_key) body = `<div class="t-body c-secondary" style="padding:12px 16px">${esc(k.error || "No key yet: the add-on generates one at its next start.")}</div>`;
+    else body = `<div style="padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+        <div class="t-footnote c-secondary">Fingerprint ${esc(k.fingerprint || "")}</div>
+        <code data-ssh-key style="font:12px/16px ui-monospace,monospace;word-break:break-all;user-select:all">${esc(k.public_key)}</code>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn text with-icon" data-act="ssh-copy">${ico("content_copy", 18)}Copy key</button></div>
+        <div class="outlined-field"><label>Test connection</label><input id="ssh-target" placeholder="user@host" autocapitalize="off" spellcheck="false" autocomplete="off"></div>
+        <div style="display:flex;align-items:center;gap:12px"><button class="btn filled" data-act="ssh-test">Test</button><span class="t-footnote" data-ssh-result></span></div></div>`;
+    return sectionHeader("SSH key of this add-on") + `<div class="group" data-ssh>${body}</div>` +
+      sectionFooter("Add the public key to ~/.ssh/authorized_keys on the computers Dieter should reach (Git remotes over SSH, other machines). The private key stays in /data of the add-on.");
+  }
+  async function sshCopy() {
+    const key = $("[data-ssh-key]")?.textContent || "";
+    try { await navigator.clipboard.writeText(key); snackbar("Public key copied."); } catch (e) { snackbar("Copy failed: select the key and copy it by hand."); }
+  }
+  async function sshTest() {
+    const inp = $("#ssh-target"), out = $("[data-ssh-result]"), btn = $('[data-act="ssh-test"]'); if (!inp || !out) return;
+    const target = inp.value.trim(); if (!target) { inp.focus(); return; }
+    btn.disabled = true; out.textContent = "Connecting…";
+    try { const r = await api("api/ssh/test", { target }); out.textContent = r.ok ? `Connected: ${r.output}` : `Failed: ${r.error}`; out.style.color = r.ok ? "var(--success)" : "var(--error,#d33)"; }
+    catch (e) { out.textContent = e.message; out.style.color = "var(--error,#d33)"; }
+    btn.disabled = false;
+  }
   function claudeAccountSection() {
     const auth = S.data.claude_auth; if (!auth) return "";
     const hasQuota = (S.data.quota || []).some((a) => a.provider === "anthropic_claude" && a.windows.length);
@@ -944,7 +1073,7 @@
       case "back": pop(); break;
       case "new": newConversation(S.tab === "chats"); break;
       case "new-chat": newConversation(true); break;
-      case "cancel-modal": S.modal = null; S.creation = null; S.repo = null; render(); break;
+      case "cancel-modal": S.modal = null; S.creation = null; S.repo = null; clearFiles("form"); render(); break;
       case "open": openConversation(id); break;
       case "project": showFrom(null, { kind: "project", id }); break;
       case "board": { const base = top().kind === "project" ? top() : null; showFrom(base, { kind: "board", id }); break; }
@@ -967,7 +1096,11 @@
       case "machine": push({ kind: "machine", id }); break;
       case "refresh": refreshState().then(render); break;
       case "agent-sheet": agentSheet(); break;
-      case "attach": snackbar("Attachments are only available in the Dieter app."); break;
+      case "attach": pickFiles(el.dataset.target || (S.modal ? "form" : "conv")); break;
+      case "rm-file": removeFile(el.dataset.target, Number(el.dataset.i)); break;
+      case "q-opt": questionToggle(el.dataset.q, el.dataset.x, el.dataset.o); break;
+      case "q-answer": questionSubmit(el.dataset.q, false); break;
+      case "q-decline": questionSubmit(el.dataset.q, true); break;
       case "picker": openPicker(el.dataset.key); break;
       case "pick": { const d = S.dialog; closeDialog(); d?.onPick(el.dataset.value); break; } // close first: onPick may open the next dialog (model → effort)
       case "close-dialog": if (el.tagName === "BUTTON" || e.target === el) { if ($("[data-claude-login]")) claudeLoginCancel(); else closeDialog(); } break; // the Cancel button or the scrim itself; clicks inside the dialog body do nothing
@@ -977,6 +1110,8 @@
       case "toggle": S.creation[el.dataset.field] = !S.creation[el.dataset.field]; render(); break;
       case "submit-creation": submitCreation(); break;
       case "submit-repo": submitRepository(); break;
+      case "ssh-copy": sshCopy(); break;
+      case "ssh-test": sshTest(); break;
       case "claude-login": claudeLogin(); break;
       case "claude-login-code": claudeLoginCode(); break;
       case "claude-login-cancel": claudeLoginCancel(); break;
@@ -987,7 +1122,8 @@
   });
   document.addEventListener("input", (e) => {
     const s = e.target.closest("[data-search]"); if (s) { S.search[s.dataset.search] = s.value; const f = e.target; render(); const n = $(`[data-search="${s.dataset.search}"]`); if (n && n !== f) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
-    const f = e.target.closest("[data-field]"); if (f && S.modal === "repo" && S.repo) { S.repo[f.dataset.field] = f.value; document.querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !S.repo.git_url.trim())); return; }
+    const qf = e.target.closest("[data-qfree]"); if (qf) { const q = (S.data.questions || []).find((z) => z.id === qf.dataset.qfree); if (q) { answerState(q)[qf.dataset.x].freeform = qf.value; const card = qf.closest("[data-question]"); const btn = card?.querySelector('[data-act="q-answer"]'); if (btn) btn.disabled = false; } return; }
+    const f = e.target.closest("[data-field]"); if (f && S.modal === "repo" && S.repo) { S.repo[f.dataset.field] = f.value; document.querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !repoReady(S.repo))); return; }
     if (f && S.creation) { S.creation[f.dataset.field] = f.value; const ready = S.creation.prompt.trim() && S.creation.project_id && (S.creation.chat || S.creation.board_id); document.querySelectorAll('[data-act="submit-creation"]').forEach((b) => (b.disabled = !ready)); }
   });
   function openMenu(el) {
@@ -996,12 +1132,13 @@
     else if (menu === "board") { const b = board(id); const boards = (S.data.boards || []); showMenu(el, [{ title: "Switch board" }, ...boards.map((x) => ({ id: "b-" + x.id, label: x.name, sub: project(x.project_id)?.name, checked: x.id === id, onClick: () => { const st = stack(); S.stacks[S.tab] = st.map((r) => (r.kind === "board" ? { kind: "board", id: x.id } : r)); render(); } })), "-", { id: "archived", label: "Archived cards", icon: "archive", onClick: () => snackbar("Archived cards are listed in the Dieter app.") }]); }
     else if (menu === "project") showMenu(el, [{ id: "open", label: "Open project", icon: "folder_open", onClick: () => showFrom(null, { kind: "project", id }) }, { id: "copy", label: "Copy path", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(project(id)?.path || "") }]);
     else if (menu === "inbox-filter") showMenu(el, [{ title: "Project" }, { id: "all", label: "All projects", checked: !S.inboxProject, onClick: () => { S.inboxProject = ""; render(); } }, ...(S.data.projects || []).map((p) => ({ id: "p-" + p.id, label: p.name, checked: S.inboxProject === p.id, onClick: () => { S.inboxProject = p.id; render(); } })), "-", { id: "theme", label: "Theme: " + (load("theme", "system")), icon: "brightness_6", onClick: () => { const n = { system: "dark", dark: "light", light: "system" }[load("theme", "system")]; save("theme", n); applyTheme(); } }]);
-    else if (menu === "projects-add") showMenu(el, [{ id: "np", label: "Add repository", icon: "create_new_folder", onClick: () => addRepository() }, { id: "nf", label: "New folder", icon: "folder", onClick: () => snackbar("Folders are managed in the Dieter app.") }]);
+    else if (menu === "projects-add") showMenu(el, [{ id: "np", label: "Add repository", icon: "create_new_folder", onClick: () => addRepository() }, { id: "nf", label: "New folder", icon: "folder", onClick: () => addFolder() }]);
     else if (menu === "chats") showMenu(el, [{ id: "live", label: "Current chats", icon: "forum", checked: true }, { id: "arch", label: "Archived chats", icon: "archive", onClick: () => snackbar("Archived chats are listed in the Dieter app.") }]);
   }
   // Escape closes what is on top: menu, dialog, then the New task / Add repository form
   document.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && e.target.id === "claude-code") { e.preventDefault(); claudeLoginCode(); return; }
+    if (e.key === "Enter" && e.target.id === "ssh-target") { e.preventDefault(); sshTest(); return; }
     if (e.key !== "Escape") return;
     if (S.menu) { closeMenu(); return; }
     if (S.dialog) { if ($("[data-claude-login]")) claudeLoginCancel(); else closeDialog(); return; }
@@ -1019,5 +1156,5 @@
   const startCard = q.get("card");
   if (startCard) openAtStart(startCard);
   else if (!startTab && !SNAP) api("api/focus?consume=1").then((f) => { if (f && f.id) openAtStart(f.id); }).catch(() => {});
-  if (!startCard && !startTab && S.data === null) { const once = setInterval(() => { if (S.data) { clearInterval(once); const b = S.data.boards?.[0]; if (b && twoPane()) { S.stacks.projects = [{ kind: "root", tab: "projects" }, { kind: "board", id: b.id }]; render(); } } }, 150); }
+  if (!startCard && !startTab && S.data === null) { const once = setInterval(() => { if (S.data) { clearInterval(once); const b = S.data.boards?.[0]; if (b && twoPane() && (S.stacks.projects || []).length <= 1) { S.stacks.projects = [{ kind: "root", tab: "projects" }, { kind: "board", id: b.id }]; render(); } } }, 150); } // default board on wide screens, unless something was opened already
 })();
