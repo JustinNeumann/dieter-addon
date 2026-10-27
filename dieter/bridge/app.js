@@ -232,6 +232,7 @@
     const formState = S.modal === "repo" ? S.repo : S.creation;
     if (formState) $("#modal").querySelectorAll("[data-field]").forEach((f) => { const v = formState[f.dataset.field] ?? ""; if (f.value !== v) f.value = v; });
     if (S.sch?.form) document.querySelectorAll("[data-sfield]").forEach((f) => { const v = S.sch.form[f.dataset.sfield] ?? ""; if (f.value !== v) f.value = v; });
+    if (S.dev) document.querySelectorAll("[data-dfield]").forEach((f) => { const v = S.dev[f.dataset.dfield] ?? ""; if (f.value !== v) f.value = v; });
     if (S.modal === "creation" && S.creation) { const c = S.creation; const ok = !!(c.prompt.trim() && c.project_id && (c.chat || c.board_id) && !S.busy); $("#modal").querySelectorAll('[data-act="submit-creation"]').forEach((b) => (b.disabled = !ok)); }
     if (S.modal === "repo" && S.repo) $("#modal").querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !repoReady(S.repo) || S.busy));
     syncConversation();
@@ -514,6 +515,7 @@
       return changesScreen({ projectId: pid }, opts);
     }
     if (page === "schedules") return schedulesScreen(route, opts);
+    if (page === "devices") return devicesScreen(route, opts);
     if (page === "files") {
       const projects = S.data.projects || [];
       const pid = route.projectId || (projects.length === 1 ? projects[0].id : null);
@@ -543,6 +545,58 @@
     return `<div class="screen">${appbar({ title: m.name, subtitle: m.online ? "Online" : "Offline", back: opts.back })}<div class="content" data-scroll="machine">
       ${sectionHeader("Connection")}${kv([["Status", m.online ? "Online" : "Offline"], ["Route", m.route || "direct"], ["Dieter", m.version || ""]])}
       ${info && !info.error ? sectionHeader("System") + kv([["System", info.os], ["Model", info.cpu], ["Cores", String(info.cores || "")], ["Uptime", `${Math.floor((info.uptime_s || 0) / 86400)}d ${Math.floor(((info.uptime_s || 0) % 86400) / 3600)}h`]]) : ""}${load}</div></div>`;
+  }
+
+  // ---- Devices: the account's trusted devices (dieter device …); approve a new app or machine by its code
+  const DEVICE_KIND_ICON = { daemon: "computer", client: "smartphone", recovery: "key" };
+  const TRUST_COPY = {
+    TRUSTED: ["verified", "Trusted", "This add-on's daemon is a trusted device of your Dieter account."],
+    PENDING: ["hourglass_top", "Waiting for approval", "Type the code below on a device you already trust (the Dieter app, or `dieter device approve CODE` on a machine)."],
+    NO_ROSTER: ["key_off", "No roster", "Your account has no device roster yet; run `dieter device init` on the first machine."],
+    REVOKED: ["block", "Removed", "Another device removed this one. Re-enroll the add-on to pair again."],
+    CONFLICT: ["warning", "Conflict", "This daemon's roster conflicts with the gateway's. Re-enroll the add-on to pair again."],
+    NOT_ENROLLED: ["cloud_off", "Not enrolled", "The add-on's daemon is not enrolled in a Dieter account (it serves the page locally). Pairing codes of your apps are approved on an enrolled machine: `dieter device approve CODE` there, or Devices in the Dieter app."],
+    UNAVAILABLE: ["error", "Unavailable", "The daemon did not answer the device status."],
+  };
+  function devicesScreen(route, opts) {
+    S.dev ||= { data: undefined, code: "" };
+    const d = S.dev.data; if (d === undefined) loadDevices();
+    const actions = iconAction("refresh", "dev-refresh", "", "Reload");
+    let body;
+    if (!d) body = spinnerCenter();
+    else {
+      const [glyph, title, msg] = TRUST_COPY[d.state] || ["devices", d.state || "Unknown", d.error || ""];
+      const can = d.state === "TRUSTED";
+      const banner = `<div class="banner ${can ? "" : "warning"}" style="margin-top:12px" data-dev-state="${esc(d.state)}">${ico(glyph, 22)}<div><div class="t">${esc(title)}</div><div class="m">${esc(msg)}${d.error && d.state !== "NOT_ENROLLED" ? " " + esc(d.error) : ""}</div></div></div>`;
+      const code = d.state === "PENDING" && d.code ? `<div class="m16" style="padding-top:12px"><div class="ccard" style="text-align:center"><div class="t-footnote c-secondary">THIS DAEMON'S CODE</div><div class="t-mono" style="font-size:22px;letter-spacing:.12em;margin-top:6px" data-dev-code>${esc(d.code)}</div></div></div>` : "";
+      const approve = `${sectionHeader("Add a device")}<div class="m16"><div class="ccard" style="border-radius:22px;padding:12px;display:flex;flex-direction:column;gap:10px">
+        <div class="outlined-field"><label>Code shown on the new device</label><input id="dev-code" data-dfield="code" placeholder="ABCD-EFGH-JKMN-PQRS" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24" ${can ? "" : "disabled"}></div>
+        <button class="btn filled with-icon" style="align-self:flex-end" data-act="dev-approve" ${can && S.dev.code.replace(/[\s-]/g, "").length === 16 && !S.busy ? "" : "disabled"}>${S.busy ? `<span class="spin"></span>` : ico("verified_user", 18)}Approve</button></div></div>
+        ${sectionFooter("Only type a code you see on your own new device: whoever's code you approve gets full access to your machines.")}`;
+      const reqs = d.requests || [];
+      const waiting = reqs.length ? sectionHeader("Waiting for approval") + `<div class="group">${reqs.map((r, i) => listRow({ title: r.name || r.id, subtitle: [r.kind, r.platform, r.expires_at ? "expires " + fmtWhen(r.expires_at) : ""].filter(Boolean).join(" · "), glyph: DEVICE_KIND_ICON[r.kind] || "devices", glyphTint: "var(--warning)", position: pos(i, reqs.length) })).join("")}</div>${sectionFooter("Codes are never listed here; the new device shows its own.")}` : "";
+      const devs = d.devices || [];
+      const list = devs.length ? sectionHeader("Devices") + `<div class="group">${devs.map((x, i) => listRow({ title: x.name || x.id, subtitle: [x.kind === "daemon" ? "machine" : x.kind === "client" ? "app" : x.kind, x.platform, x.this ? "this daemon" : ""].filter(Boolean).join(" · "), glyph: DEVICE_KIND_ICON[x.kind] || "devices", position: pos(i, devs.length), trailing: can && !x.this && x.kind !== "recovery" ? `<button class="iconbtn" data-act="dev-revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}" title="Remove">${ico("delete", 22)}</button>` : "" })).join("")}</div>` : "";
+      body = banner + code + approve + waiting + list;
+    }
+    return `<div class="screen">${appbar({ title: "Devices", subtitle: d?.synced_at ? "Synced " + fmtWhen(d.synced_at) : "", back: opts.back, actions })}<div class="content" data-scroll="devices">${body}</div></div>`;
+  }
+  async function loadDevices() {
+    S.dev.data = null;
+    try { S.dev.data = await api("api/devices"); } catch (e) { S.dev.data = { state: "UNAVAILABLE", error: e.message, devices: [], requests: [] }; }
+    render();
+  }
+  async function approveDevice() {
+    const code = (S.dev?.code || "").replace(/[\s-]/g, "").toUpperCase(); if (code.length !== 16 || S.busy) return;
+    S.busy = true; render();
+    try { const r = await api("api/devices/approve", { code }); S.busy = false; S.dev.code = ""; snackbar(`Approved ${r.device?.name || "the device"}`); S.dev.data = undefined; render(); }
+    catch (e) { S.busy = false; snackbar("Not approved: " + e.message); render(); }
+  }
+  async function revokeDevice(id, name) {
+    if (!confirm(`Remove "${name || id}" from your account's devices? It stops being accepted at once.`)) return;
+    S.busy = true; render();
+    try { await api(`api/devices/${encodeURIComponent(id)}/revoke`, {}); S.busy = false; snackbar("Device removed"); S.dev.data = undefined; render(); }
+    catch (e) { S.busy = false; snackbar("Not removed: " + e.message); render(); }
   }
 
   // ---- Schedules: recurring tasks of the daemon's scheduler (dieter schedule …)
@@ -1305,6 +1359,9 @@
         push({ kind: "tool", page: "files", projectId: r.projectId, cardId: r.cardId, path: dir ? el.dataset.path : r.path, file: dir ? undefined : el.dataset.path }); break; }
       case "files-hidden": S.showHidden = !S.showHidden; render(); break;
       case "schedule": { const r = top(); push({ kind: "tool", page: "schedules", scheduleId: id, projectId: r?.projectId }); break; }
+      case "dev-refresh": S.dev.data = undefined; render(); break;
+      case "dev-approve": approveDevice(); break;
+      case "dev-revoke": e.stopPropagation(); revokeDevice(id, el.dataset.name); break;
       case "sched-new": openScheduleForm(el.dataset.project || top()?.projectId); break;
       case "sched-refresh": S.sch.list = {}; render(); break;
       case "sched-pick": schedPick(el.dataset.key); break;
@@ -1345,6 +1402,7 @@
   document.addEventListener("input", (e) => {
     const s = e.target.closest("[data-search]"); if (s) { S.search[s.dataset.search] = s.value; const f = e.target; render(); const n = $(`[data-search="${s.dataset.search}"]`); if (n && n !== f) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
     const qf = e.target.closest("[data-qfree]"); if (qf) { const q = (S.data.questions || []).find((z) => z.id === qf.dataset.qfree); if (q) { answerState(q)[qf.dataset.x].freeform = qf.value; const card = qf.closest("[data-question]"); const btn = card?.querySelector('[data-act="q-answer"]'); if (btn) btn.disabled = false; } return; }
+    const df = e.target.closest("[data-dfield]"); if (df && S.dev) { S.dev[df.dataset.dfield] = df.value; const ok = df.value.replace(/[\s-]/g, "").length === 16 && !S.busy; document.querySelectorAll('[data-act="dev-approve"]').forEach((b) => (b.disabled = !ok)); return; }
     const sf = e.target.closest("[data-sfield]"); if (sf && S.sch?.form) { S.sch.form[sf.dataset.sfield] = sf.value; schedFormSync(); if (sf.dataset.sfield === "cron") schedPreviewDebounced(); return; }
     const f = e.target.closest("[data-field]"); if (f && S.modal === "repo" && S.repo) { S.repo[f.dataset.field] = f.value; document.querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !repoReady(S.repo))); return; }
     if (f && S.creation) { S.creation[f.dataset.field] = f.value; const ready = S.creation.prompt.trim() && S.creation.project_id && (S.creation.chat || S.creation.board_id); document.querySelectorAll('[data-act="submit-creation"]').forEach((b) => (b.disabled = !ready)); }
@@ -1365,6 +1423,7 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && e.target.id === "claude-code") { e.preventDefault(); claudeLoginCode(); return; }
     if (e.key === "Enter" && e.target.id === "ssh-target") { e.preventDefault(); sshTest(); return; }
+    if (e.key === "Enter" && e.target.id === "dev-code") { e.preventDefault(); approveDevice(); return; }
     if (e.key !== "Escape") return;
     if (S.menu) { closeMenu(); return; }
     if (S.dialog) { if ($("[data-claude-login]")) claudeLoginCancel(); else closeDialog(); return; }

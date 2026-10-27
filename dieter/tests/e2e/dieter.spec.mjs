@@ -389,3 +389,24 @@ test("the most recently used project is listed first, preselected in New task an
   await page.locator('#list [data-act="back"]').click();
   await expect(page.locator('[data-act="project"]').first()).toContainText("Hello-World");
 });
+
+test("Devices shows the daemon's trust state and refuses a code it cannot approve", async ({ page, request }) => {
+  const d = await (await request.get("api/devices")).json();
+  expect(["NOT_ENROLLED", "NO_ROSTER", "PENDING", "TRUSTED", "UNAVAILABLE"]).toContain(d.state);
+  const bad = await request.post("api/devices/approve", { data: { code: "nope" } });
+  expect(bad.ok()).toBe(false);
+  const bad2 = await request.post("api/devices/approve", { data: { code: "AAAA-BBBB-CCCC-DDDD" } });
+  expect(bad2.ok()).toBe(false); // no roster here, or no device waiting with that code
+  await page.goto("");
+  await page.locator('#rail [data-act="tab"][data-tab="tools"]').click();
+  await page.locator('[data-act="tool"][data-page="devices"]').click();
+  await expect(page.locator("[data-dev-state]")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#panes")).toContainText("Add a device");
+  if (d.state === "TRUSTED") {
+    await page.locator("#dev-code").fill("AAAA-BBBB-CCCC-DDDD");
+    await page.locator('[data-act="dev-approve"]').click();
+    await expect(page.locator("#snackbar")).toContainText("Not approved");
+  } else {
+    await expect(page.locator("#dev-code")).toBeDisabled();
+  }
+});

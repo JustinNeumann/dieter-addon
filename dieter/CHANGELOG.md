@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.13 (2026-10-27)
+
+- Devices: Tools → Devices shows the trust state of the add-on's daemon, the account's devices, the
+  devices waiting for approval, and a field for the code a new app or machine shows (`dieter device
+  status/requests/approve/revoke`, bridge `/api/devices`). Note: an add-on daemon that is not
+  enrolled in a Dieter account has no roster, so the page says so and codes must be approved on an
+  enrolled machine or in the app.
+
 ## 0.6.429.12 (2026-10-27)
 
 - Antigravity: a card with an effort other than its model's own level (e.g. Gemini 3.8 Flash (High) with

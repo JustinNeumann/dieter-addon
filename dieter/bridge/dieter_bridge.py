@@ -1073,6 +1073,62 @@ def patch_counts(patch):
     return added, removed
 
 
+DEVICE_ID_RE = re.compile(r"^dv_[a-z0-9]{1,64}$")
+DEVICE_CODE_RE = re.compile(r"^[A-Za-z0-9]{16}$")
+
+
+def _enum(v, prefix):
+    v = str(v or "")
+    return v[len(prefix):] if v.startswith(prefix) else v
+
+
+def norm_device(d):
+    return {"id": d.get("deviceId") or d.get("device_id") or "", "kind": _enum(d.get("kind"), "DEVICE_KIND_").lower(),
+            "platform": d.get("platform") or "", "name": d.get("name") or "", "this": bool(d.get("thisDevice") or d.get("this_device")),
+            "added_by": d.get("addedBy") or d.get("added_by") or "", "requested_at": d.get("requestedAt") or d.get("requested_at"),
+            "expires_at": d.get("expiresAt") or d.get("expires_at"), "request_id": d.get("id") if str(d.get("id") or "").startswith("pr_") else ""}
+
+
+def device_status():
+    """Trust state of the add-on's daemon, its devices and the devices waiting for approval.
+    An add-on daemon that is not enrolled in a Dieter account has no roster: state NOT_ENROLLED."""
+    try:
+        st = run(["device", "status", "--format", "json"], timeout=30) or {}
+    except CliError as e:
+        msg = str(e)
+        return {"state": "NOT_ENROLLED" if "enrolled" in msg.lower() else "UNAVAILABLE", "error": msg, "devices": [], "requests": []}
+    if not isinstance(st, dict):
+        return {"state": "UNAVAILABLE", "error": str(st)[:300], "devices": [], "requests": []}
+    out = {"state": _enum(st.get("state"), "TRUST_STATE_") or "UNKNOWN", "device_id": st.get("deviceId") or "",
+           "head": st.get("headSequence"), "synced_at": st.get("syncedAt"), "code": st.get("pairingCode") or st.get("code") or "",
+           "devices": [norm_device(d) for d in st.get("devices") or [] if isinstance(d, dict)], "requests": []}
+    try:
+        rq = run(["device", "requests", "--format", "json"], timeout=30) or {}
+        out["requests"] = [norm_device(r) for r in unwrap(rq, "requests") if isinstance(r, dict)]
+    except CliError as e:
+        out["requests_error"] = str(e)
+    return out
+
+
+def device_approve(code):
+    code = re.sub(r"[\s-]", "", str(code or "")).upper()
+    if not DEVICE_CODE_RE.match(code):
+        raise CliError("the code has 16 letters and digits, for example ABCD-EFGH-JKMN-PQRS")
+    out = run(["device", "approve", "--format", "json", code], timeout=60)
+    log("devices: approved a device")
+    STATE.touch()
+    return {"ok": True, "device": norm_device(out.get("device") or out) if isinstance(out, dict) else None}
+
+
+def device_revoke(device_id):
+    if not DEVICE_ID_RE.match(device_id):
+        raise CliError("bad device id")
+    run(["device", "revoke", "--format", "json", device_id], timeout=60)
+    log("devices: revoked", device_id)
+    STATE.touch()
+    return {"ok": True}
+
+
 SCHEDULE_ID_RE = re.compile(r"^sch_[a-z0-9]{1,64}$")
 SCHEDULE_ACTIONS = ("run", "pause", "resume", "delete")
 
@@ -1592,6 +1648,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"raw": changeset(None, parts[2])})
             if parts[1:] == ["schedules"]:
                 return self.send_json(schedule_list(q.get("project", [""])[0]))
+            if parts[1:] == ["devices"]:
+                return self.send_json(device_status())
             if parts[1:] == ["schedules", "preview"]:
                 return self.send_json(schedule_preview(q.get("cron", [""])[0], q.get("tz", ["UTC"])[0]))
             if len(parts) == 3 and parts[1] == "schedules":
@@ -1670,6 +1728,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.create(parts[1], body))
             if parts[1:] == ["schedules"]:
                 return self.send_json(schedule_create(body))
+            if parts[1:] == ["devices", "approve"]:
+                return self.send_json(device_approve(body.get("code")))
+            if len(parts) == 4 and parts[1] == "devices" and parts[3] == "revoke":
+                return self.send_json(device_revoke(parts[2]))
             if len(parts) == 4 and parts[1] == "schedules":
                 return self.send_json(schedule_action(parts[2], parts[3]))
             if parts[1:] == ["project"]:

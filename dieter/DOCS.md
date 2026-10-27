@@ -123,6 +123,16 @@ resumes it, lists the occurrence history (each entry opens its card) and deletes
 and history stay). The scheduler runs inside the add-on's daemon, so schedules fire while Home
 Assistant is up. Agents themselves can also create schedules and cards with the CLI inside a turn.
 
+## Devices
+
+**Tools → Devices** shows the add-on daemon's trust state, the account's machines, apps and recovery
+key, the devices waiting to join, and **Add a device**: type the 16-character code a new app or
+machine shows and approve it; **Remove** takes a device out of the roster. Only type a code you see on
+your own new device. This works when the add-on's daemon is itself a trusted device of your account,
+which needs `dieter daemon enroll` against your gateway; an add-on without enrollment (the default)
+shows "Not enrolled", and the code is then approved on an enrolled machine (`dieter device approve
+CODE`) or under Devices in the Dieter app.
+
 ## Questions from the agent and attachments
 
 Claude Code may ask the user a question with options (its AskUserQuestion tool). Dieter's daemon has
