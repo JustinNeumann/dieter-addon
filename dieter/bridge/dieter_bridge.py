@@ -45,6 +45,7 @@ Endpoints:
 Only stdlib; no pip dependencies.
 """
 import base64
+import concurrent.futures
 import ipaddress
 import pty
 import json
@@ -774,6 +775,59 @@ def setup_projects():
             log(f"projects: {pr.get('name') or pr.get('git_url')}: {e}")
 
 
+# --------------------------------------------------------------------------- workspace changes
+DIFF_LIMIT = 4_000_000      # bytes of patch fetched per file for the line counts
+COUNTED_FILES = 150         # files per changeset that get counts (the rest is listed without)
+
+
+def workspace_cmd(args, cid, project_id):
+    """`dieter workspace ...` for a card, or for its project when the daemon answers that a
+    project-directory checkout's changes are project-scoped (and for project-only requests)."""
+    if not cid:
+        return run(args + ["--project", project_id], timeout=30)
+    try:
+        return run(args + [cid], timeout=30)
+    except CliError as e:
+        if project_id and "project-scoped" in str(e):
+            return run(args + ["--project", project_id], timeout=30)
+        raise
+
+
+def patch_counts(patch):
+    """Added / removed lines of a unified diff."""
+    added = removed = 0
+    for line in (patch or "").split("\n"):
+        if line.startswith("+") and not line.startswith("+++"):
+            added += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            removed += 1
+    return added, removed
+
+
+def changeset(cid, project_id):
+    """`workspace changes` plus additions/deletions per file: the CLI lists paths and statuses only, so the
+    page showed +0 −0 for everything. The counts come from each file's patch at the changeset's revision
+    (a diff without the revision is refused once the checkout changed)."""
+    out = workspace_cmd(["workspace", "changes"], cid, project_id)
+    files = out.get("files") if isinstance(out, dict) else None
+    if not files:
+        return out
+    rev = out.get("revision")
+    args = ["workspace", "diff", "--limit", str(DIFF_LIMIT)] + (["--revision", rev] if rev else [])
+
+    def count(f):
+        try:
+            d = workspace_cmd(args + ["--path", f["path"]], cid, project_id) or {}
+            f["additions"], f["deletions"] = patch_counts(d.get("patch"))
+            if d.get("truncated"):
+                f["truncated"] = True
+        except CliError as e:
+            f["count_error"] = str(e)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+        list(ex.map(count, [f for f in files[:COUNTED_FILES] if isinstance(f, dict) and f.get("path")]))
+    return out
+
+
 # --------------------------------------------------------------------------- state poller
 class State:
     def __init__(self):
@@ -802,8 +856,12 @@ class State:
             status = run(["status", "--format", "json"], timeout=15) or {}
             projects = [p for p in unwrap(run(["project", "list", "--format", "json"], timeout=15), "projects")]
             boards = unwrap(run(["board", "list", "--format", "json"], timeout=15), "boards")
-            cards = [norm_card(c) for c in unwrap(run(["card", "list", "--format", "json", "--limit", "200"], timeout=20), "cards")]
-            chats = [norm_card(c, "chat") for c in unwrap(run(["chat", "list", "--format", "json"], timeout=15), "chats")]
+            # `card list` / `chat list` without --project answer for one project only (the CLI's default),
+            # so every further project's cards would never reach the page: list per project and merge.
+            cards, chats = [], []
+            for p in projects:
+                cards += [norm_card(c) for c in unwrap(run(["card", "list", "--project", p["id"], "--format", "json", "--limit", "200"], timeout=20), "cards")]
+                chats += [norm_card(c, "chat") for c in unwrap(run(["chat", "list", "--project", p["id"], "--format", "json"], timeout=15), "chats")]
         except CliError as e:
             with self.lock:
                 if self.data.get("ok") or self.data.get("error") != str(e):
@@ -1089,7 +1147,7 @@ class Handler(BaseHTTPRequestHandler):
                 rev, data = STATE.snapshot()
                 return self.send_json({"machines": data.get("machines", [])})
             if len(parts) == 4 and parts[1] == "project" and parts[3] == "changes":
-                return self.send_json({"raw": run(["workspace", "changes", "--project", parts[2]], timeout=30)})
+                return self.send_json({"raw": changeset(None, parts[2])})
             if parts[1:] == ["state"]:
                 rev, data = STATE.snapshot()
                 return self.send_json({"rev": rev, **data})
@@ -1241,30 +1299,16 @@ class Handler(BaseHTTPRequestHandler):
         c = out.get("card") if isinstance(out, dict) and "card" in out else out
         return {"ok": True, "id": (c or {}).get("id"), "card": norm_card(c or {}, kind)}
 
-    def changes(self, cid):
+    def card_project(self, cid):
         rev, data = STATE.snapshot()
         card = next((c for c in data.get("cards", []) if c["id"] == cid), None)
-        try:
-            out = run(["workspace", "changes", cid], timeout=30)
-        except CliError as e:
-            if card and card.get("project_id") and "project-scoped" in str(e):
-                out = run(["workspace", "changes", "--project", card["project_id"]], timeout=30)
-            else:
-                raise
-        return {"raw": out}
+        return (card or {}).get("project_id")
+
+    def changes(self, cid):
+        return {"raw": changeset(cid, self.card_project(cid))}
 
     def diff(self, cid, path):
-        rev, data = STATE.snapshot()
-        card = next((c for c in data.get("cards", []) if c["id"] == cid), None)
-        args = ["workspace", "diff", "--path", path, "--limit", "400"]
-        try:
-            out = run(args + [cid], timeout=30)
-        except CliError as e:
-            if card and card.get("project_id") and "project-scoped" in str(e):
-                out = run(args + ["--project", card["project_id"]], timeout=30)
-            else:
-                raise
-        return {"raw": out}
+        return {"raw": workspace_cmd(["workspace", "diff", "--path", path, "--limit", "400"], cid, self.card_project(cid))}
 
     def ha_summary(self):
         rev, d = STATE.snapshot()

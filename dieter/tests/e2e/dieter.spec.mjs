@@ -61,6 +61,37 @@ test("a task runs on the mock harness and its conversation streams", async ({ pa
   expect(cardId).toBeTruthy();
 });
 
+test("a task for a second project is listed too (the bridge collects cards per project)", async ({ page, request }) => {
+  // regression: `dieter card list` without --project answers for one project only, so cards of any further
+  // project were created and run but never reached api/state or the page
+  const r = await request.post("api/project", { data: { git_url: REPO, name: "Second-Repo" } });
+  expect(r.ok()).toBeTruthy();
+  let st = await state(request);
+  const second = st.projects.find((p) => p.name === "Second-Repo");
+  expect(second).toBeTruthy();
+  const board = st.boards.find((b) => b.project_id === second.id);
+  expect(board).toBeTruthy();
+  const created = await request.post("api/card", { data: { project: second.id, board: board.id, title: `Second ${stamp}`, prompt: `second ${stamp}`, provider: "mock", model: "mock", start: false } });
+  expect(created.ok()).toBeTruthy();
+  let card;
+  for (let i = 0; i < 20 && !card; i++) {
+    st = await state(request);
+    card = st.cards.find((c) => c.title === `Second ${stamp}`);
+    if (!card) await new Promise((f) => setTimeout(f, 1000));
+  }
+  expect(card).toBeTruthy();
+  expect(card.project_id).toBe(second.id);
+  expect(st.cards.some((c) => c.title === `E2E ${stamp}`)).toBe(true); // the first project's card is still there
+  expect(new Set(st.cards.map((c) => c.project_id)).size).toBeGreaterThanOrEqual(2);
+  // the second project's board shows it
+  await page.goto("");
+  await page.locator('[data-act="project"]').filter({ hasText: "Second-Repo" }).click();
+  await page.locator('[data-act="board"]').first().click();
+  const todoTab = page.locator('[data-act="lane"][data-lane="todo"]'); // narrow board pane: lanes are tabs, Running first
+  if (await todoTab.count()) await todoTab.first().click();
+  await expect(page.locator("#panes")).toContainText(`Second ${stamp}`, { timeout: 30_000 });
+});
+
 test("typing in the chat field keeps the focus and sending gets a reply", async ({ page }) => {
   await page.goto(`?card=${cardId || ""}`);
   const draft = page.locator("#draft");

@@ -2,6 +2,16 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.4 (2026-10-27)
+
+- Tasks and chats of every project are listed: the bridge asked the CLI for cards without a project, and
+  `dieter card list` then answers for one project only, so cards created for any further project were
+  created and run but never shown on the page (nor counted in `/api/ha`). The state is now collected per
+  project and merged.
+- Changes (conversation pane and Tools → Changes) show the added and removed lines per file; the CLI's
+  change list has no counts, so the bridge counts them from each file's patch (at the changeset's
+  revision) and the page no longer prints +0 −0 everywhere.
+
 ## 0.6.429.3 (2026-10-27)
 
 - Inbox usage strip: one bar per configured LLM backend (Claude Code, Antigravity, OpenAI), showing the
