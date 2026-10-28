@@ -121,6 +121,9 @@ test("typing in the chat field keeps the focus and sending gets a reply", async 
   await expect(draft).toHaveValue("Hi da");
   await expect(page.locator(".sendbtn")).toBeEnabled();
   await page.keyboard.press("Enter");
+  // the sent message shows at once, before the stream brings it
+  await expect(page.locator("#panes .msg-user").last()).toContainText("Hi da", { timeout: 2_000 });
+  await expect(draft).toHaveValue("");
   await expect(page.locator("#panes")).toContainText("Mock harness received: Hi da", { timeout: 90_000 });
 });
 

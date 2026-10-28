@@ -39,7 +39,7 @@
   // ------------------------------------------------------------------ state
   const S = {
     data: null, tab: "projects", stacks: {}, modal: null, dialog: null, menu: null,
-    conv: { id: null, kind: null, data: null, es: null, draft: "", following: true, expanded: {}, agent: null, files: [] },
+    conv: { id: null, kind: null, data: null, es: null, alive: 0, draft: "", following: true, expanded: {}, agent: null, files: [], outbox: [] },
     qa: {},        // answers being composed for the agents' questions, by question id
     files: [],     // attachments picked for the New task/chat form
     seen: load("seen", {}), pins: load("pins", {}), lanePage: {}, search: {}, inboxFilter: "all", collapsed: load("collapsed", {}),
@@ -158,8 +158,9 @@
   function connect() {
     if (SNAP) { api("api/state").then((d) => { S.data = d; render(); }); return; }
     if (S.es) S.es.close();
-    S.es = new EventSource("api/events");
-    S.es.addEventListener("state", (e) => { S.data = JSON.parse(e.data); render(); });
+    S.es = new EventSource("api/events"); S.esAlive = Date.now();
+    S.es.addEventListener("state", (e) => { S.esAlive = Date.now(); S.data = JSON.parse(e.data); render(); });
+    S.es.addEventListener("ping", () => { S.esAlive = Date.now(); });
   }
 
   // ------------------------------------------------------------------ navigation (MobileNavigation)
@@ -873,6 +874,8 @@
       out.push(`<div class="msg-assistant">${groups}${(row.plans || []).map(planCard).join("")}</div>`);
     });
     (cv.task_plans || []).filter((p) => !rows.some((r) => r.plans?.includes(p))).forEach((p) => out.push(planCard(p)));
+    S.conv.outbox = S.conv.outbox.filter((m) => !delivered(m, cv));
+    S.conv.outbox.forEach((m) => out.push(`<div class="msg-user outbox">${m.files.map((n) => `<div class="mpill att-pill" title="${esc(n)}">${ico("insert_drive_file", 18)}<span class="txt">${esc(n)}</span></div>`).join("")}${m.text ? `<div class="bubble rich">${richText(m.text)}</div>` : ""}${m.sent ? "" : `<div class="t-caption c-secondary" style="padding:4px 6px 0">Sending…</div>`}</div>`));
     const asks = c ? pendingQuestions(c.id) : [];
     asks.forEach((q) => out.push(questionCard(q)));
     if (working && !asks.length) out.push(`<div class="working"><span class="spinner s16"></span><span class="clamp2">${esc(liveActivity(cv, runtime))}</span></div>`);
@@ -1081,7 +1084,7 @@
     if (S.conv.es) S.conv.es.close();
     const kind = route.convKind || (conv(id)?.kind === "chat" ? "chat" : "card");
     clearFiles("conv");
-    S.conv = { ...S.conv, id, kind, data: null, draft: load("draft-" + id, ""), following: true, expanded: {}, agent: null, awaiting: false, files: [] };
+    S.conv = { ...S.conv, id, kind, data: null, draft: load("draft-" + id, ""), following: true, expanded: {}, agent: null, awaiting: false, files: [], outbox: [] };
     api(`api/${kind}/${id}`).then((d) => { if (S.conv.id !== id) return; S.conv.data = d; markSeen(id); render(); scrollToEnd(); })
       .catch((e) => { if (S.conv.id === id) { S.conv.data = { messages: [], error: e.message }; render(); } });
     if (SNAP) return;
@@ -1090,8 +1093,9 @@
   // The watch stream ends when a turn finishes or fails; reconnect after a moment while keeping
   // the messages on screen (resetting the conversation here blanked the pane on failures).
   function openConversationStream(id, kind) {
-    const es = new EventSource(`api/${kind}/${id}/stream`);
-    es.addEventListener("conversation", (e) => { if (S.conv.id !== id) return; const d = JSON.parse(e.data); if (!d || (!d.status && !(d.messages || []).length)) return; S.conv.data = d; S.conv.awaiting = false; markSeen(id); render(); if (S.conv.following) scrollToEnd(); });
+    const es = new EventSource(`api/${kind}/${id}/stream`); S.conv.alive = Date.now();
+    es.addEventListener("ping", () => { if (S.conv.es === es) S.conv.alive = Date.now(); });
+    es.addEventListener("conversation", (e) => { if (S.conv.id !== id) return; S.conv.alive = Date.now(); const d = JSON.parse(e.data); if (!d || (!d.status && !(d.messages || []).length)) return; S.conv.data = d; S.conv.awaiting = false; markSeen(id); render(); if (S.conv.following) scrollToEnd(); });
     es.addEventListener("end", () => {
       if (S.conv.id !== id || S.conv.es !== es) return;
       es.close(); S.conv.es = null;
@@ -1103,6 +1107,23 @@
     });
     S.conv.es = es;
   }
+  // A stream can die without an error (phone asleep, network change, a proxy dropping it): the
+  // bridge pings every 15 s, so a silent stream, or a sent message that never shows up, means
+  // reload the conversation and open a new stream.
+  function reopenConversation() {
+    const { id, kind } = S.conv; if (!id || SNAP) return;
+    if (S.conv.es) { S.conv.es.close(); S.conv.es = null; }
+    api(`api/${kind}/${id}`).then((d) => { if (S.conv.id === id) { S.conv.data = d; render(); if (S.conv.following) scrollToEnd(); } }).catch(() => {});
+    openConversationStream(id, kind);
+  }
+  function checkStreams(staleMs) {
+    if (SNAP) return;
+    if (S.es && Date.now() - (S.esAlive || 0) > staleMs) connect();
+    if (!S.conv.id) return;
+    const lost = S.conv.outbox.some((m) => m.sent && !m.retried && Date.now() - m.sent > 4000);
+    if (lost) S.conv.outbox.forEach((m) => { if (m.sent) m.retried = true; });
+    if (lost || (S.conv.es && Date.now() - S.conv.alive > staleMs)) reopenConversation();
+  }
   function markSeen(id) { const c = conv(id); if (c?.last_activity_at && !isActive(c.runtime)) { S.seen[id] = c.last_activity_at; save("seen", S.seen); } if (c?.response_seq != null && Number(c.response_seq) > Number(c.seen_response_seq || 0)) api(`api/card/${id}/read`, { seq: c.response_seq }).catch(() => {}); }
   function scrollToEnd() { const t = $("#timeline"); if (t) t.scrollTop = t.scrollHeight; }
   function bindComposer() {
@@ -1113,16 +1134,30 @@
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && innerWidth >= 600) { e.preventDefault(); send(); } });
     const t = $("#timeline"); if (t && !t._bound) { t._bound = true; t.addEventListener("scroll", () => { const atEnd = t.scrollHeight - t.scrollTop - t.clientHeight < 40; if (S.conv.following !== atEnd) { S.conv.following = atEnd; const b = $(".fab-small"); if (!atEnd && !b) render(); if (atEnd && b) b.remove(); } }, { passive: true }); }
   }
+  // The sent message shows at once (outbox) and gives way to the real one when the stream brings it.
   async function send() {
     const text = (S.conv.draft || "").trim(); if ((!text && !S.conv.files.length) || !S.conv.id || S.busy) return;
-    S.busy = true; render();
+    const id = S.conv.id;
+    const out = { text, files: S.conv.files.map((f) => f.name), known: new Set((S.conv.data?.messages || []).filter((m) => m.role === "user").map((m) => m.id)), sent: 0 };
+    S.conv.outbox.push(out); S.conv.draft = ""; save("draft-" + id, ""); S.conv.following = true;
+    S.busy = true; render(); scrollToEnd();
     try {
       const body = { message: text }; if (S.conv.agent?.model) body.model = S.conv.agent.model; if (S.conv.agent?.effort) body.effort = S.conv.agent.effort;
       if (S.conv.files.length) body.attachments = await uploadFiles("conv");
-      await api(`api/${S.conv.kind}/${S.conv.id}/send`, body);
+      await api(`api/${S.conv.kind}/${id}/send`, body);
       clearFiles("conv");
-      S.conv.draft = ""; save("draft-" + S.conv.id, ""); S.conv.following = true; S.conv.awaiting = true;
-    } catch (e) { snackbar(e.message); } finally { S.busy = false; render(); scrollToEnd(); }
+      out.sent = Date.now(); if (S.conv.id === id) S.conv.awaiting = true;
+    } catch (e) {
+      snackbar(e.message);
+      if (S.conv.id === id) { S.conv.outbox = S.conv.outbox.filter((m) => m !== out); if (!S.conv.draft) { S.conv.draft = text; save("draft-" + id, text); } }
+    } finally { S.busy = false; render(); if (S.conv.following) scrollToEnd(); }
+  }
+  // an outbox message is delivered once a user message with its text (or the queue entry) arrived
+  function delivered(m, cv) {
+    const fresh = (cv.messages || []).filter((x) => x.role === "user" && !m.known.has(x.id));
+    const textOf = (x) => (x.parts || []).filter((p) => p.type === "text").map((p) => p.text || "").join("\n\n").trim();
+    if (m.text && (fresh.some((x) => textOf(x) === m.text) || (cv.queue || []).some((q) => (q.text || "").trim() === m.text))) return true;
+    return !!fresh.length && (!m.text || (m.sent && Date.now() - m.sent > 15000));
   }
 
   // ---- Creation (CreationScreen.kt)
@@ -1499,7 +1534,8 @@
     if (S.modal) { S.modal = null; S.creation = null; S.repo = null; render(); }
   });
   addEventListener("resize", render);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && S.es && S.es.readyState === 2) connect(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) return; if (S.es && S.es.readyState === 2) connect(); checkStreams(20000); });
+  setInterval(() => { if (!document.hidden) checkStreams(45000); }, 5000);
 
   // boot
   const startTab = q.get("tab");

@@ -60,6 +60,7 @@ import mimetypes
 import pty
 import json
 import os
+import queue
 import re
 import secrets
 import shutil
@@ -2072,9 +2073,26 @@ class Handler(BaseHTTPRequestHandler):
         args.append(cid)
         self.start_sse()
         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+        # `watch` is silent while the conversation is idle. Read it on a thread and send a ping
+        # every 15 s, so proxies keep the stream open, the page can tell a live stream from a
+        # half-open one (phone asleep, network change), and a gone client ends the watch.
+        lines = queue.Queue()
+
+        def pump():
+            for raw in p.stdout:
+                lines.put(raw)
+            lines.put(None)
+        threading.Thread(target=pump, daemon=True).start()
         current = None
         try:
-            for line in p.stdout:
+            while True:
+                try:
+                    line = lines.get(timeout=15)
+                except queue.Empty:
+                    self.sse("ping", {"t": time.time()})
+                    continue
+                if line is None:
+                    break
                 line = line.strip()
                 if not line:
                     continue
