@@ -21,6 +21,7 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
     fresh conversation with the instructions and says so in the chat.
   - agy's `system_message` and `checkpoint` steps are no longer passed through as raw events.
   - The `--effort` fix of 0.6.429.12 is part of the copy (the string patch is gone).
+  - `dieter/.dockerignore` keeps the e2e tests, the unit test file and Python caches out of the image build context.
 
 ## 0.6.429.24 (2026-10-28)
 
