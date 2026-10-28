@@ -406,7 +406,7 @@
     const tools = ["files", "changes", "schedules"].map((t, i) => listRow({ title: TOOL_PAGES[t][0], glyph: TOOL_PAGES[t][1], tile: TOOL_PAGES[t][2], position: pos(i, 3), act: "tool", extra: `data-page="${t}" data-project="${p.id}"` })).join("");
     const checkouts = p.checkouts.map((c, i) => listRow({ title: cardMachineName(c), subtitle: compactPath(c.path), glyph: "computer", position: pos(i, p.checkouts.length), trailing: `<span class="dot" style="background:${machineOnline(c.daemon_id) ? "var(--success)" : "var(--tertiary-label)"}"></span>` })).join("");
     return `<div class="screen">${appbar({ title: p.name, subtitle: compactPath(p.path), back: opts.back, actions: iconAction("more_vert", "menu", `data-menu="project" data-id="${p.id}"`) })}
-      <div class="content ${hasRail() ? "" : "fab-space"}" data-scroll="project-${p.id}">${sectionHeader("Boards")}<div class="group">${rows || listRow({ title: "New board", glyph: "add" })}</div>
+      <div class="content ${hasRail() ? "" : "fab-space"}" data-scroll="project-${p.id}">${sectionHeader("Boards")}<div class="group">${rows || listRow({ title: "New board", glyph: "add", act: "new-board", extra: `data-id="${p.id}"` })}</div>
       ${sectionHeader("Workspace")}<div class="group">${tools}</div>${sectionHeader("Checkouts")}<div class="group">${checkouts}</div></div>${fab("New task", "new")}</div>`;
   }
   const compactPath = (p) => (p || "").replace(/^\/(?:Users|home)\/(?!Shared)[^/]+/, "~");
@@ -1278,9 +1278,19 @@
   // ---- add a repository (clone + register on this machine; any number of repositories)
   function addRepository() { S.repo = { git_url: "", name: "", branch: "" }; S.modal = "repo"; render(); setTimeout(() => $("#r-url")?.focus(), 50); }
   function addFolder() { S.repo = { kind: "folder", name: "" }; S.modal = "repo"; render(); setTimeout(() => $("#r-name")?.focus(), 50); }
-  const repoReady = (r) => !!r && (r.kind === "folder" ? r.name.trim() : r.git_url.trim());
+  // ---- New board (ProjectAdministration.kt NewBoardSheet): name + Review lane (review workflow) of a project
+  function newBoard(projectId) { if (!project(projectId)) return; S.repo = { kind: "board", project_id: projectId, name: "", review: true }; S.modal = "repo"; render(); setTimeout(() => $("#r-name")?.focus(), 50); }
+  const repoReady = (r) => !!r && (r.kind === "folder" || r.kind === "board" ? r.name.trim() : r.git_url.trim());
   function repoScreen() {
     const r = S.repo; const ready = false; // toggled on the DOM after rendering
+    if (r.kind === "board") return `<div class="screen">${appbar({ title: "New board", subtitle: project(r.project_id)?.name || "", cancel: true, confirm: `<button class="btn filled with-icon" style="margin-right:8px" data-act="submit-repo" ${ready ? "" : "disabled"}>${ico("check", 18)}Create</button>` })}
+      <div class="content" data-scroll="repo" style="padding-top:8px;padding-bottom:24px">
+      <div class="m16" style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+        <div class="outlined-field"><label>Name</label><input id="r-name" data-field="name" placeholder="Board name" maxlength="120"></div>
+      </div>
+      <div class="group" style="margin-top:16px">${listRow({ title: "Review lane", subtitle: "Cards move to Review before Done", trailing: `<button class="switch ${r.review ? "on" : ""}" data-act="board-review"></button>` })}</div>
+      ${sectionFooter(`A new board of ${esc(project(r.project_id)?.name || "the project")} next to its other boards, with the lanes Todo, Running${r.review ? ", Review" : ""} and Done.`)}
+      <div class="m16" style="padding:16px 16px"><button class="btn filled large" style="width:100%" data-act="submit-repo" ${ready ? "" : "disabled"}>${S.busy ? `<span class="spin"></span>` : ""}${S.busy ? "Creating…" : "Create board"}</button></div></div></div>`;
     if (r.kind === "folder") return `<div class="screen">${appbar({ title: "New folder", cancel: true, confirm: `<button class="btn filled with-icon" style="margin-right:8px" data-act="submit-repo" ${ready ? "" : "disabled"}>${ico("create_new_folder", 18)}Create</button>` })}
       <div class="content" data-scroll="repo" style="padding-top:8px;padding-bottom:24px">
       <div class="m16" style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
@@ -1301,6 +1311,16 @@
   async function submitRepository() {
     const r = S.repo; if (!r || S.busy || !repoReady(r)) return;
     S.busy = true; render();
+    if (r.kind === "board") {
+      try {
+        const res = await api("api/board", { project: r.project_id, name: r.name.trim(), workflow: r.review ? "review" : "direct" });
+        S.modal = null; S.repo = null; S.busy = false;
+        await refreshState(); touchProject(r.project_id);
+        if (res.id) { S.tab = "projects"; showFrom({ kind: "project", id: r.project_id }, { kind: "board", id: res.id }); } else render();
+        snackbar(`Board ${res.name} created.`);
+      } catch (e) { S.busy = false; snackbar(e.message); render(); }
+      return;
+    }
     try {
       const res = await api("api/project", r.kind === "folder" ? { folder: r.name.trim() } : { git_url: r.git_url.trim(), name: r.name.trim(), branch: r.branch.trim() });
       S.modal = null; S.repo = null; S.busy = false;
@@ -1573,6 +1593,8 @@
       case "toggle": S.creation[el.dataset.field] = !S.creation[el.dataset.field]; render(); break;
       case "submit-creation": submitCreation(); break;
       case "submit-repo": submitRepository(); break;
+      case "new-board": newBoard(id); break;
+      case "board-review": if (S.repo?.kind === "board") { S.repo.review = !S.repo.review; render(); } break;
       case "ssh-copy": sshCopy(); break;
       case "ssh-test": sshTest(); break;
       case "gw-enroll": gatewayEnroll(); break;
@@ -1604,11 +1626,11 @@
   function openMenu(el) {
     const menu = el.dataset.menu, id = el.dataset.id;
     if (menu === "card" || menu === "conversation") { const c = conv(id); if (!c) return; showMenu(el, [...(menu === "conversation" ? [{ id: "changes", label: "Changes", icon: "difference", onClick: () => push({ kind: "pane", id, pane: "changes" }) }, { id: "files", label: "Files", icon: "folder", onClick: () => push({ kind: "tool", page: "files", cardId: id, projectId: c.project_id }) }, { id: "refresh", label: "Refresh", icon: "refresh", onClick: () => { S.conv.id = null; syncConversation(); } }, "-"] : []), ...cardMenu(c)]); }
-    else if (menu === "board") { const b = board(id); const boards = (S.data.boards || []); showMenu(el, [{ title: "Switch board" }, ...boards.map((x) => ({ id: "b-" + x.id, label: x.name, sub: project(x.project_id)?.name, checked: x.id === id, onClick: () => { const st = stack(); S.stacks[S.tab] = st.map((r) => (r.kind === "board" ? { kind: "board", id: x.id } : r)); render(); } })), "-", { id: "archived", label: "Archived cards", icon: "archive", onClick: () => snackbar("Archived cards are listed in the Dieter app.") }]); }
+    else if (menu === "board") { const b = board(id); const boards = (S.data.boards || []); showMenu(el, [{ title: "Switch board" }, ...boards.map((x) => ({ id: "b-" + x.id, label: x.name, sub: project(x.project_id)?.name, checked: x.id === id, onClick: () => { const st = stack(); S.stacks[S.tab] = st.map((r) => (r.kind === "board" ? { kind: "board", id: x.id } : r)); render(); } })), "-", { id: "new-board", label: "New board…", icon: "add", onClick: () => newBoard(b?.project_id) }, { id: "archived", label: "Archived cards", icon: "archive", onClick: () => snackbar("Archived cards are listed in the Dieter app.") }]); }
     else if (menu === "schedule") { const d = S.sch?.detail?.[id]; const s = d?.schedule; if (!s) return; showMenu(el, [{ id: "run", label: "Run now", icon: "play_arrow", onClick: () => scheduleAction(id, "run", (r) => snackbar(r.run?.message ? `Run: ${r.run.message}` : "Run started")) },
       { id: "toggle", label: s.enabled ? "Pause" : "Resume", icon: s.enabled ? "pause" : "play_circle", onClick: () => scheduleAction(id, s.enabled ? "pause" : "resume") }, "-",
       { id: "delete", label: "Delete schedule", icon: "delete", destructive: true, onClick: () => { if (!confirm(`Delete the schedule "${s.name}"? Its cards and history stay.`)) return; scheduleAction(id, "delete", () => { const st = stack(); S.stacks[S.tab] = st.slice(0, -1); snackbar("Schedule deleted"); }); } }]); }
-    else if (menu === "project") showMenu(el, [{ id: "open", label: "Open project", icon: "folder_open", onClick: () => showFrom(null, { kind: "project", id }) }, { id: "copy", label: "Copy path", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(project(id)?.path || "") }]);
+    else if (menu === "project") showMenu(el, [{ id: "open", label: "Open project", icon: "folder_open", onClick: () => showFrom(null, { kind: "project", id }) }, { id: "new-board", label: "New board…", icon: "view_kanban", onClick: () => newBoard(id) }, { id: "copy", label: "Copy path", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(project(id)?.path || "") }]);
     else if (menu === "inbox-filter") showMenu(el, [{ title: "Project" }, { id: "all", label: "All projects", checked: !S.inboxProject, onClick: () => { S.inboxProject = ""; render(); } }, ...(S.data.projects || []).map((p) => ({ id: "p-" + p.id, label: p.name, checked: S.inboxProject === p.id, onClick: () => { S.inboxProject = p.id; render(); } })), "-", { id: "theme", label: "Theme: " + (load("theme", "system")), icon: "brightness_6", onClick: () => { const n = { system: "dark", dark: "light", light: "system" }[load("theme", "system")]; save("theme", n); applyTheme(); } }]);
     else if (menu === "projects-add") showMenu(el, [{ id: "np", label: "Add repository", icon: "create_new_folder", onClick: () => addRepository() }, { id: "nf", label: "New folder", icon: "folder", onClick: () => addFolder() }]);
     else if (menu === "chats") showMenu(el, [{ id: "live", label: "Current chats", icon: "forum", checked: true }, { id: "arch", label: "Archived chats", icon: "archive", onClick: () => snackbar("Archived chats are listed in the Dieter app.") }]);

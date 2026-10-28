@@ -41,6 +41,7 @@ Endpoints:
   POST /api/card/ID/read      {seq}  mark the displayed reply as seen (response_seq)
   POST /api/project           {git_url, name?, branch?}  add-on only: clone into /data/projects/<name> and register
                               {folder}  new empty Git repository /data/projects/<folder> (existing folder adopted)
+  POST /api/board             {project, name, workflow?: review|direct}  a new board of the project (like the app's New board)
   POST /api/focus             {id}   remember which card the next page load should open (push deep link)
   GET  /api/focus?consume=1   {id|null} and forget it (valid 15 min)
   GET  /api/settings          {title_model, title_models: [{id, name, available, detail}]}
@@ -1492,6 +1493,21 @@ def add_folder(name):
     return {"ok": True, "id": pid, "name": name, "existed": False}
 
 
+def create_board(b):
+    """A further board of a project (the app's project menu → New board): review workflow adds the Review lane."""
+    project, name, workflow = str(b.get("project") or ""), str(b.get("name") or "").strip(), b.get("workflow") or "review"
+    if not project.startswith("p_"):
+        raise ValueError("project required")
+    if not name or len(name) > 120:
+        raise ValueError("name required (max 120 characters)")
+    if workflow not in ("review", "direct"):
+        raise ValueError("workflow must be review or direct")
+    out = run(["board", "create", "--project", project, "--name", name, "--workflow", workflow], timeout=30)
+    board = (out.get("board") or out) if isinstance(out, dict) else {}
+    log(f"boards: created {name} ({workflow}) in {project} as {board.get('id')}")
+    return {"ok": True, "id": board.get("id"), "name": board.get("name") or name}
+
+
 def setup_projects():
     """Projects from the add-on options (a convenience; more can be added from the page any time)."""
     for pr in OPTS.get("projects") or []:
@@ -2259,6 +2275,10 @@ class Handler(BaseHTTPRequestHandler):
                     res = add_folder(body.get("folder"))
                 else:
                     res = add_project(body.get("git_url") or "", body.get("name") or "", body.get("branch") or "")
+                STATE.poll_fast()
+                return self.send_json(res)
+            if parts[1:] == ["board"]:
+                res = create_board(body)
                 STATE.poll_fast()
                 return self.send_json(res)
             if parts[1:] == ["settings"]:

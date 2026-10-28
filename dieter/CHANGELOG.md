@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.31 (2026-10-28)
+
+- New board, as in the Dieter app: the project's ⋮ menu (Projects list and project page) and the board's ⋮ menu
+  have **New board…**, a sheet with the name and the **Review lane** switch (on: Todo, Running, Review, Done; off:
+  without Review). The board is created next to the project's other boards and opens. Bridge: `POST /api/board`.
+
 ## 0.6.429.30 (2026-10-28)
 
 - The check badge on a conversation's project avatar (done and unread rows) is green instead of grey.

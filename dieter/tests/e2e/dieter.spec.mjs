@@ -62,6 +62,31 @@ test("a new folder becomes a project (empty Git repository under /data/projects)
   expect(bad.ok()).toBeFalsy();
 });
 
+test("a new board is added next to Main from the project menu (Review lane switch sets the workflow)", async ({ page, request }) => {
+  const proj = (await state(request)).projects.find((p) => p.name === `Scratch-${stamp}`);
+  await page.goto("");
+  // the wide-screen boot opens the first board once the state arrives and replaces the Projects list: retry until it settled
+  await expect(async () => {
+    await page.locator('#rail [data-act="tab"][data-tab="projects"]').click();
+    await page.locator(`#list [data-menu="project"][data-id="${proj.id}"]`).first().click({ timeout: 2_000 });
+    await page.locator('[data-mi="new-board"]').click({ timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
+  await expect(page.locator('[data-act="submit-repo"]').first()).toBeDisabled();
+  await page.locator("#r-name").fill("Ideas");
+  await page.locator('[data-act="board-review"]').click(); // off: direct workflow
+  await page.locator('[data-act="submit-repo"]').first().click();
+  await expect(page.locator("#snackbar")).toContainText("Board Ideas created");
+  await expect(page.locator("#list .appbar").first()).toContainText("Ideas"); // the new board is open
+  const st = await state(request);
+  const boards = st.boards.filter((b) => b.project_id === proj.id);
+  const ideas = boards.find((b) => b.name === "Ideas");
+  expect(ideas.workflow).toBe("direct");
+  expect(ideas.lanes).not.toContain("review");
+  expect(boards.length).toBeGreaterThanOrEqual(2); // next to the default board
+  const bad = await request.post("api/board", { data: { project: proj.id, name: "  " } });
+  expect(bad.status()).toBe(400);
+});
+
 test("a task runs on the mock harness and its conversation streams", async ({ page, request }) => {
   await page.goto("");
   await page.locator('[data-act="project"]').first().click();
