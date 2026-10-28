@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.21 (2026-10-28)
+
+- Tools → Machines → Gateway offers **Re-enroll** when another device has removed the add-on's daemon from
+  the account (Devices shows "Removed"). The daemon still held its gateway credential, so the page showed it
+  as enrolled and no **Enroll** button. Re-enroll runs `dieter daemon unenroll` (projects and conversations
+  stay) and shows the Enroll form again; sign in with GitHub, then approve the new pairing code.
+
 ## 0.6.429.20 (2026-10-28)
 
 - Tools → Settings now has a **Title model** choice for tasks and chats created without a title:

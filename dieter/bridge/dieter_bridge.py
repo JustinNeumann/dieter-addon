@@ -803,6 +803,24 @@ class ClaudeLogin:
         return cls.done
 
     @classmethod
+    def unenroll(cls):
+        """`dieter daemon unenroll`: drop the enrollment key and credential (the daemon was removed from the
+        account's roster, so it cannot be approved again); the next enrollment makes a new key. Projects stay."""
+        with cls.lock:
+            if cls.proc is not None and cls.done is None:
+                raise CliError("an enrollment is in progress")
+        p = subprocess.run([DIETER, "--store", DIETER_HOME, "daemon", "unenroll"], capture_output=True, text=True, timeout=60,
+                           env={**os.environ, "HOME": "/data"})
+        if p.returncode != 0:
+            raise CliError((p.stderr or p.stdout).strip()[:300] or f"unenroll exited with {p.returncode}")
+        cls.url, cls.code, cls.output, cls.done = None, None, "", None
+        log("gateway: unenrolled")
+        if Daemon.instance:
+            Daemon.instance.restart()
+        threading.Thread(target=lambda: (time.sleep(3), Daemon.wait_healthy(), STATE.touch()), daemon=True).start()
+        return {"ok": True}
+
+    @classmethod
     def cancel(cls):
         if cls.proc is not None:
             try:
@@ -898,6 +916,11 @@ def gateway_status():
                         "connected_at": st.get("gatewayConnectedAt")})
     except CliError as e:
         out["error"] = str(e)
+    if out["enrolled"]:
+        try:
+            out["trust"] = _enum((run(["--store", DIETER_HOME, "device", "status", "--format", "json"], timeout=20) or {}).get("state"), "TRUST_STATE_")
+        except CliError:
+            pass
     out["enroll"] = Enroll.status()
     return out
 
@@ -2062,6 +2085,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(schedule_create(body))
             if parts[1:] == ["gateway", "enroll"] and ADDON:
                 return self.send_json(Enroll.start(body.get("url") or OPTS.get("gateway_url"), body.get("name") or OPTS.get("machine_name")))
+            if parts[1:] == ["gateway", "unenroll"] and ADDON:
+                return self.send_json(Enroll.unenroll())
             if parts[1:] == ["gateway", "enroll", "cancel"] and ADDON:
                 Enroll.cancel()
                 return self.send_json({"ok": True})
