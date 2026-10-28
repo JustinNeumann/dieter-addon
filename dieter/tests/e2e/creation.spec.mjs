@@ -127,6 +127,45 @@ test("Add to Todo creates an unstarted card in the Todo lane; Start agent runs i
   await expect(page.locator("#panes")).toContainText(`Mock harness received: todo ${stamp}`, { timeout: 90_000 });
 });
 
+test("Edit… changes the title and task of a Todo card; once started only the title", async ({ page, request }) => {
+  const st = await (await request.get("api/state")).json();
+  const board = st.boards[0];
+  const made = await request.post("api/card", { data: { project: board.project_id, board: board.id, title: `Edit ${stamp}`, prompt: `before ${stamp}`, provider: "mock", workspace: "project", start: false } });
+  expect(made.ok()).toBeTruthy();
+  const id = (await made.json()).id;
+  const card = async () => (await (await request.get("api/state")).json()).cards.find((c) => c.id === id);
+  await page.goto(`?card=${id}`);
+  await expect(page.locator("#draft")).toBeVisible({ timeout: 30_000 });
+  await page.locator('[data-menu="conversation"]').first().click();
+  await page.locator('[data-mi="edit"]').click();
+  await expect(page.locator("#e-title")).toHaveValue(`Edit ${stamp}`);
+  await expect(page.locator("#e-prompt")).toHaveValue(`before ${stamp}`);
+  await page.locator("#e-title").fill(`Edited ${stamp}`);
+  await page.locator("#e-prompt").fill(`after ${stamp}`);
+  await page.locator('[data-act="edit-save"]').click();
+  await expect(page.locator("#overlay")).toHaveClass(/hidden/);
+  await expect.poll(async () => (await card()).initial_prompt, { timeout: 20_000 }).toBe(`after ${stamp}`);
+  expect((await card()).title).toBe(`Edited ${stamp}`);
+  // an empty task is refused client-side
+  await page.locator('[data-menu="conversation"]').first().click();
+  await page.locator('[data-mi="edit"]').click();
+  await page.locator("#e-prompt").fill("  ");
+  await page.locator('[data-act="edit-save"]').click();
+  await expect(page.locator("#e-title")).toBeVisible();
+  await page.locator('#overlay [data-act="close-dialog"]').last().click();
+  // start it: the task is locked, the title is not
+  await page.locator('[data-menu="conversation"]').first().click();
+  await page.locator('[data-mi="start"]').click();
+  await expect(page.locator("#panes")).toContainText(`Mock harness received: after ${stamp}`, { timeout: 90_000 });
+  await expect.poll(async () => (await card()).initial_prompt_sent, { timeout: 20_000 }).toBe(true);
+  await page.locator('[data-menu="conversation"]').first().click();
+  await page.locator('[data-mi="edit"]').click();
+  await expect(page.locator("#e-prompt")).toHaveCount(0);
+  await page.locator("#e-title").fill(`Renamed ${stamp}`);
+  await page.locator('[data-act="edit-save"]').click();
+  await expect.poll(async () => (await card()).title, { timeout: 20_000 }).toBe(`Renamed ${stamp}`);
+});
+
 test("New chat has no board row and no Start/Todo segment; cancel works", async ({ page }) => {
   await page.goto("");
   await page.locator('#rail [data-act="tab"][data-tab="chats"]').click();
