@@ -161,6 +161,46 @@ resumes it, lists the occurrence history (each entry opens its card) and deletes
 and history stay). The scheduler runs inside the add-on's daemon, so schedules fire while Home
 Assistant is up. Agents themselves can also create schedules and cards with the CLI inside a turn.
 
+## Dreamfall boards
+
+A **Dreamfall board** is a funnel for ideas next to the project's Kanban boards: a project's ⋮ → **New
+Dreamfall board…** (or New board → **Dreamfall board**) creates three ordinary boards and two schedules. The form asks for three things: the
+**categories** to enumerate (one per line, or a categories file of the project), the **enumeration goal** (new ideas per
+category and night) and the **navigation logic**: in plain language, what makes an idea worth your time, what to drop
+and how selective to be. It starts with sensible criteria (value, realism, novelty, risk; about one idea in four) for you
+to rewrite. A topic line, the times, the agent and the stage boards are optional.
+
+- **Enumeration**: an agent writes new ideas every night (at least *n* per category, as Todo cards
+  `[Category] Title`), after checking every idea the board ever had so it does not repeat one.
+- **Navigation**: a second agent, later that night, judges every idea in the Enumeration queue by your navigation
+  logic (it is quoted in the agent's instructions and decides over the agent's own taste). A strong
+  idea is *transferred*: copied to Navigation's Todo with a link back to its source, and the original moves
+  to Done. A weak one is *released* to Enumeration's Review lane. Nothing stays undecided. The agent
+  waits while that night's Enumeration run is still working.
+- **Implementation**: yours. Only your **Pick** on a Navigation idea copies it here as a Todo draft (in a
+  new worktree or the project directory, optionally started at once). **Park** keeps an idea for later,
+  **Back to the queue** undoes a release or a park, and you can promote a released idea yourself.
+
+The board shows the stages side by side with a funnel on top (stage, actor, schedule, waiting ideas,
+how many ideas pass) and, on a phone, as tabs. Released, transferred, parked and picked ideas sit in
+collapsible groups under each queue (the newest 40). Tapping an idea opens its brief, the verdict with
+the agent's reason and score, the **Provenance** (the copies across the stages) and the **Trail**: who
+created, judged, transferred, picked, parked or started it, when, and why. The board's ⋮ runs a stage
+now, pauses or resumes both schedules, changes the settings (name, topic, categories or a categories file
+of the project, ideas per category, navigation logic, times, time zone, agent; optionally a mail with the night's result)
+and opens a stage as a normal Kanban board. **Remove Dreamfall…** deletes the schedules; the three boards
+and their cards stay. New board can also take existing boards of the project (with a Review lane) as
+stages instead of creating new ones.
+
+The agents work through the `dreamfall` command in the image (`dreamfall --help`; run from their run
+cards): `run begin`/`run end`, `ideas`, `add`, `queue`, `promote`, `release`. It records every step and
+refuses what a stage may not do: no agent creates, moves or judges cards on Implementation, and a rerun
+neither duplicates an idea nor transfers one twice. The records (pipeline, card verdicts and trail,
+runs) are kept in Dieter's account-wide key-value store, namespace `dreamfall`. The rules are enforced
+by the command and visible on the board: an agent that bypasses it with `dieter card create` on the
+Implementation board is not stopped by the daemon, but its card is flagged **Added outside Dreamfall**.
+The agents need the `dreamfall` command, so the project's checkout must be on the add-on's machine.
+
 ## Gateway: show the add-on in the Dieter apps
 
 The Dieter apps (Android, iPhone, Mac) talk to a **gateway**, and a gateway lists the machines

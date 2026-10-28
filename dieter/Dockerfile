@@ -122,6 +122,9 @@ RUN set -eu; \
     ls /opt/dieter-runtime | wc -l
 
 COPY bridge/ /opt/bridge/
+# dreamfall: the command of the Dreamfall stage agents (bridge/dreamfall.py; they run it from their run cards)
+RUN printf '#!/bin/sh\nexec python3 /opt/bridge/dreamfall.py "$@"\n' > /usr/local/bin/dreamfall && chmod 755 /usr/local/bin/dreamfall \
+    && dreamfall --help >/dev/null
 COPY run.sh /run.sh
 RUN chmod 755 /run.sh
 

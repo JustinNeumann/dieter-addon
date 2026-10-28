@@ -21,6 +21,9 @@ Endpoints:
                               reports a change, else every IDLE_POLL_S, or POLL_S while that stream is down)
   GET  /api/events            SSE: "state" whenever the board changed, heartbeats
   GET  /api/ha                compact summary for HA sensors
+  GET  /api/dreamfall/card/ID  Dreamfall: a card's trail and provenance chain
+  POST /api/dreamfall          Dreamfall: create a pipeline (stage boards, records, schedules)
+  POST /api/dreamfall/ID/{update|delete|run|act}   settings, removal, run a stage now, a person's decision
   GET  /api/{card|chat}/ID    conversation (last 200 messages) + detail
   GET  /api/{card|chat}/ID/stream?after=SEQ&delta=1   SSE of `dieter ... watch` frames: "conversation" (complete),
                               with delta=1 then "delta" (the changed messages and the conversation's other fields)
@@ -85,6 +88,8 @@ import time
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import dreamfall   # Dreamfall boards (bridge/dreamfall.py): pipelines, records, the agents' `dreamfall` command
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTIONS_FILE = "/data/options.json"              # written by the Supervisor from the add-on's options
@@ -2018,7 +2023,8 @@ class State:
 
     def snapshot(self):
         with self.lock:
-            return self.rev, {**self.data, "questions": pending_questions()}
+            rev, data = self.rev, {**self.data, "questions": pending_questions()}
+        return rev, DREAMFALL.decorate(data)   # outside the lock: the Dreamfall cache calls touch() from its threads
 
     def touch(self):
         """Something outside the polls changed (a question arrived or was answered): push to the page."""
@@ -2242,6 +2248,99 @@ class State:
 STATE = State()
 
 
+# --------------------------------------------------------------------------- Dreamfall boards (bridge/dreamfall.py)
+DREAMFALL = dreamfall.Cache(norm_card, on_change=lambda: STATE.touch(), log=log)
+
+
+def df_poll(pid=None, boards=None):
+    """Cards made or moved here must be in the next /api/state, not only after the next poll: the touched stage
+    boards are read while the state polls."""
+    t = threading.Thread(target=DREAMFALL.refresh, kwargs={"full": True, "only": pid, "boards": boards}, daemon=True)
+    t.start()
+    if hasattr(STATE, "refresh"):
+        STATE.refresh(wait=True)
+    else:
+        STATE.poll_fast()
+    t.join(30)
+
+
+def df_sync(*keys):
+    """Show records written here at once instead of when the kv watch delivers them."""
+    for k in keys:
+        if k:
+            try:
+                val, _ = dreamfall.kv_get(k)
+                DREAMFALL.put_local(k, val)
+            except dreamfall.DfError as e:
+                log(f"dreamfall: {k}: {e}")
+
+
+def dreamfall_post(path, body, user):
+    """POST /api/dreamfall[/ID/ACTION]: the page's Dreamfall actions (the person; agents use the `dreamfall` command)."""
+    try:
+        if not path:
+            p = dreamfall.create_pipeline(body, user)
+            DREAMFALL.put_local("p." + p["id"], p)
+            df_poll(p["id"])
+            log(f"dreamfall: {p['name']} ({p['id']}) created in {p['project_id']}")
+            return {"ok": True, "id": p["id"], "pipeline": p}
+        pid, action = path[0], (path[1] if len(path) > 1 else "")
+        if action == "update":
+            p = dreamfall.update_pipeline(pid, body)
+            DREAMFALL.put_local("p." + pid, p)
+            return {"ok": True, "pipeline": p}
+        if action == "delete":
+            res = dreamfall.delete_pipeline(pid)
+            DREAMFALL.put_local("p." + pid, None)
+            df_poll()
+            log(f"dreamfall: {pid} removed, its boards stay")
+            return res
+        if action == "run":
+            res = dreamfall.run_now(pid, str(body.get("stage") or ""))
+            df_poll(pid)
+            return res
+        if action == "act":
+            res = dreamfall.act(pid, body, user)
+            df_sync("c." + str(body.get("card") or ""), ("c." + res["id"]) if res.get("id") else "")
+            df_poll(pid, res.pop("boards", None))
+            return res
+        raise ValueError("not found")
+    except dreamfall.DfError as e:
+        raise ValueError(str(e))
+
+
+def dreamfall_detail(cid):
+    rev, data = STATE.snapshot()
+    d = DREAMFALL.detail(cid, data.get("cards") or [])
+    for n in d["chain"]:
+        if not n["known"] and dreamfall.CARD_RE.match(n["card"] or ""):
+            try:
+                c = dreamfall.card_show(n["card"])
+                n.update(title=c["title"], lane="archived" if c["archived"] else c["lane"], board_id=c["board_id"])
+                if n.get("self") and d.get("brief") is None:
+                    d["brief"] = c["prompt"]
+            except dreamfall.DfError:
+                pass
+    return d
+
+
+def dreamfall_created(cid, b, user):
+    """A card the person adds to a Dreamfall stage board from the page gets a record (created by the person), so the
+    board can tell it from a card that arrived some other way (e.g. an agent's `dieter card create`)."""
+    board_id = b.get("board")
+    p = next((x for x in DREAMFALL.pipelines() if dreamfall.stage_of_board(x, board_id)), None)
+    if not p:
+        return
+    s = dreamfall.stage_of_board(p, board_id)
+    if s["actor"] == "agent" and b.get("start", True):
+        return     # an agent turn started by hand on an agent stage is a run, not an idea
+    try:
+        dreamfall.record_created(p, {"id": cid, "board_id": board_id, "title": str(b.get("title") or "")}, "human", user)
+        df_sync("c." + cid)
+    except dreamfall.DfError as e:
+        log(f"dreamfall: record of {cid}: {e}")
+
+
 class Watch:
     """`dieter watch changes`: the daemon's change frames (the stream the native apps hold). A change of the shared
     records (projects, boards, cards, checkouts), of a card this machine runs, or of a conversation's status asks
@@ -2361,6 +2460,10 @@ class Handler(BaseHTTPRequestHandler):
     # ---- helpers
     def client_ip(self):
         return self.client_address[0]
+
+    def user_name(self):
+        """The Home Assistant user behind Ingress (it forwards the logged-in user's name), for the Dreamfall trail."""
+        return (self.headers.get("X-Remote-User-Display-Name") or self.headers.get("X-Remote-User-Name") or "you").strip()[:60] or "you"
 
     def caller_ip(self):
         """Real caller: X-Forwarded-For is trusted only from loopback (Caddy)."""
@@ -2506,6 +2609,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_text(open(os.path.join(HERE, parts[0]), "rb").read(), ctype=ctype)
             if parts[0] != "api":
                 return self.send_json({"error": "not found"}, 404)
+            if len(parts) == 4 and parts[1] == "dreamfall" and parts[2] == "card":
+                return self.send_json(dreamfall_detail(parts[3]))
             if parts[1:] == ["machines"]:
                 rev, data = STATE.snapshot()
                 return self.send_json({"machines": data.get("machines", [])})
@@ -2601,6 +2706,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_body()
             if parts[:1] != ["api"]:
                 return self.send_json({"error": "not found"}, 404)
+            if parts[1:2] == ["dreamfall"]:
+                return self.send_json(dreamfall_post(parts[2:], body, self.user_name()))
             if parts[1:] == ["card"] or parts[1:] == ["chat"]:
                 return self.send_json(self.create(parts[1], body))
             if parts[1:] == ["schedules"]:
@@ -2788,6 +2895,8 @@ class Handler(BaseHTTPRequestHandler):
             upload_forget(files)
         c = out.get("card") if isinstance(out, dict) and "card" in out else out
         cid = (c or {}).get("id")
+        if kind == "card" and cid:
+            dreamfall_created(cid, b, self.user_name())
         if entity and cid:
             TITLE_PENDING[cid] = first_line_title(b["prompt"])
             threading.Thread(target=retitle, args=(kind, cid, b["prompt"], entity), daemon=True).start()
@@ -2968,6 +3077,8 @@ def main():
         log(f"dieter bridge on {BIND}:{PORT}, dieter={DIETER}, HA={HA_IP}, owner={owner_login()}")
     threading.Thread(target=STATE.loop, daemon=True).start()
     threading.Thread(target=Watch.loop, daemon=True).start()
+    dreamfall.DIETER = DIETER
+    DREAMFALL.start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
     srv.daemon_threads = True
     srv.serve_forever()

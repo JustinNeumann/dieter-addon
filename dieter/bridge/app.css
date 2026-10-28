@@ -425,3 +425,79 @@ body.has-bottombar #snackbar { bottom: 96px; }
 [data-drag] { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 .gitem.dragging { position: relative; z-index: 5; box-shadow: 0 6px 20px rgb(0 0 0 / .35); background: color-mix(in srgb, var(--on-surface) 10%, var(--cell)); cursor: grabbing; }
 body.drag-active, body.drag-active * { cursor: grabbing !important; }
+
+/* ------------------------------------------------------------- Dreamfall board (funnel of stage boards) */
+.df-funnel { display: flex; align-items: stretch; gap: 6px; padding: 6px 16px 10px; overflow-x: auto; scrollbar-width: none; flex: none; }
+.df-stage-chip { flex: 1 1 0; min-width: 220px; display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 16px; background: var(--cell); }
+.df-stage-chip .num { width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; background: var(--stage); flex: none; }
+:root[data-theme="dark"] .df-stage-chip .num { color: var(--background); }
+.df-stage-chip .t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.df-stage-chip .t .n { font: 500 15px/20px var(--body); letter-spacing: .1px; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.df-stage-chip .t .s { font: 400 12px/16px var(--body); letter-spacing: .4px; color: var(--secondary-label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
+.df-stage-chip .big { font: 600 22px/28px var(--display); color: var(--label); }
+.df-arrow { display: flex; align-items: center; color: var(--tertiary-label); flex: none; }
+.df-arrow .in { display: flex; flex-direction: column; align-items: center; min-width: 34px; }
+.df-arrow .pct { font: 500 11px/14px var(--body); color: var(--secondary-label); margin-top: 2px; white-space: nowrap; }
+.df-stages { display: flex; gap: 12px; padding: 4px 16px 16px; overflow-x: auto; flex: 1; min-height: 0; align-items: stretch; }
+.df-stage { flex: 1 1 0; min-width: 300px; display: flex; flex-direction: column; min-height: 0; }
+.df-stage.single { min-width: 0; padding: 8px 16px 0; }
+.df-stage .lh { display: flex; align-items: center; gap: 4px; padding: 0 0 2px 4px; }
+.df-stage .lh .nm { font: 600 15px/24px var(--body); letter-spacing: .1px; margin-left: 4px; }
+.df-stage .lh .ct { margin-left: 8px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; text-align: center; font: 500 12px/20px var(--body); background: var(--fill); color: var(--secondary-label); }
+.df-stage .lh .grow { flex: 1; }
+.df-ic { color: var(--stage); }
+.df-stage .actor { display: flex; align-items: center; gap: 6px; padding: 2px 4px 8px; font: 400 12px/16px var(--body); letter-spacing: .4px; color: var(--secondary-label); min-width: 0; }
+.df-stage .actor .ms { color: var(--stage); flex: none; }
+.df-stages .df-stage .lane-list { overflow: auto; flex: 1; padding: 0 2px 8px; }
+.df-stage.single .lane-list { padding: 0 0 16px; }
+.df-stage .ccard { background: var(--surface-container-lowest); border: 1px solid color-mix(in srgb, var(--separator) 45%, transparent); border-radius: 12px; }
+.df-stage .ccard.clickable:hover { background: color-mix(in srgb, var(--on-surface) 4%, var(--surface-container-lowest)); }
+.df-stage.human .lane-list { border-top: 2px dashed color-mix(in srgb, var(--stage) 45%, transparent); padding-top: 10px; }
+.df-card .df-verdict { margin-top: 2px; }
+.df-card .df-btn { margin-left: 8px; height: 32px; padding: 0 12px 0 10px; border-radius: 16px; font: 500 13px/18px var(--body); }
+.df-card .foot .agent { font: 400 12px/16px var(--body); letter-spacing: .4px; color: var(--secondary-label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.df-warn { color: var(--warning) !important; background: color-mix(in srgb, var(--warning) 12%, transparent) !important; }
+.df-sub { display: flex; align-items: center; gap: 8px; padding: 10px 6px 6px; font: 500 12px/16px var(--body); letter-spacing: .4px; color: var(--secondary-label); cursor: pointer; user-select: none; }
+.df-sub .c { margin-left: auto; font-weight: 400; }
+.df-sub .chev { transition: transform .15s; }
+.df-sub.open .chev { transform: rotate(90deg); }
+.df-group { display: flex; flex-direction: column; gap: 10px; }
+.df-group.review .ccard, .df-group.done .ccard { opacity: .8; }
+.df-sec { display: flex; align-items: center; gap: 8px; padding: 6px 6px 0; font: 500 12px/16px var(--body); letter-spacing: .4px; color: var(--secondary-label); }
+.df-sec span { font-weight: 400; }
+.df-empty { padding: 14px 6px; font: 400 13px/18px var(--body); letter-spacing: .25px; color: var(--secondary-label); }
+.df-verdict { display: flex; gap: 6px; align-items: flex-start; font: 400 13px/18px var(--body); letter-spacing: .25px; color: var(--secondary-label); padding: 4px 8px 4px 6px; border-radius: 8px; background: color-mix(in srgb, var(--vc) 9%, transparent); }
+.df-verdict .ms { color: var(--vc); margin-top: 2px; flex: none; }
+.df-verdict b { font-weight: 500; color: var(--vc); }
+.df-gate { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--stage) 9%, transparent); margin: 0 0 10px; font: 400 13px/18px var(--body); letter-spacing: .25px; color: var(--label); }
+.df-gate > .ms { color: var(--stage); }
+.df-gate .t { flex: 1; } .df-gate .t b { display: block; font-weight: 500; }
+.df-run { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--cell); font: 400 12px/16px var(--body); letter-spacing: .4px; color: var(--secondary-label); margin-bottom: 10px; min-width: 0; }
+.df-run.clickable { cursor: pointer; } .df-run.clickable:hover { background: color-mix(in srgb, var(--on-surface) 6%, var(--cell)); }
+.df-run > .ms { color: var(--stage); flex: none; }
+.df-run b { color: var(--label); font-weight: 500; }
+.df-tabs .tab { gap: 6px; }
+.df-chips { display: flex; gap: 8px; padding: 12px 16px 4px; flex-wrap: wrap; align-items: center; }
+.df-chips .cchip { height: 32px; border-radius: 10px; padding: 0 12px 0 10px; display: inline-flex; align-items: center; gap: 6px; font: 500 13px/18px var(--body); background: var(--secondary-container); color: var(--on-secondary-container); }
+.df-actions { display: flex; gap: 8px; padding: 10px 16px 4px; flex-wrap: wrap; }
+.df-row { display: flex; align-items: center; gap: 14px; padding: 12px 16px; }
+.df-row > .ms { color: var(--secondary-label); flex: none; }
+.df-row > .df-ic { color: var(--stage, var(--secondary-label)); }
+.df-row .l { flex: 1; min-width: 0; }
+.df-row .l .t { font: 400 16px/24px var(--body); letter-spacing: .5px; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.df-row .l .s { font: 400 14px/20px var(--body); letter-spacing: .25px; color: var(--secondary-label); }
+.df-trail { padding: 4px 16px 0; }
+.df-trail .ev { display: flex; gap: 12px; padding: 0 4px; }
+.df-trail .ev .ln { width: 28px; display: flex; flex-direction: column; align-items: center; flex: none; }
+.df-trail .ev .ln .dot { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--secondary-container); color: var(--on-secondary-container); flex: none; }
+.df-trail .ev .ln .dot.human { background: var(--primary); color: var(--on-primary); }
+.df-trail .ev .ln .dot.now { background: var(--surface-container-highest); color: var(--secondary-label); }
+.df-trail .ev .ln .bar { width: 2px; flex: 1; background: var(--outline-variant, var(--separator)); margin: 4px 0; min-height: 14px; }
+.df-trail .ev .tx { flex: 1; min-width: 0; padding: 4px 0 14px; }
+.df-trail .ev .tx .h { font: 500 14px/20px var(--body); letter-spacing: .1px; color: var(--label); }
+.df-trail .ev .tx .w { font: 400 12px/16px var(--body); letter-spacing: .4px; color: var(--secondary-label); margin-top: 1px; }
+.df-trail .ev .tx .q { font: 400 14px/20px var(--body); letter-spacing: .25px; color: var(--label); margin-top: 6px; padding: 8px 12px; border-radius: 10px; background: var(--cell); }
+.df-trail .ev:last-child .ln .bar { display: none; }
+.df-dialog .seg { margin-top: 4px; }
+.df-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 2px 0; font: 400 14px/20px var(--body); color: var(--label); cursor: pointer; }
+.df-logic { min-height: 180px !important; font: 400 14px/20px var(--body) !important; }
