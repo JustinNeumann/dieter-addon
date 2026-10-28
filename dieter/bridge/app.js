@@ -424,10 +424,10 @@
     const cards = (S.data.cards || []).filter((c) => c.board_id === b.id && !c.archived && (!query || cardTitle(c).toLowerCase().includes(query) || (c.summary || "").toLowerCase().includes(query)));
     const lanes = (b.lanes && b.lanes.length ? b.lanes : Object.keys(LANES)).map((id) => ({ id, name: LANES[id] || id, cards: sortCards(cards.filter((c) => c.lane === id), b.id, id) }));
     const page = S.lanePage[b.id] || "running";
-    const wide = (opts.inList ? 400 : innerWidth - (hasRail() ? 80 : 0)) >= 700;
-    const single = wide && !!opts.full;
+    // Lanes side by side only when all of them fit (min 240px each, 12px gaps, 16px padding); otherwise the phone's lane tabs, e.g. on an iPad in portrait
+    const wide = !opts.inList && innerWidth - (hasRail() ? 80 : 0) >= lanes.length * 252 + 20;
     let lanesHtml;
-    if (wide) lanesHtml = `<div class="lanes-parallel ${single ? "full" : ""}">${lanes.map((l) => `<div class="lane"><div class="lh"><span class="nm">${esc(l.name)}</span><span class="ct">${l.cards.length}</span><span class="grow"></span><button class="iconbtn small" title="${(S.boardSort[b.id + ":" + l.id] ?? true) ? "Newest first" : "Oldest first"}" data-act="sort" data-board="${b.id}" data-lane="${l.id}">${ico("sort", 20)}</button><button class="iconbtn small" title="New task" data-act="new">${ico("add", 20)}</button></div>${laneList(l, b, true)}</div>`).join("")}</div>`;
+    if (wide) lanesHtml = `<div class="lanes-parallel">${lanes.map((l) => `<div class="lane"><div class="lh"><span class="nm">${esc(l.name)}</span><span class="ct">${l.cards.length}</span><span class="grow"></span><button class="iconbtn small" title="${(S.boardSort[b.id + ":" + l.id] ?? true) ? "Newest first" : "Oldest first"}" data-act="sort" data-board="${b.id}" data-lane="${l.id}">${ico("sort", 20)}</button><button class="iconbtn small" title="New task" data-act="new">${ico("add", 20)}</button></div>${laneList(l, b, true)}</div>`).join("")}</div>`;
     else {
       const tabs = lanes.map((l) => `<button class="tab ${page === l.id ? "on" : ""}" data-act="lane" data-board="${b.id}" data-lane="${l.id}">${esc(l.name)}${l.cards.length ? `<span class="cnt">${l.cards.length}</span>` : ""}</button>`).join("");
       const lane = lanes.find((l) => l.id === page) || lanes[0];

@@ -258,8 +258,7 @@ body.immersive #bottombar { display: none; }
 @keyframes pulse { from { transform: scale(.6); opacity: .09; } to { transform: scale(1.2); opacity: .25; } }
 .sdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; flex: none; }
 .lanes-parallel { display: flex; gap: 12px; padding: 4px 16px 16px; overflow-x: auto; flex: 1; min-height: 0; align-items: stretch; }
-.lanes-parallel .lane { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; }
-.lanes-parallel.full .lane { flex: 1 1 0; min-width: 260px; width: auto; }
+.lanes-parallel .lane { flex: 1 1 0; min-width: 240px; display: flex; flex-direction: column; min-height: 0; }
 .lanes-parallel .lane .lh { display: flex; align-items: center; gap: 2px; padding: 0 0 6px 4px; }
 .lanes-parallel .lane .lh .nm { font: 600 15px/24px var(--body); letter-spacing: .1px; }
 .lanes-parallel .lane .lh .ct { margin-left: 8px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; text-align: center; font: 500 12px/20px var(--body); background: var(--fill); color: var(--secondary-label); }

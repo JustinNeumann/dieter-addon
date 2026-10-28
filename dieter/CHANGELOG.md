@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.40 (2026-10-28)
+
+- Board: the lanes stand side by side only when all of them fit the screen (at least 240 px each). Otherwise
+  the board shows the phone's lane tabs, so an iPad in portrait (744–1024 px) no longer has to be scrolled
+  sideways. Turning the iPad switches between the two layouts. In landscape (from about 1110 px) the lanes stay
+  side by side and share the width.
+
 ## 0.6.429.39 (2026-10-28)
 
 - Tools → Machines: a machine's screen showed the add-on host's own system and load figures (Cortex-A76,
