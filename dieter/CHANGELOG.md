@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.24 (2026-10-28)
+
+- Checkouts and cards of a machine identity the account no longer knows (the add-on's daemon was removed
+  from the account and re-enrolled, so its records stay owned by the old identity) are handled: such
+  checkouts are hidden from "Run on", so a new task no longer fails with `rpc error: code = NotFound`;
+  such cards show "Owned by a removed machine" instead of polling a conversation that cannot be opened,
+  and carry a "Removed machine" badge on the board.
+
 ## 0.6.429.23 (2026-10-28)
 
 - The gateway sign-in dialog also shows the link as text with a **Copy link** button, for app views where

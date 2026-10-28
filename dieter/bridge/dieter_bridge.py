@@ -1698,6 +1698,11 @@ class State:
                     self.rev += 1
                     self.cond.notify_all()
             return
+        # Checkouts and cards of a machine identity the account no longer knows (e.g. the add-on's daemon
+        # was removed and re-enrolled) cannot be used: hide such checkouts, mark such cards as orphaned.
+        known = {m.get("id") for m in (self.slow.get("machines") or []) if m.get("id")}
+        for c in cards + chats:
+            c["orphaned"] = bool(known) and bool(c.get("owner_daemon_id")) and c.get("owner_daemon_id") not in known
         pmap = {p["id"]: p for p in projects}
         now = time.time()
         finished = None
@@ -1725,7 +1730,8 @@ class State:
             "daemon": {"health": (status.get("health") or {}).get("status"), "version": (status.get("health") or {}).get("release_version"),
                        "route": status.get("route"), "counts": {k: status.get(k) for k in ("projects", "boards", "cards", "chats")}},
             "projects": [{"id": p["id"], "name": p.get("name"), "path": p.get("path"), "boards": p.get("boardCount"),
-                          "checkouts": [{"id": c.get("id"), "name": c.get("name"), "path": c.get("path"), "daemon_id": c.get("daemonId") or c.get("daemon_id")} for c in p.get("checkouts", []) or []]}
+                          "checkouts": [{"id": c.get("id"), "name": c.get("name"), "path": c.get("path"), "daemon_id": c.get("daemonId") or c.get("daemon_id")}
+                                        for c in p.get("checkouts", []) or [] if not known or (c.get("daemonId") or c.get("daemon_id")) in known]}
                          for p in projects],
             "boards": [{"id": b.get("id"), "name": b.get("name"), "project_id": b.get("project_id") or b.get("projectId"),
                         "workflow": b.get("workflow"), "lanes": [l.get("id") for l in b.get("lanes", []) or []]} for b in boards],
