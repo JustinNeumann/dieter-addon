@@ -363,6 +363,28 @@ test("a push deep link (api/focus) opens the card on the next load", async ({ pa
   await expect(page.locator("#panes")).toContainText(`E2E ${stamp}`);
 });
 
+test("a push to /<panel>/card/<id> opens the card in the already open page (HA app panel route)", async ({ page }) => {
+  test.skip(!cardId, "no card from the earlier test");
+  // the parent plays HA's app panel: answers subscribe-properties with its route, resends it on navigation
+  const src = new URL(test.info().project.use.baseURL).href;
+  await page.setContent(`<script>
+    let route = { prefix: "/4d8f2a84_dieter", path: "" }, sub = null; window.navigated = [];
+    const send = () => sub && sub.postMessage({ type: "home-assistant/properties", narrow: false, route }, "*");
+    addEventListener("message", (e) => {
+      if (e.data?.type === "home-assistant/subscribe-properties") { sub = e.source; send(); }
+      if (e.data?.type === "home-assistant/navigate") { navigated.push(e.data.path); route = { prefix: "/4d8f2a84_dieter", path: "" }; send(); }
+    });
+    window.tap = (id) => { route = { prefix: "/4d8f2a84_dieter", path: "/card/" + id }; send(); };
+  </script><iframe src="${src}" style="width:1200px;height:800px"></iframe>`);
+  const frame = page.frameLocator("iframe");
+  await expect(frame.locator("#shell")).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1500); // state loaded, subscribed
+  await page.evaluate((id) => window.tap(id), cardId);
+  await expect(frame.locator("#draft")).toBeVisible({ timeout: 30_000 });
+  await expect(frame.locator("#panes")).toContainText(`E2E ${stamp}`);
+  expect(await page.evaluate(() => window.navigated)).toEqual(["/4d8f2a84_dieter"]);
+});
+
 test("the HA summary endpoint stays consistent", async ({ request }) => {
   let ha;
   for (let i = 0; i < 12; i++) { // the bridge polls the daemon every 8 s

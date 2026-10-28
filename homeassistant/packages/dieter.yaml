@@ -22,8 +22,9 @@
 #   http://DIETER_HOST:8099/api/ha             compact status for sensor.dieter (polled)
 #   events dieter_turn_finished / dieter_card_review   fired by the bridge via the Supervisor
 #                                              as soon as an agent finishes / a card hits Review
-# Ingress URLs carry no deep link, so before a push HA tells the bridge which card to open
-# (rest_command.dieter_focus); the page asks /api/focus when it loads.
+# The push opens /<slug>/card/<card id>: the app panel passes that route to the Dieter page, which
+# opens the card, also when the page is already open. (rest_command.dieter_focus, the older one-card
+# slot the page reads when it loads, is still there for automations that open the bare panel URL.)
 # =============================================================================
 
 rest:
@@ -121,7 +122,7 @@ rest_command:
     content_type: "application/json"
     timeout: 30
     payload: '{{ {"lane": lane} | to_json }}'
-  # card the Dieter panel opens on its next load (15 min), used before a push
+  # card the Dieter panel opens on its next load (15 min); pushes link /<slug>/card/<id> instead
   dieter_focus:
     url: "http://4d8f2a84-dieter:8099/api/focus"
     method: POST
@@ -149,11 +150,7 @@ automation:
     actions:
       - variables:
           ev: "{{ trigger.event.data }}"
-          url: /4d8f2a84_dieter
-      - action: rest_command.dieter_focus
-        continue_on_error: true
-        data:
-          card: "{{ ev.card_id if trigger.id == 'question' else ev.id }}"
+          url: "/4d8f2a84_dieter/card/{{ ev.card_id if trigger.id == 'question' else ev.id }}"
       # replace with your Companion app's notify service (Settings → Companion app → device name)
       - action: notify.mobile_app_YOUR_PHONE
         data:

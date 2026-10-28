@@ -1777,9 +1777,24 @@
   if (startTab && TABS.some((t) => t[0] === startTab)) S.tab = startTab;
   connect();
   function openAtStart(id) { const once = setInterval(() => { if (S.data) { clearInterval(once); const c = conv(id); if (c) { S.tab = c.kind === "chat" ? "chats" : "projects"; if (c.kind !== "chat" && c.board_id) S.stacks.projects = [{ kind: "root", tab: "projects" }, { kind: "board", id: c.board_id }]; openConversation(id); } } }, 150); }
-  // ?card=ID (PC page), else the card HA registered before its push (Ingress deep link: /api/focus)
+  // push deep link: HA's app panel passes its route to a subscribed iframe, on load and on every navigation, so a
+  // tap on /<panel>/card/<id> opens that card even when the page is already open; the URL then goes back to the panel
+  let routeCard = false;
+  if (window.parent !== window && !SNAP) {
+    addEventListener("message", (e) => {
+      const d = e.data;
+      if (e.source !== window.parent || d?.type !== "home-assistant/properties" || !d.route) return;
+      const m = ((d.route.prefix || "") + (d.route.path || "")).match(/^(.*)\/card\/(c_[\w-]+)/);
+      if (!m) return;
+      routeCard = true; api("api/focus?consume=1").catch(() => {});
+      openAtStart(m[2]);
+      window.parent.postMessage({ type: "home-assistant/navigate", path: m[1] || "/", options: { replace: true } }, "*");
+    });
+    window.parent.postMessage({ type: "home-assistant/subscribe-properties" }, "*");
+  }
+  // ?card=ID (PC page), else the card an older HA automation registered before its push (/api/focus)
   const startCard = q.get("card");
   if (startCard) openAtStart(startCard);
-  else if (!startTab && !SNAP) api("api/focus?consume=1").then((f) => { if (f && f.id) openAtStart(f.id); }).catch(() => {});
+  else if (!startTab && !SNAP) api("api/focus?consume=1").then((f) => { if (f && f.id && !routeCard) openAtStart(f.id); }).catch(() => {});
   if (!startCard && !startTab && S.data === null) { const once = setInterval(() => { if (S.data) { clearInterval(once); const m = mruProject(); const b = S.data.boards?.[0]; if ((m || b) && twoPane() && (S.stacks.projects || []).length <= 1) { S.stacks.projects = [{ kind: "root", tab: "projects" }, m ? { kind: "project", id: m.id } : { kind: "board", id: b.id }]; render(); } } }, 150); } // default board on wide screens, unless something was opened already
 })();

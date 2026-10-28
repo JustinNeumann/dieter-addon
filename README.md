@@ -45,7 +45,7 @@ cd dieter/tests && npm install && npx playwright install chromium   # once
 The container uses the host network (bridge :18099, daemon :4342, proxy :18100) and keeps its
 `/data` (staged runtime, test cards) in `~/.cache/dieter-addon-e2e/data`. The tests cover: page via
 Ingress, add repository (chunked POST), task on the mock harness with streaming, chat field focus +
-send, model/effort pickers, Inbox, Tools (Machines/Usage/Changes, Settings → Agent instructions), push deep link, `/api/ha`.
+send, model/effort pickers, Inbox, Tools (Machines/Usage/Changes, Settings → Agent instructions), push deep links (`/api/focus` and the app panel route), `/api/ha`.
 
 ### Releasing
 

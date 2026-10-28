@@ -23,7 +23,7 @@ flowchart LR
       ENV["/data/dieter.env\nCLAUDE_CODE_OAUTH_TOKEN · OPENAI_API_KEY\n/data/.git-credentials (GitHub token)"]
     end
     Pkg["packages/dieter.yaml\nsensor.dieter (REST every 30 s)\nrest_command.dieter_focus · create · send · move\nautomation on dieter_turn_finished / dieter_card_review"]
-    Push["notify.mobile_app_YOUR_PHONE\ntap → /4d8f2a84_dieter, card from /api/focus"]
+    Push["notify.mobile_app_YOUR_PHONE\ntap → /4d8f2a84_dieter/card/<id>\npanel route → page opens the card"]
   end
 
   HAApp -->|LAN or Nabu Casa| Core

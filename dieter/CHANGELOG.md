@@ -2,6 +2,16 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.37 (2026-10-28)
+
+- Push notifications open their own task: the Home Assistant package now links each push to
+  `/4d8f2a84_dieter/card/<card id>`. Home Assistant's app panel hands that route to the Dieter page, which
+  opens the card's conversation, also when the page is already open (before, the card came from
+  `/api/focus`, read only when the page loaded, and that one slot held the last push's card, so an older
+  notification opened the newest card). The page then sets the panel URL back to `/4d8f2a84_dieter`, so the
+  next tap works again. `/api/focus` stays for older copies of the package. Update the automation's `url`
+  variable in your copy of `homeassistant/packages/dieter.yaml`.
+
 ## 0.6.429.36 (2026-10-28)
 
 - Agent instructions in Settings: Tools → Settings → **Agent instructions** edits the text that opens every

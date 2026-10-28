@@ -64,9 +64,12 @@ The add-on works on its own from the sidebar. The repository ships an optional p
 - `rest_command.dieter_create_task`, `dieter_send_message`, `dieter_move_card`, `dieter_focus` to
   drive Dieter from automations;
 - an automation that pushes to the Companion app when the bridge fires `dieter_turn_finished`
-  (an agent ended its turn) or `dieter_card_review` (a card moved to Review). The tap opens the
-  Dieter panel; because Ingress URLs carry no deep link, the automation first tells the bridge which
-  card to show (`POST /api/focus`, remembered for 15 minutes).
+  (an agent ended its turn) or `dieter_card_review` (a card moved to Review). The tap opens
+  `/4d8f2a84_dieter/card/<card id>`: Home Assistant's app panel hands that route to the Dieter page,
+  which opens the card's conversation, also when the page is already open and with several pushes
+  waiting (each opens its own card). Older copies of the package, which open the bare panel URL after
+  `rest_command.dieter_focus` (`POST /api/focus`, one card for 15 minutes, read when the page loads),
+  still work; update the `url` variable to get the per-card link.
 
 Install: copy
 [`homeassistant/packages/dieter.yaml`](https://github.com/JustinNeumann/dieter-addon/blob/main/homeassistant/packages/dieter.yaml)
