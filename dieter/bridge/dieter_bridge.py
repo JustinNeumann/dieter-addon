@@ -186,6 +186,17 @@ def b64json(s):
         return {}
 
 
+def local_daemon_info():
+    """(daemon id, enrolled) from the store's runtime file; ("", False) if unknown. An unenrolled daemon
+    owns every record it holds, so orphan detection only applies to an enrolled one."""
+    try:
+        with open(os.path.join(DIETER_HOME, "runtime", "daemon.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        return str(d.get("daemonId") or ""), bool(d.get("enrolled"))
+    except Exception:
+        return "", False
+
+
 def norm_card(c, kind="card"):
     """snake_case (list) and camelCase (show/create) variants -> one shape."""
     g = lambda *ks: next((c[k] for k in ks if k in c and c[k] is not None), None)
@@ -1700,7 +1711,10 @@ class State:
             return
         # Checkouts and cards of a machine identity the account no longer knows (e.g. the add-on's daemon
         # was removed and re-enrolled) cannot be used: hide such checkouts, mark such cards as orphaned.
-        known = {m.get("id") for m in (self.slow.get("machines") or []) if m.get("id")}
+        local_id, enrolled = local_daemon_info()
+        known = {m.get("id") for m in (self.slow.get("machines") or []) if m.get("id")} if enrolled else set()
+        if enrolled and local_id:
+            known.add(local_id)
         for c in cards + chats:
             c["orphaned"] = bool(known) and bool(c.get("owner_daemon_id")) and c.get("owner_daemon_id") not in known
         pmap = {p["id"]: p for p in projects}

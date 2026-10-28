@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.25 (2026-10-28)
+
+- Fix for 0.6.429.24: the "removed machine" detection only applies to an enrolled daemon (an unenrolled
+  daemon owns every record it holds, so its cards and checkouts stayed usable before but were wrongly
+  marked as orphaned, which hid the composer). The daemon's own id (`runtime/daemon.json`) counts as known.
+- E2E note: "Edit… changes the title and task" and "Schedules: create … pause" fail on 0.6.429.23 too
+  (same 25 passed / 2 failed with the shared test cache); unrelated to this change.
+
 ## 0.6.429.24 (2026-10-28)
 
 - Checkouts and cards of a machine identity the account no longer knows (the add-on's daemon was removed
