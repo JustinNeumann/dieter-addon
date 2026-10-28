@@ -165,7 +165,7 @@
   }
 
   // ------------------------------------------------------------------ navigation (MobileNavigation)
-  const isList = (r) => ["root", "project", "board"].includes(r.kind);
+  const isList = (r) => ["root", "project", "board", "dreamfall"].includes(r.kind);
   const isImmersive = (r) => ["conversation", "pane", "terminal"].includes(r.kind);
   const stack = () => S.stacks[S.tab];
   const top = () => stack()[stack().length - 1];
@@ -216,7 +216,7 @@
     const stk = stack();
     const listIdx = stk.map(isList).lastIndexOf(true);
     let listHtml, detailHtml = null;
-    const boardFull = twoPane() && listIdx >= 0 && stk[listIdx].kind === "board";
+    const boardFull = twoPane() && listIdx >= 0 && ["board", "dreamfall"].includes(stk[listIdx].kind);
     document.body.classList.toggle("fullpane", boardFull);
     if (boardFull) {
       // Kanban board on a tablet: the lanes side by side use the whole width; opening a card shows it full width, back returns to the board
@@ -306,6 +306,8 @@
       case "root": return { inbox: inboxScreen, projects: projectsScreen, chats: chatsScreen, mail: mailScreen, tools: toolsScreen, channels: channelsScreen }[route.tab](opts);
       case "project": return projectScreen(route, opts);
       case "board": return boardScreen(route, opts);
+      case "dreamfall": return dreamfallScreen(route, opts);
+      case "dfcard": return dfCardScreen(route, opts);
       case "conversation": return conversationScreen(route, opts);
       case "pane": return paneScreen(route, opts);
       case "tool": return toolScreen(route, opts);
@@ -382,13 +384,14 @@
       <div class="content ${hasRail() ? "" : "fab-space"}" data-scroll="projects">${searchField("projects", "Search projects and boards")}${body}</div>${fab("New task", "new")}</div>`;
   }
   function projectGroup(p) {
-    const boards = (S.data.boards || []).filter((b) => b.project_id === p.id);
+    const boards = boardEntries(p.id);
     const n = boards.length + 1;
     const machines = [...new Set(p.checkouts.map((c) => cardMachineName(c)))];
     const head = `<div class="gitem ${pos(0, n)} clickable" data-act="project" data-id="${p.id}"><div style="display:flex;align-items:center;padding:11px 14px;gap:14px">${avatar(p.id, p.name, 38)}
       <div style="flex:1;min-width:0"><div class="t-headline ellipsis">${esc(p.name)}</div><div class="t-subheadline c-secondary ellipsis">${esc(machines.length ? machines.join(" · ") : "No checkouts")}</div></div>
       <button class="iconbtn" data-act="menu" data-menu="project" data-id="${p.id}">${ico("more_vert")}</button></div></div>`;
-    const rows = boards.map((b, i) => {
+    const rows = boards.map(({ b, df }, i) => {
+      if (df) return listRow({ title: df.name, glyph: "waterfall_chart", glyphTint: "var(--purple)", value: String(dfIdeas(df)), position: pos(i + 1, n), act: "dreamfall", extra: `data-pid="${df.id}" data-id="${b.id}" data-drag="board" data-project="${p.id}"`, trailing: countBadge(dfWaiting(df), "var(--warning)") });
       const cards = (S.data.cards || []).filter((c) => c.board_id === b.id && !c.archived);
       const attention = cards.filter((c) => c.lane === "review" || isActive(c.runtime)).length;
       return listRow({ title: b.name, glyph: "view_kanban", glyphTint: stableColor(b.id), value: String(cards.length), position: pos(i + 1, n), act: "board", extra: `data-id="${b.id}" data-drag="board" data-project="${p.id}"`, trailing: countBadge(attention, "var(--warning)") });
@@ -400,8 +403,9 @@
   function projectScreen(route, opts) {
     const p = project(route.id);
     if (!p) return `<div class="screen">${appbar({ title: "Project", back: opts.back })}<div class="center-fill t-body-em c-secondary">This project is no longer available.</div></div>`;
-    const boards = (S.data.boards || []).filter((b) => b.project_id === p.id);
-    const rows = boards.map((b, i) => {
+    const boards = boardEntries(p.id);
+    const rows = boards.map(({ b, df }, i) => {
+      if (df) { const w = dfWaiting(df); return listRow({ title: df.name, subtitle: ["Dreamfall", counts(dfIdeas(df), "idea"), w ? `${w} waiting for you` : null].filter(Boolean).join(" · "), glyph: "waterfall_chart", tile: "#8a62c3", position: pos(i, boards.length), act: "dreamfall", extra: `data-pid="${df.id}" data-id="${b.id}" data-drag="board" data-project="${p.id}"`, trailing: countBadge(w, "var(--warning)") }); }
       const cards = (S.data.cards || []).filter((c) => c.board_id === b.id && !c.archived); const running = cards.filter((c) => c.lane === "running").length;
       const attention = cards.filter((c) => c.lane === "review" || isActive(c.runtime)).length;
       return listRow({ title: b.name, subtitle: [counts(cards.length, "card"), running ? `${running} running` : null].filter(Boolean).join(" · "), glyph: "view_kanban", tile: stableColor(b.id), position: pos(i, boards.length), act: "board", extra: `data-id="${b.id}" data-drag="board" data-project="${p.id}"`, trailing: countBadge(attention, "var(--warning)") });
@@ -461,6 +465,391 @@
       <button class="iconbtn" data-act="menu" data-menu="card" data-id="${c.id}">${ico("more_vert")}</button></div></div>`;
   }
   const mpill = (icon, text) => `<span class="mpill">${ico(icon, 12)}<span class="txt">${esc(text)}</span></span>`;
+
+  // ---- Dreamfall board (bridge/dreamfall.py): stage boards of one project tied together as a funnel
+  // Enumeration (agent) → Navigation (agent) → Implementation (the person). Records come with the state
+  // (S.data.dreamfall: pipelines, compact card records, runs); a card's full trail is loaded on demand.
+  const DF_COLOR = { enumeration: "var(--purple)", navigation: "var(--info)", implementation: "var(--success)" };
+  const DF_LANES = {
+    enumeration: { todo: "Queue", running: "Queue", review: "Released", done: "Transferred" },
+    navigation: { todo: "Waiting for you", running: "Waiting for you", review: "Parked", done: "Picked" },
+    implementation: { todo: "Todo", running: "Running", review: "Review", done: "Done" },
+  };
+  const DF_TAIL = 40;
+  const dfData = () => S.data?.dreamfall || { pipelines: [], records: {}, runs: {} };
+  const dfPipeline = (id) => dfData().pipelines.find((p) => p.id === id);
+  function dfStageOfBoard(boardId) { for (const p of dfData().pipelines) { const s = (p.stages || []).find((x) => x.board_id === boardId); if (s) return [p, s]; } return [null, null]; }
+  const dfRec = (id) => dfData().records?.[id] || null;
+  const dfIsRun = (s, c) => { const t = (c.title || "").trim(); return !!t && !!s && (t === s.run_title || (s.old_run_titles || []).includes(t)); };
+  function dfSplit(c) { const t = cardTitle(c); const m = t.match(/^\s*\[([^\]]{1,60})\]\s*(.*)$/); const cat = dfRec(c.id)?.category || (m ? m[1].trim() : ""); return [cat, m ? m[2].trim() || t : t]; }
+  const dfHHMM = (cron) => { const p = String(cron || "").split(/\s+/); return p.length > 1 && /^\d+$/.test(p[0]) && /^\d+$/.test(p[1]) ? `${p[1].padStart(2, "0")}:${p[0].padStart(2, "0")}` : ""; };
+  const dfShort = (id) => String(id || "").slice(0, 10);
+  const byTime = (k) => (a, b) => (Date.parse(b[k] || b.updated_at || 0) || 0) - (Date.parse(a[k] || a.updated_at || 0) || 0);
+  function dfWhen(iso) {
+    const t = Date.parse(iso || ""); if (!t) return "";
+    const d = new Date(t), today = new Date(); const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    const diff = Math.round((day(today) - day(d)) / 86400000);
+    return diff === 0 ? `today ${hm}` : diff === 1 ? `yesterday ${hm}` : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${hm}`;
+  }
+  function dfExcerpt(c) {
+    if (c.summary) return c.summary;
+    const body = String(c.initial_prompt || "").split(/\n-{3,}\s*\n(?=\s*(?:Found by |\*\*(?:Promoted|Picked) from ))/)[0]; // without the provenance footers
+    const lines = body.split("\n").map((l) => l.replace(/^#+\s*/, "").replace(/\*\*([^*]+)\*\*:?/g, "").replace(/^[-*]\s+/, "").replace(/<!--.*?-->/g, "").trim()).filter((l) => l && !/^-{3,}$/.test(l));
+    return lines.join(" ").slice(0, 240);
+  }
+  // one stage: its ideas by lane (run cards apart), its latest run
+  function dfStage(p, s) {
+    const all = (S.data.cards || []).filter((c) => c.board_id === s.board_id && !c.archived);
+    const ideas = all.filter((c) => !dfIsRun(s, c)), runCards = all.filter((c) => dfIsRun(s, c)).sort(byTime("created_at"));
+    const lane = (...ls) => ideas.filter((c) => ls.includes(c.lane));
+    const runs = (dfData().runs?.[p.id] || []).filter((r) => r.stage === s.role);
+    const human = s.actor === "human";
+    const queue = (human ? lane("todo", "running", "review") : lane("todo", "running")).sort(byTime("created_at"));
+    return { p, s, role: s.role, name: s.name, human, color: DF_COLOR[s.role] || stableColor(s.board_id), icon: s.icon || "view_kanban", ideas, lane, queue, runCard: runCards[0], lastRun: runs[runs.length - 1] };
+  }
+  const dfNext = (p, role) => { const i = (p.stages || []).findIndex((s) => s.role === role); return (p.stages || [])[i + 1] || null; };
+  function dfActorLine(st) {
+    const p = st.p;
+    if (st.human) return `${ico("person", 16)}<span>You decide · agents never create or move cards here</span>`;
+    const t = dfHHMM(st.s.cron); const prev = (p.stages || [])[(p.stages || []).indexOf(st.s) - 1];
+    const what = st.role === "enumeration" ? "writes new ideas" : `judges ${prev ? prev.name : "the queue"}`;
+    return `${ico("smart_toy", 16)}<span class="ellipsis">Agent · ${t ? "daily " + t : "on demand"}${p.enabled === false ? " (paused)" : ""} · ${esc(what)}</span>`;
+  }
+  function dfRunLine(st) {
+    const rc = st.runCard; let r = st.lastRun;
+    if (rc && r && r.card !== rc.id && Date.parse(rc.created_at || 0) > Date.parse(r.started_at || 0)) r = null; // a newer run that has not begun yet
+    const c = rc && (!r || r.card === rc.id) ? rc : (r ? conv(r.card) : null);
+    const live = c && isActive(c.runtime);
+    const t = dfHHMM(st.s.cron);
+    if (!r && !c) return `<div class="df-run">${ico("schedule", 18)}<span>No run yet${t ? ` · next at <b>${t}</b>` : ""}${st.p.enabled === false ? " · schedules paused" : ""}</span></div>`;
+    const n = r?.counts || {};
+    const what = st.role === "enumeration" ? (n.created != null ? `<b>${n.created}</b> new ${n.created === 1 ? "idea" : "ideas"}` : "")
+      : (n.promoted != null || n.released != null) ? `<b>${(n.promoted || 0) + (n.released || 0)}</b> judged, <b>${n.promoted || 0}</b> promoted` : "";
+    const status = live ? `<span class="livedot" style="color:var(--info)"></span>` : r?.status === "failed" ? ico("error", 18) : r?.status === "done" ? ico("check_circle", 18) : ico("hourglass_empty", 18);
+    const when = r ? `${dfWhen(r.started_at)}${r.finished_at ? " – " + new Date(Date.parse(r.finished_at)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : ""}` : dfWhen(c?.created_at);
+    const state = live ? "working" : r?.status === "failed" ? "failed" : r?.status === "running" ? "not finished" : "";
+    return `<div class="df-run ${c ? "clickable" : ""}" ${c ? `data-act="open" data-id="${c.id}"` : ""} title="${esc(r?.note || "")}">${status}<span class="ellipsis">Run · ${esc(when)}${state ? " · " + state : ""}${what ? " · " + what : ""}</span></div>`;
+  }
+  const dfCat = (cat) => (cat ? `<span class="lpill" style="color:${stableColor(cat)};background:color-mix(in srgb, ${stableColor(cat)} 14%, transparent)"><span class="dot"></span>${esc(cat)}</span>` : "");
+  function dfVerdict(v) {
+    if (!v || !v.kind) return "";
+    const good = v.kind === "promote" || v.kind === "pick";
+    const label = { promote: "Promoted", pick: "Picked", release: "Released", park: "Parked" }[v.kind] || v.kind;
+    return `<div class="df-verdict" style="--vc:${good ? "var(--success)" : "var(--secondary-label)"}">${ico(good ? "thumb_up" : v.kind === "park" ? "pause_circle" : "thumb_down", 14)}<span><b>${label}</b>${v.score != null ? ` · ${esc(v.score)}/10` : ""}${v.rationale ? " · " + esc(v.rationale) : ""}</span></div>`;
+  }
+  function dfCard(st, c) {
+    const rec = dfRec(c.id); const [cat, title] = dfSplit(c); const p = st.p;
+    const src = rec?.source ? (p.stages || []).find((s) => s.role === (dfRec(rec.source)?.stage)) || (p.stages || [])[(p.stages || []).indexOf(st.s) - 1] : null;
+    const metas = [];
+    if (rec?.source) metas.push(mpill("call_split", `from ${src?.name || "earlier stage"}`));
+    if (rec?.transferred_to) { const to = dfNext(p, st.role); metas.push(mpill("east", `to ${to?.name || "next stage"}`)); }
+    const by = rec?.created_by;
+    if (by && !rec?.source) metas.push(by.actor === "agent" ? mpill("auto_awesome", by.run ? `Run ${dfWhen((dfData().runs?.[p.id] || []).find((r) => r.card === by.run)?.started_at) || dfShort(by.run)}` : by.name || "Agent") : mpill("person", `Added by ${by.name || "you"}`));
+    if (st.human && rec?.source && by?.actor === "human") metas.push(mpill("how_to_reg", `Picked by ${by.name || "you"}`));
+    if (st.human && !rec) metas.push(`<span class="mpill df-warn" title="This card did not come through a pick on the Dreamfall board">${ico("report", 12)}<span class="txt">Added outside Dreamfall</span></span>`);
+    if (st.human) metas.push(mpill("account_tree", workspaceBadge(c)));
+    let foot = "", button = "";
+    if (st.human) {
+      const tone = rtTone(c.runtime), badge = rtBadge(c.runtime); const status = tone !== "idle" || badge ? rtLabel(c.runtime) : DF_LANES.implementation[c.lane] || "";
+      foot = `<div class="status" style="color:${toneColor(tone)}">${tone === "active" ? `<span class="livedot"></span>` : `<span class="sdot"></span>`}<span>${esc(status)}</span></div><div class="agent">${esc([agentLine(c), tokensLabel(c)].filter(Boolean).join(" · "))}</div>`;
+      if (c.lane === "todo" && !c.initial_prompt_sent) button = `<button class="btn filled with-icon df-btn" data-act="df-start" data-id="${c.id}" data-pid="${p.id}">${ico("play_arrow", 18)}Start</button>`;
+    } else if (["todo", "running"].includes(c.lane)) {
+      const next = dfNext(p, st.role);
+      if (next?.actor === "human") { foot = `<div class="agent">Waiting for you</div>`; button = `<button class="btn tonal with-icon df-btn" data-act="df-pick" data-id="${c.id}" data-pid="${p.id}">${ico("arrow_forward", 16)}Pick</button>`; }
+      else foot = `<div class="agent">Waiting for ${esc(next?.name || "the next stage")}${next?.cron ? " · " + dfHHMM(next.cron) : ""}</div>`;
+    } else foot = `<div class="agent">${esc(DF_LANES[st.role]?.[c.lane] || c.lane)} · ${esc(cardAge(c) || "")}</div>`;
+    const open = st.human ? `data-act="open" data-id="${c.id}"` : `data-act="df-card" data-id="${c.id}"`;
+    return `<div class="ccard workcard clickable df-card ${isSelected(c.id) ? "selected" : ""}" ${open}>
+      <div class="body">${cat ? `<div class="labels">${dfCat(cat)}</div>` : ""}<div class="top"><div class="ttl clamp2">${esc(title)}</div>${cardAge(c) ? `<div class="age">${cardAge(c)}</div>` : ""}</div>
+      ${dfExcerpt(c) ? `<div class="summary clamp2">${esc(dfExcerpt(c))}</div>` : ""}${dfVerdict(rec?.verdict || rec?.source_verdict)}${metas.length ? `<div class="metas">${metas.join("")}</div>` : ""}</div>
+      <div class="foot"><div class="col">${foot}</div>${button}<button class="iconbtn" data-act="menu" data-menu="dfcard" data-id="${c.id}">${ico("more_vert")}</button></div></div>`;
+  }
+  function dfGroup(st, key, title, cards, icon) {
+    if (!cards.length) return "";
+    const k = `dfo:${st.p.id}:${st.role}:${key}`; const open = !!S.collapsed[k];
+    const shown = cards.slice(0, DF_TAIL);
+    return `<div class="df-sub ${open ? "open" : ""}" data-act="collapse" data-key="${esc(k)}">${ico("chevron_right", 18, "chev")}${ico(icon, 16)}<span>${esc(title)}</span><span class="c">${cards.length > DF_TAIL ? `newest ${DF_TAIL} of ${cards.length}` : cards.length}</span></div>
+      ${open ? `<div class="df-group ${key}">${shown.map((c) => dfCard(st, c)).join("")}</div>` : ""}`;
+  }
+  function dfStageBody(st) {
+    const out = [];
+    if (st.human) out.push(`<div class="df-gate">${ico("lock_person", 22)}<div class="t"><b>You decide what gets built</b>Pick an idea in ${esc((st.p.stages || [])[(st.p.stages || []).indexOf(st.s) - 1]?.name || "the stage before")} to copy it here as a Todo draft. Start it when you are ready.</div></div>`);
+    else out.push(dfRunLine(st));
+    if (st.human) {
+      [["todo", "Todo"], ["running", "Running"], ["review", "Review"]].forEach(([l, t]) => { const cs = st.lane(l).sort(byTime("updated_at")); if (cs.length) out.push(`<div class="df-sec">${esc(t)}<span>${cs.length}</span></div>${cs.map((c) => dfCard(st, c)).join("")}`); });
+      if (!st.queue.length) out.push(`<div class="df-empty">Nothing picked yet.</div>`);
+      out.push(dfGroup(st, "done", "Done", st.lane("done").sort(byTime("phase_changed_at")), "task_alt"));
+    } else {
+      out.push(st.queue.length ? st.queue.map((c) => dfCard(st, c)).join("") : `<div class="df-empty">${st.role === "enumeration" ? "No ideas waiting." : "Nothing waiting for you."}</div>`);
+      const L = DF_LANES[st.role] || {};
+      out.push(dfGroup(st, "done", L.done || "Done", st.lane("done").sort(byTime("phase_changed_at")), st.role === "enumeration" ? "call_split" : "how_to_reg"));
+      out.push(dfGroup(st, "review", L.review || "Review", st.lane("review").sort(byTime("phase_changed_at")), st.role === "enumeration" ? "inventory_2" : "pause_circle"));
+    }
+    return out.join("");
+  }
+  function dfStageHead(st) {
+    const run = !st.human && st.s.schedule_id ? `<button class="iconbtn small" title="Run ${esc(st.name)} now" data-act="df-run" data-id="${st.p.id}" data-stage="${st.role}">${ico("play_arrow", 20)}</button>` : "";
+    const add = st.role === "enumeration" || st.human ? `<button class="iconbtn small" title="${st.human ? "New task" : "New idea"}" data-act="df-new" data-board="${st.s.board_id}">${ico("add", 20)}</button>` : "";
+    return `<div class="lh">${ico(st.icon, 20, "df-ic")}<span class="nm">${esc(st.name)}</span><span class="ct">${st.queue.length}</span><span class="grow"></span>${run}${add}</div><div class="actor">${dfActorLine(st)}</div>`;
+  }
+  function dfFunnel(stages) {
+    return `<div class="df-funnel">${stages.map((st, i) => {
+      let arrow = "";
+      if (i > 0) {
+        const prev = stages[i - 1];
+        let label = "";
+        if (st.human) label = "you";
+        else { const vs = prev.ideas.map((c) => dfRec(c.id)?.verdict?.kind).filter((k) => k === "promote" || k === "release"); const up = vs.filter((k) => k === "promote").length; label = vs.length ? `${up} of ${vs.length}` : ""; }
+        arrow = `<div class="df-arrow"><div class="in">${ico("arrow_forward", 18)}<span class="pct">${esc(label)}</span></div></div>`;
+      }
+      const sub = st.human ? `${ico("person", 13)}You · human gate${st.lane("running").length ? ` · ${st.lane("running").length} running` : ""}` : `${ico("smart_toy", 13)}Agent · ${dfHHMM(st.s.cron) ? "daily " + dfHHMM(st.s.cron) : "on demand"}${st.p.enabled === false ? " · paused" : ""}`;
+      return `${arrow}<div class="df-stage-chip" style="--stage:${st.color}" data-act="df-stage" data-id="${st.p.id}" data-stage="${st.role}"><span class="num">${ico(st.icon, 20)}</span><div class="t"><div class="n">${esc(st.name)}</div><div class="s">${sub}</div></div><div class="big">${st.queue.length}</div></div>`;
+    }).join("")}</div>`;
+  }
+  function dreamfallScreen(route, opts) {
+    const p = dfPipeline(route.id);
+    if (!p) return `<div class="screen">${appbar({ title: "Dreamfall", back: opts.back })}${dfData().ready === false ? spinnerCenter() : `<div class="center-fill t-body-em c-secondary">This Dreamfall board is no longer available.</div>`}</div>`;
+    const stages = (p.stages || []).map((s) => dfStage(p, s));
+    const total = stages.reduce((n, st) => n + st.ideas.length, 0);
+    const wide = !opts.inList && innerWidth - (hasRail() ? 80 : 0) >= stages.length * 312 + 20;
+    const page = stages.some((st) => st.role === S.lanePage[p.id]) ? S.lanePage[p.id] : (stages.find((st) => st.role === "navigation") || stages[0]).role;
+    let body;
+    if (wide) body = `${dfFunnel(stages)}<div class="df-stages">${stages.map((st) => `<div class="df-stage ${st.human ? "human" : ""}" style="--stage:${st.color}" data-stage="${st.role}">${dfStageHead(st)}<div class="lane-list" data-scroll="df-${p.id}-${st.role}">${dfStageBody(st)}</div></div>`).join("")}</div>`;
+    else {
+      const tabs = stages.map((st) => `<button class="tab ${page === st.role ? "on" : ""}" data-act="df-stage" data-id="${p.id}" data-stage="${st.role}">${ico(st.icon, 18)}${esc(st.name)}${st.queue.length ? `<span class="cnt">${st.queue.length}</span>` : ""}</button>`).join("");
+      const st = stages.find((x) => x.role === page);
+      body = `<div class="tabs scroll df-tabs">${tabs}</div><div class="content ${hasRail() ? "" : "fab-space"}" data-scroll="df-${p.id}-${page}"><div class="df-stage single ${st.human ? "human" : ""}" style="--stage:${st.color}" data-stage="${st.role}">${dfStageHead(st)}<div class="lane-list">${dfStageBody(st)}</div></div></div>`;
+    }
+    return `<div class="screen df-screen">${appbar({ title: p.name, subtitle: [project(p.project_id)?.name, "Dreamfall", counts(total, "idea")].filter(Boolean).join(" · "), back: opts.back, actions: iconAction("more_vert", "menu", `data-menu="dreamfall" data-id="${p.id}"`) })}${body}</div>`;
+  }
+  // ---- a Dreamfall card: brief, verdict, provenance (copies across stages) and the trail
+  S.df = { detail: {} };
+  function dfLoadDetail(id, want) {
+    const d = S.df.detail[id]; if (d && (d.loading || d.want === want)) return;
+    S.df.detail[id] = { ...(d || {}), loading: true, want };
+    api(`api/dreamfall/card/${encodeURIComponent(id)}`).then((r) => { S.df.detail[id] = { data: r, want, loading: false }; render(); })
+      .catch((e) => { S.df.detail[id] = { error: e.message, want, loading: false }; render(); });
+  }
+  const DF_EVENT = {
+    created: ["auto_awesome", (e) => e.actor === "human" ? `Added to ${e.stage_name}` : `Created on ${e.stage_name}`],
+    judged: ["thumb_up", (e) => `Judged: ${e.verdict === "promote" ? "promote" : e.verdict}`],
+    released: ["thumb_down", () => "Released"], parked: ["pause_circle", () => "Parked"],
+    transferred: ["call_split", (e) => `Transferred to ${e.to_name}, source released`],
+    picked: ["how_to_reg", (e) => (e.to_name ? `Picked for ${e.to_name}` : "Picked")], restored: ["undo", () => "Back in the queue"], started: ["play_arrow", () => "Started"],
+  };
+  function dfTrail(p, d, c) {
+    const sname = (role) => (p.stages || []).find((s) => s.role === role)?.name || role || "";
+    const evs = (d.events || []).map((e) => {
+      const to = e.stage && ["transferred", "picked"].includes(e.kind) ? sname(e.stage) : "";
+      const [icon, fn] = DF_EVENT[e.kind] || ["circle", () => e.kind];
+      const who = [e.name || (e.actor === "human" ? "You" : "Agent"), e.run ? `run ${dfShort(e.run)}` : "", dfWhen(e.at)].filter(Boolean).join(" · ");
+      const q = e.rationale || e.note ? `<div class="q">${esc(e.rationale || e.note)}${e.score != null ? ` <span class="c-secondary">Score ${esc(e.score)}/10.</span>` : ""}</div>` : "";
+      const human = e.actor === "human";
+      return `<div class="ev"><div class="ln"><span class="dot ${human ? "human" : ""}">${ico(human && e.kind === "created" ? "person" : icon, 16)}</span><span class="bar"></span></div><div class="tx"><div class="h">${esc(fn({ ...e, stage_name: sname(e.card_stage || e.stage), to_name: to }))}</div><div class="w">${esc(who)}</div>${q}</div></div>`;
+    });
+    if (c) evs.push(`<div class="ev"><div class="ln"><span class="dot now">${ico("location_on", 16)}</span></div><div class="tx"><div class="h">Now: ${esc(DF_LANES[dfStageOfBoard(c.board_id)[1]?.role]?.[c.lane] || c.lane)} on ${esc(dfStageOfBoard(c.board_id)[1]?.name || "")}</div><div class="w">${esc(rtState(c.runtime) !== "idle" ? rtLabel(c.runtime) : cardAge(c) === "now" ? "changed just now" : cardAge(c) ? "changed " + cardAge(c) + " ago" : "")}</div></div></div>`);
+    return evs.join("");
+  }
+  function dfCardScreen(route, opts) {
+    const c = conv(route.id); const [p, s] = dfStageOfBoard(c?.board_id);
+    if (!c || !p) return `<div class="screen">${appbar({ title: "Idea", back: opts.back })}<div class="center-fill t-body-em c-secondary">${c ? "This card is not on a Dreamfall board." : "This card is no longer on the page."}</div></div>`;
+    const rec = dfRec(c.id); const want = `${rec?.u || ""}:${rec?.events || 0}:${c.lane}`;
+    dfLoadDetail(c.id, want);
+    const d = S.df.detail[c.id]?.data; const [cat, title] = dfSplit(c);
+    const st = dfStage(p, s); const next = dfNext(p, s.role);
+    const btns = [];
+    if (!st.human && ["todo", "running"].includes(c.lane)) {
+      if (next?.actor === "human") btns.push(`<button class="btn filled with-icon" data-act="df-pick" data-id="${c.id}" data-pid="${p.id}">${ico("arrow_forward", 18)}Pick</button>`, `<button class="btn tonal with-icon" data-act="df-do" data-do="park" data-id="${c.id}" data-pid="${p.id}">${ico("pause_circle", 18)}Park</button>`);
+      else btns.push(`<button class="btn tonal with-icon" data-act="df-do" data-do="promote" data-id="${c.id}" data-pid="${p.id}">${ico("thumb_up", 18)}Promote</button>`, `<button class="btn tonal with-icon" data-act="df-do" data-do="release" data-id="${c.id}" data-pid="${p.id}">${ico("thumb_down", 18)}Release</button>`);
+    }
+    if (!st.human && c.lane === "review") {
+      btns.push(`<button class="btn tonal with-icon" data-act="df-do" data-do="restore" data-id="${c.id}" data-pid="${p.id}">${ico("undo", 18)}Back to the queue</button>`);
+      if (next?.actor === "human") btns.push(`<button class="btn text with-icon" data-act="df-pick" data-id="${c.id}" data-pid="${p.id}">${ico("arrow_forward", 18)}Pick anyway</button>`);
+      else btns.push(`<button class="btn text with-icon" data-act="df-do" data-do="promote" data-id="${c.id}" data-pid="${p.id}">${ico("thumb_up", 18)}Promote anyway</button>`);
+    }
+    if (st.human && c.lane === "todo" && !c.initial_prompt_sent) btns.push(`<button class="btn filled with-icon" data-act="df-start" data-id="${c.id}" data-pid="${p.id}">${ico("play_arrow", 18)}Start</button>`);
+    btns.push(`<button class="btn text with-icon" data-act="open" data-id="${c.id}">${ico("forum", 18)}Conversation</button>`);
+    const sname = (role) => (p.stages || []).find((x) => x.role === role)?.name || "";
+    const chain = (d?.chain || []).map((n, i, arr) => {
+      const icon = (p.stages || []).find((x) => x.role === n.stage)?.icon || "view_kanban";
+      const human = (p.stages || []).find((x) => x.role === n.stage)?.actor === "human";
+      const verb = i === 0 ? (n.created_by?.actor === "agent" ? "Found" : "Added") : human ? "Picked" : "Promoted";
+      const how = n.created_by ? `${verb} by ${n.created_by.name || (n.created_by.actor === "agent" ? "agent" : "you")}${n.created_at ? " · " + dfWhen(n.created_at) : ""}` : n.known ? "" : "not on the page";
+      const v = n.verdict?.kind ? ` · ${{ promote: "promoted", pick: "picked", release: "released", park: "parked" }[n.verdict.kind] || n.verdict.kind}` : "";
+      return `<div class="gitem ${pos(i, arr.length)} ${n.self ? "" : "clickable"}" ${n.self ? "" : `data-act="df-card" data-id="${n.card}"`}><div class="df-row">${ico(icon, 20, "df-ic")}<div class="l"><div class="t">${esc(sname(n.stage) || "Card")} · ${n.self ? "this card" : esc(dfShort(n.card))}</div><div class="s">${esc(how + v)}</div></div>${n.self ? ico("check", 20) : ico("chevron_right", 20)}</div></div>`;
+    }).join("");
+    const brief = d?.brief || c.initial_prompt || "";
+    return `<div class="screen">${appbar({ title, subtitle: [project(p.project_id)?.name, p.name, s.name].filter(Boolean).join(" · "), back: opts.back, actions: iconAction("more_vert", "menu", `data-menu="dfcard" data-id="${c.id}"`) })}
+      <div class="content" data-scroll="dfcard-${c.id}" style="padding-bottom:32px">
+      <div class="df-chips"><span class="cchip" style="--stage:${DF_COLOR[s.role]}">${ico(s.icon || "view_kanban", 16, "df-ic")}${esc(s.name)} · ${esc(DF_LANES[s.role]?.[c.lane] || c.lane)}</span>${cat ? dfCat(cat) : ""}</div>
+      <div class="df-actions">${btns.join("")}</div>
+      ${rec?.verdict || rec?.source_verdict ? `<div class="m16" style="padding-top:8px">${dfVerdict(rec.verdict || rec.source_verdict)}</div>` : ""}
+      ${sectionHeader("Brief")}<div class="m16"><div class="ccard"><div class="rich">${brief ? richText(brief.replace(/<!--[^>]*-->/g, "").trim()) : `<span class="c-secondary">No brief.</span>`}</div></div></div>
+      ${sectionHeader("Provenance")}${d ? `<div class="group">${chain}</div>${sectionFooter("Every copy keeps the id of the card it came from, and the source shows where it went.")}` : `<div class="m16 c-secondary t-body">${S.df.detail[c.id]?.error ? esc(S.df.detail[c.id].error) : "Loading…"}</div>`}
+      ${sectionHeader("Trail")}${d ? `<div class="df-trail">${dfTrail(p, d, c)}</div>` : ""}</div></div>`;
+  }
+  // ---- the person's decisions (Pick, Park, Promote, Release, Back to the queue, Start)
+  function dfPickDialog(pid, id) {
+    const c = conv(id); const p = dfPipeline(pid); if (!c || !p) return;
+    const [, s] = dfStageOfBoard(c.board_id); const next = dfNext(p, s.role);
+    S.dfPick = { pid, id, workspace: "worktree", start: false };
+    const el = $("#overlay"); S.dialog = { title: "Pick" };
+    el.innerHTML = `<div class="scrim" data-act="close-dialog"><div class="dialog df-dialog"><div class="dt">Pick for ${esc(next?.name || "Implementation")}</div>
+      <div class="t-body c-secondary" style="margin-bottom:12px">${esc(dfSplit(c)[1])}</div>
+      <div class="outlined-field"><label>Note (optional, kept on the trail)</label><textarea id="df-note" rows="3" placeholder="Why now, what to keep in mind"></textarea></div>
+      <div style="margin-top:12px" data-df-ws>${dfPickWs()}</div>
+      <div class="acts"><button class="btn text" data-act="close-dialog">Cancel</button><button class="btn filled" data-act="df-pick-ok">Pick</button></div></div></div>`;
+    el.classList.remove("hidden"); setTimeout(() => $("#df-note")?.focus(), 50);
+  }
+  function dfPickWs() {
+    const k = S.dfPick || {};
+    return `<div class="seg">${[["worktree", "New worktree"], ["project", "Project directory"]].map(([v, l]) => `<button class="${k.workspace === v ? "on" : ""}" data-act="df-pick-ws" data-v="${v}">${k.workspace === v ? ico("check", 18) : ""}${l}</button>`).join("")}</div>
+      <div class="df-switch" data-act="df-pick-start"><span>Start the agent now</span><button class="switch ${k.start ? "on" : ""}"></button></div>`;
+  }
+  async function dfPickOk() {
+    const k = S.dfPick; if (!k) return; const note = ($("#df-note")?.value || "").trim(); closeDialog();
+    try { const r = await api(`api/dreamfall/${k.pid}/act`, { action: "pick", card: k.id, note, workspace: k.workspace, start: k.start }); await refreshState(); render(); snackbar(r.created === false ? "Already picked." : "Picked: a Todo draft on " + (dfNext(dfPipeline(k.pid), "navigation")?.name || "Implementation") + "."); }
+    catch (e) { snackbar(e.message); }
+  }
+  const DF_DO = { promote: ["Promote", "Copy it to the next stage; the original leaves the queue."], release: ["Release", "It leaves the queue and stays on the board as released."], park: ["Park", "It leaves your queue for later; you can pick it any time."], restore: ["Back to the queue", "It waits in its stage's queue again."] };
+  function dfDoDialog(pid, id, what) {
+    const c = conv(id); if (!c) return; const [t, m] = DF_DO[what];
+    const el = $("#overlay"); S.dialog = { title: t }; S.dfDo = { pid, id, what };
+    el.innerHTML = `<div class="scrim" data-act="close-dialog"><div class="dialog df-dialog"><div class="dt">${esc(t)}</div><div class="t-body c-secondary" style="margin-bottom:12px">${esc(dfSplit(c)[1])}. ${esc(m)}</div>
+      <div class="outlined-field"><label>Note (optional, kept on the trail)</label><textarea id="df-note" rows="3"></textarea></div>
+      <div class="acts"><button class="btn text" data-act="close-dialog">Cancel</button><button class="btn filled" data-act="df-do-ok">${esc(t)}</button></div></div></div>`;
+    el.classList.remove("hidden"); setTimeout(() => $("#df-note")?.focus(), 50);
+  }
+  async function dfDoOk() {
+    const k = S.dfDo; if (!k) return; const note = ($("#df-note")?.value || "").trim(); closeDialog();
+    try { await api(`api/dreamfall/${k.pid}/act`, { action: k.what, card: k.id, note }); await refreshState(); render(); snackbar({ promote: "Promoted.", release: "Released.", park: "Parked.", restore: "Back in the queue." }[k.what]); }
+    catch (e) { snackbar(e.message); }
+  }
+  async function dfStart(pid, id) {
+    try { await api(`api/dreamfall/${pid}/act`, { action: "start", card: id }); S.conv.awaiting = true; await refreshState(); render(); } catch (e) { snackbar(e.message); }
+  }
+  async function dfRun(pid, role) {
+    const p = dfPipeline(pid); const s = (p?.stages || []).find((x) => x.role === role);
+    try { await api(`api/dreamfall/${pid}/run`, { stage: role }); await refreshState(); render(); snackbar(`${s?.name || role} run started.`); } catch (e) { snackbar(e.message); }
+  }
+  function dfNewTask(boardId) {
+    const b = board(boardId); if (!b) return; const [, s] = dfStageOfBoard(boardId);
+    newConversation(false); const c = S.creation; c.project_id = b.project_id; c.board_id = b.id; c.checkout_id = project(b.project_id)?.checkouts?.[0]?.id || ""; c.runNow = s?.actor === "human" ? c.runNow : false; render();
+  }
+  function dfCardMenu(c) {
+    const [p, s] = dfStageOfBoard(c.board_id); if (!p) return cardMenu(c);
+    const items = [{ id: "df-trail", label: "Provenance and trail", icon: "timeline", onClick: () => push({ kind: "dfcard", id: c.id }) }, { id: "df-conv", label: "Conversation", icon: "forum", onClick: () => openConversation(c.id) }, "-"];
+    const next = dfNext(p, s.role);
+    if (s.actor !== "human") {
+      if (["todo", "running"].includes(c.lane)) {
+        if (next?.actor === "human") items.push({ id: "pick", label: "Pick…", icon: "arrow_forward", onClick: () => dfPickDialog(p.id, c.id) }, { id: "park", label: "Park…", icon: "pause_circle", onClick: () => dfDoDialog(p.id, c.id, "park") });
+        else items.push({ id: "promote", label: "Promote…", icon: "thumb_up", onClick: () => dfDoDialog(p.id, c.id, "promote") }, { id: "release", label: "Release…", icon: "thumb_down", onClick: () => dfDoDialog(p.id, c.id, "release") });
+      } else if (c.lane === "review") items.push({ id: "restore", label: "Back to the queue…", icon: "undo", onClick: () => dfDoDialog(p.id, c.id, "restore") }, next?.actor === "human" ? { id: "pick", label: "Pick anyway…", icon: "arrow_forward", onClick: () => dfPickDialog(p.id, c.id) } : { id: "promote", label: "Promote anyway…", icon: "thumb_up", onClick: () => dfDoDialog(p.id, c.id, "promote") });
+      items.push("-");
+    }
+    items.push({ id: "pin", label: S.pins[c.id] ? "Unpin" : "Pin", icon: "push_pin", onClick: () => { S.pins[c.id] = !S.pins[c.id]; if (!S.pins[c.id]) delete S.pins[c.id]; save("pins", S.pins); render(); } });
+    items.push({ id: "copy", label: "Copy ID", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(c.id) });
+    if (s.actor === "human") items.push("-", ...cardMenu(c).filter((it) => it === "-" || it.title || ["cancel", "edit", "archive"].includes(it.id) || String(it.id).startsWith("lane-")));
+    else items.push("-", { id: "archive", label: "Archive", icon: "archive", destructive: true, onClick: () => action(`api/card/${c.id}/archive`, {}) });
+    return items;
+  }
+  function dfMenu(el, pid) {
+    const p = dfPipeline(pid); if (!p) return;
+    const agents = (p.stages || []).filter((s) => s.actor === "agent" && s.schedule_id);
+    showMenu(el, [...agents.map((s) => ({ id: "run-" + s.role, label: `Run ${s.name} now`, icon: "play_arrow", onClick: () => dfRun(pid, s.role) })),
+      { id: "toggle", label: p.enabled === false ? "Resume the schedules" : "Pause the schedules", icon: p.enabled === false ? "play_circle" : "pause", onClick: () => dfUpdate(pid, { enabled: p.enabled === false }) },
+      { id: "settings", label: "Settings…", icon: "tune", onClick: () => dfForm(p.project_id, p) }, "-",
+      { title: "Open a stage as a Kanban board" }, ...(p.stages || []).map((s) => ({ id: "b-" + s.board_id, label: s.name, icon: s.icon, onClick: () => push({ kind: "board", id: s.board_id }) })), "-",
+      { id: "remove", label: "Remove Dreamfall…", icon: "delete", destructive: true, onClick: () => dfRemove(pid) }]);
+  }
+  async function dfUpdate(pid, body) {
+    try { await api(`api/dreamfall/${pid}/update`, body); await refreshState(); render(); snackbar(body.enabled === false ? "Schedules paused." : body.enabled ? "Schedules resumed." : "Saved."); } catch (e) { snackbar(e.message); }
+  }
+  async function dfRemove(pid) {
+    const p = dfPipeline(pid); if (!p || !confirm(`Remove the Dreamfall board "${p.name}"? Its two schedules are deleted; the stage boards and all their cards stay as ordinary Kanban boards.`)) return;
+    try { await api(`api/dreamfall/${pid}/delete`, {}); const st = stack(); S.stacks[S.tab] = st.filter((r) => !(r.kind === "dreamfall" && r.id === pid)); await refreshState(); render(); snackbar("Dreamfall removed; its boards stay."); } catch (e) { snackbar(e.message); }
+  }
+  // ---- New board → Dreamfall board, and its settings (the same form)
+  function dfForm(projectId, p) {
+    const h = (S.data?.harnesses || []).find((x) => x.id === "claude-code") || S.data?.harnesses?.[0];
+    const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch (e) { return "UTC"; } })();
+    const st = (role) => (p?.stages || []).find((s) => s.role === role);
+    S.repo = p ? { kind: "dreamfall", edit: p.id, project_id: p.project_id, name: p.name, goal: p.goal || "", categories: (p.categories || []).join("\n"), categories_file: p.categories_file || "",
+      per_category: String(p.per_category || 3), navigation_logic: p.navigation_logic || dfData().defaults?.navigation_logic || "", enumeration_time: dfHHMM(st("enumeration")?.cron) || "02:00", navigation_time: dfHHMM(st("navigation")?.cron) || "05:00", timezone: p.timezone || tz,
+      provider: p.agent?.provider || "", model: p.agent?.model || "", effort: p.agent?.effort || "", enabled: p.enabled !== false, mail: !!p.mail, boards: {} }
+      : { kind: "dreamfall", project_id: projectId, name: S.repo?.name?.trim() || "Dreamfall", goal: "", categories: "", categories_file: "", per_category: "3", navigation_logic: dfData().defaults?.navigation_logic || "", enumeration_time: "02:00", navigation_time: "05:00", timezone: tz,
+      provider: h?.id || "", model: h ? load("model-" + h.id, h.default_model || h.models?.[0]?.id || "") : "", effort: "", enabled: true, mail: false, boards: {} };
+    S.modal = "repo"; render();
+  }
+  const dfReady = (r) => !!(r.name.trim() && (r.categories.trim() || r.categories_file.trim()) && Number(r.per_category) >= 1 && Number(r.per_category) <= 10 && r.navigation_logic.trim());
+  function dfFormScreen() {
+    const r = S.repo; const pj = project(r.project_id);
+    const h = (S.data.harnesses || []).find((x) => x.id === r.provider); const m = h?.models.find((x) => x.id === r.model);
+    const pick = (title, value, key, glyph, position) => listRow({ title, value: value || "Choose", glyph, position, act: "df-form-pick", extra: `data-key="${key}"`, trailing: ico("expand_more", 20, "c-secondary") });
+    const sw = (title, sub, key, position) => listRow({ title, subtitle: sub, position, trailing: `<button class="switch ${r[key] ? "on" : ""}" data-act="df-form-toggle" data-key="${key}"></button>` });
+    const boardName = (role) => r.boards[role] ? board(r.boards[role])?.name || "?" : "New board";
+    const confirmLbl = r.edit ? "Save" : "Create";
+    return `<div class="screen">${appbar({ title: r.edit ? "Dreamfall settings" : "New board", subtitle: pj?.name || "", cancel: true, confirm: `<button class="btn filled with-icon" style="margin-right:8px" data-act="submit-repo" disabled>${ico("check", 18)}${confirmLbl}</button>` })}
+      <div class="content" data-scroll="repo" style="padding-top:8px;padding-bottom:24px">
+      ${r.edit ? "" : `<div class="m16" style="padding-top:8px">${`<div class="seg">${["Kanban board", "Dreamfall board"].map((o, i) => `<button class="${i === 1 ? "on" : ""}" data-act="board-type" data-i="${i}">${i === 1 ? ico("check", 18) : ""}${o}</button>`).join("")}</div>`}</div>`}
+      <div class="m16" style="display:flex;flex-direction:column;gap:12px;padding-top:12px">
+        <div class="outlined-field"><label>Name</label><input id="r-name" data-field="name" placeholder="Dreamfall" maxlength="80"></div>
+        <div class="outlined-field"><label>What are the ideas about? (optional)</label><textarea data-field="goal" rows="2" placeholder="Improvement ideas for our Home Assistant setup: new features and automations, not bug fixes"></textarea></div>
+      </div>
+      ${sectionHeader("1 · Categories to enumerate")}<div class="m16" style="display:flex;flex-direction:column;gap:12px">
+        <div class="outlined-field"><label>Categories, one per line</label><textarea data-field="categories" rows="5" placeholder="Energy&#10;Heating&#10;Security"></textarea></div>
+        <div class="outlined-field"><label>Or a categories file in the project</label><input data-field="categories_file" placeholder="ENUMERATION_CATEGORIES.md" autocapitalize="off" spellcheck="false"></div></div>
+      ${sectionHeader("2 · Enumeration goal")}<div class="m16"><div class="outlined-field"><label>New ideas per category and night</label><input data-field="per_category" type="number" min="1" max="10"></div></div>
+      ${sectionFooter("The Enumeration agent writes at least this many new ideas per category every night, none repeating an idea the board already had.")}
+      ${sectionHeader("3 · Navigation logic")}<div class="m16"><div class="outlined-field"><label>How the Navigation agent decides which ideas go on</label><textarea data-field="navigation_logic" rows="9" class="df-logic"></textarea></div></div>
+      ${sectionFooter("Plain language: what makes an idea worth your time, what to drop, how selective to be. Every idea gets promoted or released by this text, with a one-sentence reason and a score.")}
+      ${sectionHeader("Schedule")}<div class="m16" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;gap:12px"><div class="outlined-field" style="flex:1"><label>Enumeration runs at</label><input data-field="enumeration_time" type="time"></div>
+          <div class="outlined-field" style="flex:1"><label>Navigation runs at</label><input data-field="navigation_time" type="time"></div></div>
+        <div class="outlined-field"><label>Time zone</label><input data-field="timezone" autocapitalize="off" spellcheck="false"></div></div>
+      ${sectionHeader("Agents")}<div class="group">${pick("Agent", HARNESS_NAMES[r.provider] || h?.name || r.provider, "provider", "auto_awesome", "first")}${pick("Model", m?.name || r.model, "model", "memory", m?.efforts?.length ? "middle" : "last")}${m?.efforts?.length ? pick("Effort", r.effort ? r.effort[0].toUpperCase() + r.effort.slice(1) : "Default", "effort", "bolt", "last") : ""}</div>
+      <div class="group" style="margin-top:12px">${sw("Run on schedule", "Enumeration and Navigation run every night at the times above", "enabled", "first")}${sw("Mail me the result", "The Navigation agent mails what it promoted", "mail", "last")}</div>
+      ${r.edit ? "" : `${sectionHeader("Stage boards")}<div class="group">${["enumeration", "navigation", "implementation"].map((role, i) => pick({ enumeration: "Enumeration", navigation: "Navigation", implementation: "Implementation" }[role], boardName(role), "board-" + role, { enumeration: "auto_awesome", navigation: "balance", implementation: "lock_person" }[role], pos(i, 3))).join("")}</div>
+      ${sectionFooter("Each stage is an ordinary board of the project (new, or one of its boards with a Review lane). Agents write to Enumeration and Navigation; Implementation is yours: only your Pick puts cards there.")}`}
+      <div class="m16" style="padding:16px 16px"><button class="btn filled large" style="width:100%" data-act="submit-repo" disabled>${S.busy ? `<span class="spin"></span>` : ""}${S.busy ? (r.edit ? "Saving…" : "Creating…") : r.edit ? "Save" : "Create Dreamfall board"}</button></div></div></div>`;
+  }
+  function dfFormPick(key) {
+    const r = S.repo; if (!r) return;
+    if (key === "provider") showDialog("Agent", (S.data.harnesses || []).map((h) => [h.id, h.name]), r.provider, (v) => { r.provider = v; const h = (S.data.harnesses || []).find((x) => x.id === v); r.model = load("model-" + v, h?.default_model || h?.models?.[0]?.id || ""); r.effort = ""; render(); });
+    else if (key === "model") showDialog("Model", modelOpts((S.data.harnesses || []).find((h) => h.id === r.provider)), r.model, (v) => { r.model = v; r.effort = ""; render(); });
+    else if (key === "effort") { const m = (S.data.harnesses || []).find((h) => h.id === r.provider)?.models.find((x) => x.id === r.model); showDialog("Effort", [["", "Default"], ...(m?.efforts || []).map((e) => [e, e[0].toUpperCase() + e.slice(1)])], r.effort, (v) => { r.effort = v; render(); }); }
+    else if (key.startsWith("board-")) {
+      const role = key.slice(6); const used = new Set(dfData().pipelines.flatMap((p) => (p.stages || []).map((s) => s.board_id)));
+      const opts = [["", "New board"], ...(S.data.boards || []).filter((b) => b.project_id === r.project_id && !used.has(b.id) && (b.lanes || []).includes("review") && !Object.entries(r.boards).some(([k, v]) => k !== role && v === b.id)).map((b) => [b.id, b.name])];
+      showDialog(key === "board-implementation" ? "Implementation board" : key === "board-navigation" ? "Navigation board" : "Enumeration board", opts, r.boards[role] || "", (v) => { r.boards[role] = v; render(); });
+    }
+  }
+  async function dfSubmit() {
+    const r = S.repo; if (!r || S.busy || !dfReady(r)) return;
+    S.busy = true; render();
+    const body = { name: r.name.trim(), goal: r.goal.trim(), categories: r.categories, categories_file: r.categories_file.trim(), per_category: Number(r.per_category) || 3, navigation_logic: r.navigation_logic,
+      enumeration_time: r.enumeration_time, navigation_time: r.navigation_time, timezone: r.timezone.trim(), enabled: r.enabled, mail: r.mail, agent: { provider: r.provider, model: r.model, effort: r.effort } };
+    try {
+      if (r.edit) { await api(`api/dreamfall/${r.edit}/update`, body); S.modal = null; S.repo = null; S.busy = false; await refreshState(); render(); snackbar("Dreamfall settings saved."); return; }
+      const res = await api("api/dreamfall", { ...body, project: r.project_id, boards: r.boards });
+      S.modal = null; S.repo = null; S.busy = false; save("model-" + body.agent.provider, body.agent.model);
+      await refreshState(); touchProject(res.pipeline?.project_id);
+      S.tab = "projects"; showFrom({ kind: "project", id: res.pipeline?.project_id }, { kind: "dreamfall", id: res.id });
+      snackbar(`Dreamfall board ${res.pipeline?.name || ""} created.`);
+    } catch (e) { S.busy = false; snackbar(e.message); render(); }
+  }
+  // the project's board rows: a Dreamfall board's stage boards are one row (at the place of its first stage board)
+  function boardEntries(projectId) {
+    const out = [], seen = new Set();
+    for (const b of (S.data.boards || []).filter((x) => x.project_id === projectId)) {
+      const [p] = dfStageOfBoard(b.id);
+      if (p && p.project_id === projectId) { if (!seen.has(p.id)) { seen.add(p.id); out.push({ b, df: p }); } } else out.push({ b });
+    }
+    return out;
+  }
+  function dfWaiting(p) { const s = (p.stages || []).find((x) => x.role === "navigation") || (p.stages || [])[1]; return s ? (S.data.cards || []).filter((c) => c.board_id === s.board_id && !c.archived && ["todo", "running"].includes(c.lane) && !dfIsRun(s, c)).length : 0; }
+  function dfIdeas(p) { const ids = new Set((p.stages || []).map((s) => s.board_id)); return (S.data.cards || []).filter((c) => ids.has(c.board_id) && !c.archived && !dfIsRun((p.stages || []).find((s) => s.board_id === c.board_id), c)).length; }
 
   // ---- Chats (ChatsScreen.kt)
   function chatsScreen(opts) {
@@ -944,7 +1333,9 @@
     const modelName = harness?.models.find((m) => m.id === (sel.model || c?.model))?.name || sel.model || c?.model || "";
     const effortName = sel.effort || c?.effort || "";
     const agentChip = c ? `<button class="cchip" data-act="agent-sheet">${ico("auto_awesome", 13)}${esc([HARNESS_NAMES[c.provider] || c.provider, modelName, effortName && effortName[0].toUpperCase() + effortName.slice(1)].filter(Boolean).join(" · "))}${ico("expand_more", 10, "chev")}</button>` : "";
-    const chips = agentChip + (canStart ? `<button class="cchip prominent" data-act="start" data-id="${route.id}">${ico("play_arrow", 13)}Start</button>` : "")
+    const dfs = c ? dfStageOfBoard(c.board_id) : [null, null];
+    const dfChip = dfs[0] && !dfIsRun(dfs[1], c) ? `<button class="cchip" data-act="df-card" data-id="${route.id}">${ico("waterfall_chart", 13)}${esc(dfs[1].name)} · trail</button>` : "";
+    const chips = agentChip + dfChip + (canStart ? `<button class="cchip prominent" data-act="start" data-id="${route.id}">${ico("play_arrow", 13)}Start</button>` : "")
       + (reviewable ? `<button class="cchip" data-act="move" data-id="${route.id}" data-lane="review">${ico("checklist", 13)}Move to Review</button>` : "")
       + (cv.pending_tools_summary ? `<span class="cchip">${ico("hourglass_empty", 13)}${esc(cv.pending_tools_summary)}</span>` : "");
     const draft = S.conv.draft; const showStop = canHalt && !draft.trim();
@@ -1353,12 +1744,14 @@
   function addFolder() { S.repo = { kind: "folder", name: "" }; S.modal = "repo"; render(); setTimeout(() => $("#r-name")?.focus(), 50); }
   // ---- New board (ProjectAdministration.kt NewBoardSheet): name + Review lane (review workflow) of a project
   function newBoard(projectId) { if (!project(projectId)) return; S.repo = { kind: "board", project_id: projectId, name: "", review: true, publish: "manual" }; S.modal = "repo"; render(); setTimeout(() => $("#r-name")?.focus(), 50); }
-  const repoReady = (r) => !!r && (r.kind === "folder" || r.kind === "board" ? r.name.trim() : r.git_url.trim());
+  const repoReady = (r) => !!r && (r.kind === "dreamfall" ? dfReady(r) : r.kind === "folder" || r.kind === "board" ? r.name.trim() : r.git_url.trim());
   function repoScreen() {
     const r = S.repo; const ready = false; // toggled on the DOM after rendering
+    if (r.kind === "dreamfall") return dfFormScreen();
     if (r.kind === "board") return `<div class="screen">${appbar({ title: "New board", subtitle: project(r.project_id)?.name || "", cancel: true, confirm: `<button class="btn filled with-icon" style="margin-right:8px" data-act="submit-repo" ${ready ? "" : "disabled"}>${ico("check", 18)}Create</button>` })}
       <div class="content" data-scroll="repo" style="padding-top:8px;padding-bottom:24px">
-      <div class="m16" style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
+      <div class="m16" style="padding-top:8px"><div class="seg">${["Kanban board", "Dreamfall board"].map((o, i) => `<button class="${i === 0 ? "on" : ""}" data-act="board-type" data-i="${i}">${i === 0 ? ico("check", 18) : ""}${o}</button>`).join("")}</div></div>
+      <div class="m16" style="display:flex;flex-direction:column;gap:12px;padding-top:12px">
         <div class="outlined-field"><label>Name</label><input id="r-name" data-field="name" placeholder="Board name" maxlength="120"></div>
       </div>
       <div class="group" style="margin-top:16px">${listRow({ title: "Review lane", subtitle: "Cards move to Review before Done", position: "first", trailing: `<button class="switch ${r.review ? "on" : ""}" data-act="board-review"></button>` })}${listRow({ title: "Publishing", value: publishLabel(r.publish), glyph: "publish", position: "last", act: "board-publish", trailing: ico("expand_more", 20, "c-secondary") })}</div>
@@ -1383,6 +1776,7 @@
   }
   async function submitRepository() {
     const r = S.repo; if (!r || S.busy || !repoReady(r)) return;
+    if (r.kind === "dreamfall") return dfSubmit();
     S.busy = true; render();
     if (r.kind === "board") {
       try {
@@ -1568,6 +1962,8 @@
   function snackbar(text) { const s = $("#snackbar"); s.innerHTML = `<span>${esc(text)}</span><button class="iconbtn small x" data-act="close-snack">${ico("close", 20)}</button>`; s.classList.add("show"); clearTimeout(s._t); s._t = setTimeout(() => s.classList.remove("show"), 6000); }
   function cardMenu(c) {
     const items = [];
+    const dfs = c.kind !== "chat" ? dfStageOfBoard(c.board_id) : [null, null];
+    if (dfs[0] && !dfIsRun(dfs[1], c)) items.push({ id: "df-trail", label: "Provenance and trail", icon: "timeline", onClick: () => push({ kind: "dfcard", id: c.id }) }, "-");
     if (c.kind !== "chat") { items.push({ title: "Move to" }); Object.entries(LANES).forEach(([id, name]) => items.push({ id: "lane-" + id, label: name, checked: c.lane === id, onClick: () => action(`api/card/${c.id}/move`, { lane: id }) })); items.push("-"); }
     if (isActive(c.runtime)) items.push({ id: "cancel", label: "Stop agent", icon: "stop", destructive: true, onClick: () => action(`api/${c.kind}/${c.id}/cancel`, {}) });
     if (c.lane === "todo" && !c.initial_prompt_sent) items.push({ id: "start", label: "Start agent", icon: "play_arrow", onClick: () => action(`api/card/${c.id}/start`, {}) });
@@ -1686,6 +2082,21 @@
       case "project": touchProject(id); showFrom(null, { kind: "project", id }); break;
       case "board": { touchProject(board(id)?.project_id); const base = top().kind === "project" ? top() : null; showFrom(base, { kind: "board", id }); break; }
       case "lane": S.lanePage[el.dataset.board] = el.dataset.lane; render(); break;
+      case "dreamfall": { const pid = el.dataset.pid || id; touchProject(dfPipeline(pid)?.project_id); const base = top().kind === "project" ? top() : null; showFrom(base, { kind: "dreamfall", id: pid }); break; }
+      case "df-stage": S.lanePage[id] = el.dataset.stage; render(); break;
+      case "df-card": push({ kind: "dfcard", id }); break;
+      case "df-pick": e.stopPropagation(); dfPickDialog(el.dataset.pid, id); break;
+      case "df-pick-ws": if (S.dfPick) { S.dfPick.workspace = el.dataset.v; $("[data-df-ws]").innerHTML = dfPickWs(); } break;
+      case "df-pick-start": if (S.dfPick) { S.dfPick.start = !S.dfPick.start; $("[data-df-ws]").innerHTML = dfPickWs(); } break;
+      case "df-pick-ok": dfPickOk(); break;
+      case "df-do": dfDoDialog(el.dataset.pid, id, el.dataset.do); break;
+      case "df-do-ok": dfDoOk(); break;
+      case "df-start": e.stopPropagation(); dfStart(el.dataset.pid, id); break;
+      case "df-run": dfRun(id, el.dataset.stage); break;
+      case "df-new": dfNewTask(el.dataset.board); break;
+      case "df-form-pick": dfFormPick(el.dataset.key); break;
+      case "df-form-toggle": if (S.repo) { S.repo[el.dataset.key] = !S.repo[el.dataset.key]; render(); } break;
+      case "board-type": if (el.dataset.i === "1" && S.repo?.kind === "board") dfForm(S.repo.project_id); else if (el.dataset.i === "0" && S.repo?.kind === "dreamfall" && !S.repo.edit) { const nm = S.repo.name; newBoard(S.repo.project_id); if (S.repo && nm !== "Dreamfall") { S.repo.name = nm; render(); } } break;
       case "sort": { const k = el.dataset.board + ":" + el.dataset.lane; S.boardSort[k] = !(S.boardSort[k] ?? true); render(); break; }
       case "inbox-filter": S.inboxFilter = el.dataset.filter; render(); break;
       case "clear-search": S.search[el.dataset.key] = ""; render(); break;
@@ -1782,7 +2193,9 @@
     else if (menu === "schedule") { const d = S.sch?.detail?.[id]; const s = d?.schedule; if (!s) return; showMenu(el, [{ id: "run", label: "Run now", icon: "play_arrow", onClick: () => scheduleAction(id, "run", (r) => snackbar(r.run?.message ? `Run: ${r.run.message}` : "Run started")) },
       { id: "toggle", label: s.enabled ? "Pause" : "Resume", icon: s.enabled ? "pause" : "play_circle", onClick: () => scheduleAction(id, s.enabled ? "pause" : "resume") }, "-",
       { id: "delete", label: "Delete schedule", icon: "delete", destructive: true, onClick: () => { if (!confirm(`Delete the schedule "${s.name}"? Its cards and history stay.`)) return; scheduleAction(id, "delete", () => { const st = stack(); S.stacks[S.tab] = st.slice(0, -1); snackbar("Schedule deleted"); }); } }]); }
-    else if (menu === "project") showMenu(el, [{ id: "open", label: "Open project", icon: "folder_open", onClick: () => showFrom(null, { kind: "project", id }) }, { id: "new-board", label: "New board…", icon: "view_kanban", onClick: () => newBoard(id) }, { id: "copy", label: "Copy path", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(project(id)?.path || "") }]);
+    else if (menu === "dreamfall") dfMenu(el, id);
+    else if (menu === "dfcard") { const c = conv(id); if (c) showMenu(el, dfCardMenu(c)); }
+    else if (menu === "project") showMenu(el, [{ id: "open", label: "Open project", icon: "folder_open", onClick: () => showFrom(null, { kind: "project", id }) }, { id: "new-board", label: "New board…", icon: "view_kanban", onClick: () => newBoard(id) }, { id: "new-df", label: "New Dreamfall board…", icon: "waterfall_chart", onClick: () => dfForm(id) }, { id: "copy", label: "Copy path", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(project(id)?.path || "") }]);
     else if (menu === "inbox-filter") showMenu(el, [{ title: "Project" }, { id: "all", label: "All projects", checked: !S.inboxProject, onClick: () => { S.inboxProject = ""; render(); } }, ...(S.data.projects || []).map((p) => ({ id: "p-" + p.id, label: p.name, checked: S.inboxProject === p.id, onClick: () => { S.inboxProject = p.id; render(); } })), "-", { id: "theme", label: "Theme: " + (load("theme", "system")), icon: "brightness_6", onClick: () => { const n = { system: "dark", dark: "light", light: "system" }[load("theme", "system")]; save("theme", n); applyTheme(); } }]);
     else if (menu === "projects-add") showMenu(el, [{ id: "np", label: "Add repository", icon: "create_new_folder", onClick: () => addRepository() }, { id: "nf", label: "New folder", icon: "folder", onClick: () => addFolder() }]);
     else if (menu === "chats") showMenu(el, [{ id: "live", label: "Current chats", icon: "forum", checked: true }, { id: "arch", label: "Archived chats", icon: "archive", onClick: () => snackbar("Archived chats are listed in the Dieter app.") }]);

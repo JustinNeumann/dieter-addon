@@ -2,6 +2,23 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.42 (2026-10-29)
+
+- **Dreamfall boards**: a funnel for ideas next to a project's Kanban boards (project ⋮ → New Dreamfall board…, or New
+  board → Dreamfall board). Its three inputs: the categories to enumerate, the enumeration goal (new ideas per category
+  and night) and the navigation logic (the person's plain-language rules, prefilled and editable in Settings). Three stage
+  boards and two schedules: an Enumeration agent writes new ideas every night, a Navigation agent judges each one by
+  that logic later that night (strong ones are copied to Navigation with a link to their source,
+  the rest released to Review), and only the person picks what goes to Implementation. The page shows the stages side by
+  side under a funnel (tabs on a phone), the run of each night, verdicts with the agent's reason and score, and for every
+  idea its provenance across the stages and its trail (who did what, when and why). Pick, Park, Back to the queue,
+  promote a released idea, run a stage now, pause the schedules, settings, remove (the boards stay). The agents use the new
+  `dreamfall` command, which records every step in Dieter's kv store (namespace `dreamfall`), makes reruns idempotent,
+  lets Navigation wait for a still running Enumeration and refuses any agent write to Implementation. Bridge:
+  `POST /api/dreamfall[/ID/update|delete|run|act]`, `GET /api/dreamfall/card/ID`; the stage boards' cards are read per
+  board, so a busy pipeline is not cut off by the 200-card project list. Tests: `tests/dreamfall_test.py`,
+  `tests/e2e/dreamfall.spec.mjs`.
+
 ## 0.6.429.41 (2026-10-28)
 
 - Faster page. The bridge polled the daemon every 8 s with nine `dieter` calls one after the other (~7 s on a
