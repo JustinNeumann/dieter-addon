@@ -2,7 +2,7 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
-## 0.6.429.25 (2026-10-28)
+## 0.6.429.27 (2026-10-28)
 
 - Antigravity harness, now the add-on's own copy of the fork's adapter (`patches/antigravity-runtime.mjs`,
   laid over the pinned fork sources at image build; the build fails when the fork's file changes so the
@@ -22,17 +22,43 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
   - agy's `system_message` and `checkpoint` steps are no longer passed through as raw events.
   - The `--effort` fix of 0.6.429.12 is part of the copy (the string patch is gone).
   - `dieter/.dockerignore` keeps the e2e tests, the unit test file and Python caches out of the image build context.
+- Bridge: a fork release whose harness runtime archive is unchanged (same sha256) takes over the staged
+  runtime directory of the previous version by renaming it instead of downloading ~775 MB again. This is
+  the reuse 0.6.429.26 announced; that release only changed the version, so the bridge downloaded the
+  archive once more under the new name. DOCS.md describes Re-enroll (new daemon ID,
+  checkouts re-registered at the first peer sync); DEPLOY.md keeps the upstream screening notes.
+- Merge of two lines of work of 2026-10-28: 0.6.429.24–.26 published from another machine (removed-machine
+  handling, fork release 4) and the add-on's local commits for the same fork bump and the Antigravity
+  harness, which had reused the numbers .24 and .25.
+
+## 0.6.429.26 (2026-10-28)
+
+- Dieter from fork release v0.6.429-antigravity.4: after **Re-enroll** (a new daemon ID under the same
+  account) the daemon registers the add-on's project checkouts again under its new ID at the first peer
+  sync round and drops the stale local registrations, so New task works without re-attaching anything by
+  hand. Conversations and schedules created before the re-enroll stay with the old ID as read-only
+  history; shared ownership cannot change, so that part is permanent (the Removed-machine badge from
+  0.6.429.24 marks them). Between the new enrollment and the first sync round (device trust must be
+  approved first) the daemon refuses writes instead of publishing them as the old ID; such writes used
+  to stall the sync with other machines for good.
+- The harness runtime archives of the new release are byte-identical to the previous one, so the staged
+  runtime is reused; only the daemon binaries change.
+
+## 0.6.429.25 (2026-10-28)
+
+- Fix for 0.6.429.24: the "removed machine" detection only applies to an enrolled daemon (an unenrolled
+  daemon owns every record it holds, so its cards and checkouts stayed usable before but were wrongly
+  marked as orphaned, which hid the composer). The daemon's own id (`runtime/daemon.json`) counts as known.
+- E2E note: "Edit… changes the title and task" and "Schedules: create … pause" fail on 0.6.429.23 too
+  (same 25 passed / 2 failed with the shared test cache); unrelated to this change.
 
 ## 0.6.429.24 (2026-10-28)
 
-- Bundled Dieter is now the fork release `0.6.429-antigravity.4`: after **Re-enroll** (a new enrollment under
-  the same account) the daemon registers its checkouts again under its new daemon ID at the first peer sync,
-  so new tasks and the apps find the add-on's projects again instead of failing with "project has no
-  checkout on the target machine". Conversations and schedules of the previous daemon ID stay as read-only
-  history (the Re-enroll confirmation now says so). Until that first sync the daemon refuses writes instead
-  of publishing records no peer would accept.
-- The harness runtime archive of this release is unchanged, so the bridge takes over the already staged
-  runtime instead of downloading it again (~775 MB).
+- Checkouts and cards of a machine identity the account no longer knows (the add-on's daemon was removed
+  from the account and re-enrolled, so its records stay owned by the old identity) are handled: such
+  checkouts are hidden from "Run on", so a new task no longer fails with `rpc error: code = NotFound`;
+  such cards show "Owned by a removed machine" instead of polling a conversation that cannot be opened,
+  and carry a "Removed machine" badge on the board.
 
 ## 0.6.429.23 (2026-10-28)
 

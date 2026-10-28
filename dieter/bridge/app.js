@@ -441,7 +441,7 @@
     const status = tone !== "idle" || badge ? rtLabel(c.runtime) : "";
     const agent = [agentLine(c), tokensLabel(c)].filter(Boolean).join(" · ");
     const canStart = c.lane === "todo" && !c.initial_prompt_sent;
-    const metas = [(S.data.machines || []).length > 1 ? mpill("computer", cardMachine(c) || "Unassigned") : "", mpill("account_tree", workspaceBadge(c))].join("");
+    const metas = [(S.data.machines || []).length > 1 ? mpill("computer", cardMachine(c) || "Unassigned") : "", mpill("account_tree", workspaceBadge(c)), c.orphaned ? mpill("cloud_off", "Removed machine") : ""].join("");
     return `<div class="ccard workcard clickable ${isSelected(c.id) ? "selected" : ""}" data-act="open" data-id="${c.id}">
       <div class="body"><div class="top"><div class="ttl clamp2">${esc(cardTitle(c))}</div>${cardAge(c) ? `<div class="age">${cardAge(c)}</div>` : ""}</div>
       ${c.summary ? `<div class="summary clamp2">${esc(c.summary)}</div>` : ""}<div class="metas">${metas}</div></div>
@@ -870,6 +870,7 @@
     const title = c ? cardTitle(c) : chat ? "Chat" : "Conversation";
     const subtitle = [project(c?.project_id)?.name, chat ? "Chat" : board(c?.board_id)?.name].filter(Boolean).join(" · ");
     const actions = (chat ? "" : iconAction("difference", "pane", `data-id="${route.id}" data-pane="changes"`, "Changes")) + iconAction("more_vert", "menu", `data-menu="conversation" data-id="${route.id}"`);
+    if (c?.orphaned) return `<div class="screen">${appbar({ title, subtitle, back: opts.back, actions })}<div class="content"><div class="banner warning" style="margin-top:12px">${ico("cloud_off", 22)}<div><div class="t">Owned by a removed machine</div><div class="m">This conversation belongs to a machine identity that was removed from the account, so it cannot be opened or continued here. Archive the card or keep it for reference.</div></div></div></div></div>`;
     if (!cv) return `<div class="screen">${appbar({ title, subtitle, back: opts.back, actions })}${spinnerCenter()}</div>`;
     const status = cv.status; const working = isActive(status) || isActive(c?.runtime) || S.conv.awaiting;
     const runtime = isActive(status) ? status : c?.runtime || status || "idle";
@@ -1117,6 +1118,7 @@
     const kind = route.convKind || (conv(id)?.kind === "chat" ? "chat" : "card");
     clearFiles("conv");
     S.conv = { ...S.conv, id, kind, data: null, draft: load("draft-" + id, ""), following: true, expanded: {}, agent: null, awaiting: false, files: [], outbox: [] };
+    if (conv(id)?.orphaned) { S.conv.data = { messages: [], orphaned: true }; render(); return; }
     api(`api/${kind}/${id}`).then((d) => { if (S.conv.id !== id) return; S.conv.data = d; markSeen(id); render(); scrollToEnd(); })
       .catch((e) => { if (S.conv.id === id) { S.conv.data = { messages: [], error: e.message }; render(); } });
     if (SNAP) return;
