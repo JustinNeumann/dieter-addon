@@ -38,6 +38,7 @@
 
   // ------------------------------------------------------------------ state
   const S = {
+    minfo: {}, // machine id -> telemetry of the Machines detail screen {…norm_machine | error, loading, at}
     data: null, tab: "projects", stacks: {}, modal: null, dialog: null, menu: null,
     conv: { id: null, kind: null, data: null, es: null, alive: 0, draft: "", following: true, expanded: {}, agent: null, files: [], outbox: [] },
     qa: {},        // answers being composed for the agents' questions, by question id
@@ -552,7 +553,14 @@
   const modelOpts = (h) => (h?.models || []).map((m) => [m.id, m.name, m.quota ? `<span class="${m.quota.remaining < 20 ? "c-warning" : "c-secondary"}">${m.quota.remaining}% left${m.quota.remaining ? "" : ` · resets ${esc(resetsAt(m.quota.resets_at))}`}</span>` : ""]);
   const gb = (b) => { const v = Math.floor((b || 0) / 107374182.4) / 10; return v >= 100 ? String(Math.floor(v)) : v.toFixed(1); };
   function machineScreen(route, opts) {
-    const m = (S.data.machines || []).find((x) => x.id === route.id); const info = S.data.machine;
+    const m = (S.data.machines || []).find((x) => x.id === route.id);
+    // telemetry is per machine (`dieter machine info ID`), not the local daemon's figures from the state; refreshed every 20 s while open
+    const cached = S.minfo[route.id];
+    if (m && (!cached || (!cached.loading && Date.now() - cached.at > 20000))) {
+      S.minfo[route.id] = { ...(cached || {}), loading: true, at: Date.now() };
+      api(`api/machine/${encodeURIComponent(route.id)}/info`).then((r) => { S.minfo[route.id] = { ...r, at: Date.now() }; render(); }).catch((e) => { S.minfo[route.id] = { error: e.message, at: Date.now() }; render(); });
+    }
+    const info = cached && (cached.os || cached.error) ? cached : null;
     if (!m) return `<div class="screen">${appbar({ title: "Machine", back: opts.back })}<div class="center-fill t-body-em c-secondary">This machine is no longer enrolled.</div></div>`;
     const kv = (pairs) => `<div class="group">${pairs.map(([t, v], i) => listRow({ title: t, value: v, position: pos(i, pairs.length) })).join("")}</div>`;
     const load = info && !info.error ? `${sectionHeader("Load")}<div class="gauges">
