@@ -461,7 +461,8 @@
 
   // ---- Chats (ChatsScreen.kt)
   function chatsScreen(opts) {
-    const chats = (S.data.chats || []).filter((c) => !c.archived);
+    const recent = (c) => Math.max(Date.parse(c.updated_at || 0) || 0, Date.parse(c.last_activity_at || 0) || 0);
+    const chats = (S.data.chats || []).filter((c) => !c.archived).sort((a, b) => recent(b) - recent(a));
     const query = (S.search.chats || "").trim().toLowerCase();
     const visible = chats.filter((c) => !query || cardTitle(c).toLowerCase().includes(query));
     const pinned = visible.filter((c) => S.pins[c.id]);
