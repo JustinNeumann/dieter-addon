@@ -99,7 +99,9 @@ The harnesses run inside the container, so they need their own credentials:
   `agy` per turn with `--dangerously-skip-permissions` (Dieter's allow-all mode), continued with
   `--conversation`. Default model Gemini 3.8 Flash (High); Gemini 4 Argon, Claude Opus/Sonnet 5.5 and
   GPT-OSS are selectable. Not available through the CLI: host tools (present_content, processes),
-  suspend/continue and compaction.
+  suspend/continue and compaction. Its quota (`agy --print=/quota`) comes in groups whose models share a
+  weekly and a 5-hour window (Gemini Flash/Pro; Claude and GPT-OSS; Gemini 4 Argon): **Tools → Usage** shows
+  each window with the models it covers, the model pickers show the share left for each model.
 
 Restart the add-on after changing tokens.
 

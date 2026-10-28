@@ -2,6 +2,19 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.16 (2026-10-28)
+
+- Antigravity usage: the quota is shown again when the daemon is enrolled in a gateway. The bridge only probed
+  `agy` when the daemon's `quota list` was empty, and the gateway's list (Claude, Codex) never contains
+  Antigravity, so the Inbox bar said "no quota data". Local probes now fill in every provider the gateway lacks
+  (Claude Code too), each cached for 5 minutes.
+- Per-model usage for Antigravity: agy's quota groups (Gemini Flash/Pro, Claude Opus/Sonnet and GPT-OSS,
+  Gemini 4 Argon) are read from `agy --print=/quota --output-format json` and matched to the models. The model
+  pickers (New task, New schedule, a conversation's agent) show each model's remaining share, in warning color
+  below 20 % and with the reset time at 0 %. Usage lists the models each window covers, and the Inbox bar
+  follows the group of the model a new task preselects instead of the tightest group (an exhausted Argon week
+  no longer turns the whole bar to 0 %).
+
 ## 0.6.429.15 (2026-10-28)
 
 - Dieter from fork release `v0.6.429-antigravity.3`: the daemon reports its version as

@@ -367,6 +367,7 @@ body.immersive #bottombar { display: none; }
 .dialog { width: min(560px, 100%); max-height: 100%; overflow: auto; border-radius: 28px; background: var(--surface-container-high); padding: 24px; display: flex; flex-direction: column; gap: 16px; box-shadow: var(--shadow-3); }
 .dialog .dt { font: 400 24px/32px var(--display); color: var(--on-surface); }
 .dialog .opt { display: flex; align-items: center; gap: 12px; padding: 12px 0; cursor: pointer; font: 400 16px/24px var(--body); }
+.dialog .opt .note { margin-left: auto; font: 500 12px/16px var(--body); letter-spacing: .5px; white-space: nowrap; }
 .radio { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--on-surface-variant); flex: none; position: relative; }
 .radio.on { border-color: var(--primary); } .radio.on::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--primary); }
 .dialog .acts { display: flex; justify-content: flex-end; gap: 8px; }

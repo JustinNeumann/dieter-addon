@@ -458,7 +458,7 @@ def setup_antigravity():
     log("env: Antigravity credentials installed")
 
 
-QUOTA_CACHE = {"at": 0, "items": [], "gen": 0}
+QUOTA_CACHE = {}   # provider -> {"at", "gen", "item"} of the local probes
 QUOTA_GEN = [0]   # bumped when provider credentials change: a poll that started earlier must not refill the cache
 QUOTA_TTL_S = 300
 
@@ -718,7 +718,7 @@ def on_claude_login_changed():
     except Exception as e:
         log("env:", e)
     QUOTA_GEN[0] += 1
-    QUOTA_CACHE["at"] = 0
+    QUOTA_CACHE.clear()
     if Daemon.instance:
         Daemon.instance.restart()
     threading.Thread(target=lambda: (time.sleep(3), Daemon.wait_healthy(), STATE.poll_slow()), daemon=True).start()
@@ -735,64 +735,110 @@ def claude_logout():
     return claude_auth_status()
 
 
-def local_quota():
-    """Provider quotas without a gateway (the daemon's `quota list` is gateway-scoped): Claude via Dieter's
-    probe quota-claude.mjs (reads CLAUDE_CODE_OAUTH_TOKEN), Antigravity via `agy --print=/quota`."""
-    now = time.time()
-    gen = QUOTA_GEN[0]
-    if now - QUOTA_CACHE["at"] < QUOTA_TTL_S and QUOTA_CACHE.get("gen") == gen:
-        return QUOTA_CACHE["items"]
+def cached_quota(provider, probe):
+    """A local probe's quota item (or None), run at most every QUOTA_TTL_S per provider."""
+    now, gen = time.time(), QUOTA_GEN[0]
+    hit = QUOTA_CACHE.get(provider)
+    if hit and now - hit["at"] < QUOTA_TTL_S and hit["gen"] == gen:
+        return hit["item"]
+    item = probe()
+    if QUOTA_GEN[0] == gen:
+        QUOTA_CACHE[provider] = {"at": now, "gen": gen, "item": item}
+    return item
+
+
+def local_quota(have=()):
+    """Provider quotas the daemon's `quota list` lacks (it is gateway-scoped and knows no Antigravity): Claude via
+    Dieter's probe quota-claude.mjs (reads CLAUDE_CODE_OAUTH_TOKEN), Antigravity via `agy --print=/quota`."""
     items = []
+    if "anthropic_claude" not in have:
+        items.append(cached_quota("anthropic_claude", claude_quota))
+    if "antigravity" not in have and os.path.exists(ANTIGRAVITY_TOKEN_FILE):
+        items.append(cached_quota("antigravity", agy_quota))
+    return [i for i in items if i]
+
+
+def claude_quota():
     env = {**os.environ, **env_file_vars(), "HOME": "/data"}
     probe = os.path.join(RUNTIME_DIR, "quota-claude.mjs")
     if claude_credentials():
         env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)   # the probe reads /data/.claude/.credentials.json instead
         claude_refresh_if_due()
-    if (env.get("CLAUDE_CODE_OAUTH_TOKEN") or claude_credentials()) and os.path.exists(probe):
+    if not (env.get("CLAUDE_CODE_OAUTH_TOKEN") or claude_credentials()) or not os.path.exists(probe):
+        return None
+    try:
+        p = subprocess.run(["node", probe], capture_output=True, text=True, timeout=40, env=env, cwd=os.path.dirname(probe))
+        a = json.loads(p.stdout.strip() or "{}")
+        if p.returncode != 0 or not p.stdout.strip():
+            log("quota: claude probe exited", p.returncode, (p.stderr.strip().splitlines() or ["(no output)"])[-1][:160])
+        if not a.get("windows") and not claude_credentials():
+            # setup-token logins are "unsupported" for Dieter's probe: fetch the usage API directly
+            p = subprocess.run(["node", os.path.join(HERE, "quota_claude_token.mjs"), probe], capture_output=True, text=True, timeout=40, env=env, cwd=HERE)
+            err = next((l for l in p.stderr.splitlines() if "Error" in l), (p.stderr.strip().splitlines() or ["?"])[-1])
+            a = json.loads(p.stdout.strip() or "{}") if p.returncode == 0 else {"availability": err.strip()[:120]}
+        if a.get("windows"):
+            return {"provider": "anthropic_claude", "plan": a.get("plan"), "email": a.get("displayEmail"),
+                    "available": a.get("availability") == "available",
+                    "windows": [{"id": w.get("id"), "label": w.get("label"), "used": w.get("usedPercent"),
+                                 "remaining": w.get("remainingPercent"), "resets_at": w.get("resetsAt")} for w in a["windows"]],
+                    "refreshed_at": datetime_now()}
+        if a.get("availability"):
+            log("quota: claude:", a.get("availability"), "" if not a.get("displayEmail") else f"({a.get('displayEmail')})")
+        elif claude_credentials():
+            log("quota: claude: the probe returned no windows for the page sign-in")
+    except Exception as e:
+        log("quota: claude probe:", e)
+    return None
+
+
+def agy_quota():
+    """Antigravity's quota groups: within a group the models share a weekly and a 5-hour window. A group names its
+    model families in the description ("Models within this group: Gemini Flash, Gemini Pro"), Argon only itself."""
+    try:
+        p = subprocess.run(["agy", "--print=/quota", "--output-format", "json"], capture_output=True, text=True, timeout=60,
+                           env={**os.environ, "HOME": "/data"}, cwd="/data")
         try:
-            p = subprocess.run(["node", probe], capture_output=True, text=True, timeout=40, env=env, cwd=os.path.dirname(probe))
-            a = json.loads(p.stdout.strip() or "{}")
-            if p.returncode != 0 or not p.stdout.strip():
-                log("quota: claude probe exited", p.returncode, (p.stderr.strip().splitlines() or ["(no output)"])[-1][:160])
-            if not a.get("windows") and not claude_credentials():
-                # setup-token logins are "unsupported" for Dieter's probe: fetch the usage API directly
-                p = subprocess.run(["node", os.path.join(HERE, "quota_claude_token.mjs"), probe], capture_output=True, text=True, timeout=40, env=env, cwd=HERE)
-                err = next((l for l in p.stderr.splitlines() if "Error" in l), (p.stderr.strip().splitlines() or ["?"])[-1])
-                a = json.loads(p.stdout.strip() or "{}") if p.returncode == 0 else {"availability": err.strip()[:120]}
-            if a.get("windows"):
-                items.append({"provider": "anthropic_claude", "plan": a.get("plan"), "email": a.get("displayEmail"),
-                              "available": a.get("availability") == "available",
-                              "windows": [{"id": w.get("id"), "label": w.get("label"), "used": w.get("usedPercent"),
-                                           "remaining": w.get("remainingPercent"), "resets_at": w.get("resetsAt")} for w in a["windows"]],
-                              "refreshed_at": datetime_now()})
-            elif a.get("availability"):
-                log("quota: claude:", a.get("availability"), "" if not a.get("displayEmail") else f"({a.get('displayEmail')})")
-            elif claude_credentials():
-                log("quota: claude: the probe returned no windows for the page sign-in")
-        except Exception as e:
-            log("quota: claude probe:", e)
-    if os.path.exists(ANTIGRAVITY_TOKEN_FILE):
-        try:
-            p = subprocess.run(["agy", "--print=/quota"], capture_output=True, text=True, timeout=60, env=env, cwd="/data")
-            windows = []
-            for line in p.stdout.splitlines():
-                cols = [c.strip() for c in line.split("\t")]
-                if len(cols) >= 3 and cols[2].endswith("%"):
-                    remaining = int(cols[2].rstrip("%"))
-                    wid = re.sub(r"[^a-z0-9]+", "_", f"{cols[0]} {cols[1]}".lower()).strip("_")
-                    label = f"{cols[0]} · {cols[1].replace(' Limit Remaining', '').replace(' Limit', '')}"
-                    windows.append({"id": wid, "label": label, "used": 100 - remaining, "remaining": remaining,
-                                    "resets_at": cols[3] if len(cols) > 3 else None})
-            if windows:
-                items.append({"provider": "antigravity", "plan": None, "email": None, "available": all(w["remaining"] > 0 for w in windows),
-                              "windows": windows, "refreshed_at": datetime_now()})
-            elif p.returncode != 0:
-                log("quota: agy:", (p.stderr or p.stdout).strip()[-160:])
-        except Exception as e:
-            log("quota: agy:", e)
-    if QUOTA_GEN[0] == gen:
-        QUOTA_CACHE.update(at=now, items=items, gen=gen)
-    return items
+            groups = ((json.loads(p.stdout).get("command") or {}).get("data") or {}).get("groups") or []
+        except ValueError:
+            groups = []
+        windows = []
+        for g in groups:
+            name = (g.get("name") or "").strip()
+            m = re.search(r"Models within this group:\s*(.+)", g.get("description") or "")
+            families = [f.strip() for f in m.group(1).strip().rstrip(".").split(",") if f.strip()] if m else [name]
+            for b in g.get("buckets") or []:
+                if b.get("remaining_fraction") is None:
+                    continue
+                remaining = round(max(0.0, min(1.0, float(b["remaining_fraction"]))) * 100)
+                span = {"weekly": "Week", "5h": "5h"}.get(b.get("window"), (b.get("name") or "").replace(" Limit Remaining", "").replace(" Limit", ""))
+                windows.append({"id": b.get("id") or re.sub(r"[^a-z0-9]+", "_", f"{name} {span}".lower()).strip("_"),
+                                "label": f"{name} · {span}", "used": 100 - remaining, "remaining": remaining,
+                                "resets_at": b.get("reset_time"), "group": name, "models": families})
+        if windows:
+            return {"provider": "antigravity", "plan": None, "email": None, "available": all(w["remaining"] > 0 for w in windows),
+                    "windows": windows, "refreshed_at": datetime_now()}
+        log("quota: agy:", ((p.stderr or p.stdout).strip() or f"no quota groups (exit {p.returncode})")[-160:])
+    except Exception as e:
+        log("quota: agy:", e)
+    return None
+
+
+def name_words(s):
+    return set(re.findall(r"[a-z0-9.]+", (s or "").lower()))
+
+
+def agy_model_quota(harnesses, quota):
+    """Attach to each Antigravity model its tightest quota window: those of the groups naming its family
+    (all words of "Gemini Flash" in "Gemini 3.8 Flash (High)" / gemini-3.8-flash-high)."""
+    windows = next((a["windows"] for a in quota if a.get("provider") == "antigravity"), [])
+    for h in harnesses:
+        if h.get("id") != "antigravity":
+            continue
+        for m in h["models"]:
+            words = name_words(m.get("name")) | name_words(m.get("id"))
+            mine = [w for w in windows if any(name_words(f) and name_words(f) <= words for f in w.get("models") or [])]
+            low = min(mine, key=lambda w: w["remaining"]) if mine else None
+            m["quota"] = {k: low[k] for k in ("remaining", "label", "resets_at", "group")} if low else None
 
 
 def configured_backends():
@@ -1497,9 +1543,9 @@ class State:
         except CliError as e:
             quota = []
             self.note("quota", e)
-        if not quota and ADDON:
+        if ADDON:
             try:
-                quota = local_quota()
+                quota = quota + local_quota({a["provider"] for a in quota})
             except Exception as e:
                 self.note("quota-local", e)
         try:
@@ -1523,6 +1569,7 @@ class State:
         except CliError as e:
             harnesses = []
             self.note("harness", e)
+        agy_model_quota(harnesses, quota)
         if not machines and isinstance(machine, dict) and not machine.get("error"):
             # unenrolled daemon (no gateway): `machine list` is empty, so list this machine from `machine info`
             machines = [{"id": "local", "name": "Home Assistant" if ADDON else (machine.get("hostname") or "local"), "online": True,

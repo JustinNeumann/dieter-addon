@@ -320,7 +320,11 @@
     const usage = backends.length ? `<div class="usage-strip" data-act="tool" data-page="usage">${ico("speed", 20)}<div class="cols">${backends.slice(0, 3).map((b) => {
       const a = quota.find((q) => q.provider === b.id);
       if (!a) return `<div class="col"><div class="nm">${esc(b.name)}</div>${progress(0, "var(--outline)")}<div class="lf c-secondary">no quota data</div></div>`;
-      const low = a.windows.reduce((m, w) => ((w.remaining ?? 100) < (m.remaining ?? 100) ? w : m), a.windows[0]);
+      // Antigravity's quota groups are separate: the bar follows the group of the model a new task preselects
+      const ag = b.id === "antigravity" && (S.data.harnesses || []).find((h) => h.id === "antigravity");
+      const mq = ag && ag.models.find((m) => m.id === load("model-antigravity", ag.default_model))?.quota;
+      const grp = a.windows.filter((w) => mq && w.group === mq.group); const wins = grp.length ? grp : a.windows;
+      const low = wins.reduce((m, w) => ((w.remaining ?? 100) < (m.remaining ?? 100) ? w : m), wins[0]);
       const r = low.remaining ?? 100;
       return `<div class="col"><div class="nm">${esc(b.name)}</div>${progress(r / 100, r < 20 ? "var(--warning)" : "var(--success)")}<div class="lf">${r}% left${a.windows.length > 1 ? ` <span class="c-secondary">· ${esc(String(low.label || "").replace(/ Limit Remaining| Limit/g, ""))}</span>` : ""}</div></div>`;
     }).join("")}</div></div>` : "";
@@ -499,7 +503,7 @@
     }
     if (page === "usage") {
       const quota = S.data.quota || [];
-      const gauges = quota.map((a) => sectionHeader(`${providerName(a.provider)}${a.plan ? " · " + a.plan : ""}`) + `<div class="gauges">${a.windows.map((w) => `<div class="gauge"><div class="hd">${esc(w.label)}<b>${w.remaining}% left</b></div>${progress((w.remaining ?? 0) / 100, (w.remaining ?? 100) < 20 ? "var(--warning)" : "var(--success)")}<div class="t-footnote c-secondary" style="margin-top:4px">Resets ${esc(resetsAt(w.resets_at))}</div></div>`).join("")}
+      const gauges = quota.map((a) => sectionHeader(`${providerName(a.provider)}${a.plan ? " · " + a.plan : ""}`) + `<div class="gauges">${a.windows.map((w) => `<div class="gauge"><div class="hd">${esc(w.label)}<b>${w.remaining}% left</b></div>${progress((w.remaining ?? 0) / 100, (w.remaining ?? 100) < 20 ? "var(--warning)" : "var(--success)")}<div class="t-footnote c-secondary" style="margin-top:4px">${w.models?.length && w.models.join(", ") !== w.group ? `${esc(w.models.join(", "))} · ` : ""}Resets ${esc(resetsAt(w.resets_at))}</div></div>`).join("")}
         ${a.email ? `<div class="kv">Account<b>${esc(a.email)}</b></div>` : ""}</div>`).join("");
       const body = (gauges || emptyState("speed", "No quota data", "Quotas appear once a provider account is discovered.")) + claudeAccountSection();
       return `<div class="screen">${appbar({ title, back: opts.back })}<div class="content" data-scroll="usage">${body}</div></div>`;
@@ -531,6 +535,8 @@
     return `<div class="screen">${appbar({ title, back: opts.back })}<div class="content">${emptyState(...copy)}</div></div>`;
   }
   const resetsAt = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }); };
+  // model dialog options; Antigravity models carry the tightest window of their quota group (bridge agy_model_quota)
+  const modelOpts = (h) => (h?.models || []).map((m) => [m.id, m.name, m.quota ? `<span class="${m.quota.remaining < 20 ? "c-warning" : "c-secondary"}">${m.quota.remaining}% left${m.quota.remaining ? "" : ` · resets ${esc(resetsAt(m.quota.resets_at))}`}</span>` : ""]);
   const gb = (b) => { const v = Math.floor((b || 0) / 107374182.4) / 10; return v >= 100 ? String(Math.floor(v)) : v.toFixed(1); };
   function machineScreen(route, opts) {
     const m = (S.data.machines || []).find((x) => x.id === route.id); const info = S.data.machine;
@@ -708,7 +714,7 @@
     else if (key === "project") { title = "Project"; options = (S.data.projects || []).map((p) => [p.id, p.name]); selected = f.project_id; }
     else if (key === "board") { title = "Board"; options = (S.data.boards || []).filter((b) => b.project_id === f.project_id).map((b) => [b.id, b.name]); selected = f.board_id; }
     else if (key === "provider") { title = "Agent"; options = (S.data.harnesses || []).map((h) => [h.id, h.name]); selected = f.provider; }
-    else if (key === "model") { title = "Model"; options = ((S.data.harnesses || []).find((h) => h.id === f.provider)?.models || []).map((m) => [m.id, m.name]); selected = f.model; }
+    else if (key === "model") { title = "Model"; options = modelOpts((S.data.harnesses || []).find((h) => h.id === f.provider)); selected = f.model; }
     else if (key === "effort") { title = "Effort"; const m = (S.data.harnesses || []).find((h) => h.id === f.provider)?.models.find((x) => x.id === f.model); options = [["", "Default"], ...(m?.efforts || []).map((e) => [e, e[0].toUpperCase() + e.slice(1)])]; selected = f.effort; }
     else return;
     showDialog(title, options, selected, (v) => {
@@ -1208,7 +1214,7 @@
     else if (key === "board") { title = "Board"; options = (S.data.boards || []).filter((b) => b.project_id === c.project_id).map((b) => [b.id, b.name]); selected = c.board_id; }
     else if (key === "checkout") { title = "Run on"; options = (project(c.project_id)?.checkouts || []).map((x) => [x.id, cardMachineName(x) + ((project(c.project_id)?.checkouts || []).length > 1 ? " · " + x.name : "")]); selected = c.checkout_id; }
     else if (key === "provider") { title = "Agent"; options = (S.data.harnesses || []).map((h) => [h.id, h.name]); selected = c.provider; }
-    else if (key === "model") { title = "Model"; options = ((S.data.harnesses || []).find((h) => h.id === c.provider)?.models || []).map((m) => [m.id, m.name]); selected = c.model; }
+    else if (key === "model") { title = "Model"; options = modelOpts((S.data.harnesses || []).find((h) => h.id === c.provider)); selected = c.model; }
     else if (key === "effort") { title = "Effort"; const m = (S.data.harnesses || []).find((h) => h.id === c.provider)?.models.find((x) => x.id === c.model); options = [["", "Default"], ...(m?.efforts || []).map((e) => [e, e[0].toUpperCase() + e.slice(1)])]; selected = c.effort; }
     showDialog(title, options, selected, (v) => {
       if (key === "project") { c.project_id = v; c.board_id = (S.data.boards || []).find((b) => b.project_id === v)?.id || ""; c.checkout_id = project(v)?.checkouts?.[0]?.id || ""; }
@@ -1221,7 +1227,7 @@
   function agentSheet() {
     const c = conv(S.conv.id); if (!c) return;
     const h = (S.data.harnesses || []).find((x) => x.id === c.provider); const cur = S.conv.agent?.model || c.model;
-    showDialog("Model", (h?.models || []).map((m) => [m.id, m.name]), cur, (v) => {
+    showDialog("Model", modelOpts(h), cur, (v) => {
       S.conv.agent = { ...(S.conv.agent || {}), model: v }; const m = h?.models.find((x) => x.id === v);
       if (m?.efforts?.length) showDialog("Effort", [["", "Default"], ...m.efforts.map((e) => [e, e[0].toUpperCase() + e.slice(1)])], S.conv.agent.effort || c.effort || "", (ef) => { S.conv.agent.effort = ef; render(); }); else render();
     });
@@ -1335,7 +1341,7 @@
   async function claudeLogout() { try { await api("api/claude/logout", {}); snackbar("Signed out of Claude."); await refreshState(); render(); } catch (e) { snackbar(e.message); } }
   function showDialog(title, options, selected, onPick) {
     S.dialog = { title, options, selected, onPick }; const el = $("#overlay");
-    el.innerHTML = `<div class="scrim" data-act="close-dialog"><div class="dialog"><div class="dt">${esc(title)}</div><div>${options.map(([v, l]) => `<div class="opt" data-act="pick" data-value="${esc(v)}"><span class="radio ${v === selected ? "on" : ""}"></span><span>${esc(l)}</span></div>`).join("")}</div><div class="acts"><button class="btn text" data-act="close-dialog">Cancel</button></div></div></div>`;
+    el.innerHTML = `<div class="scrim" data-act="close-dialog"><div class="dialog"><div class="dt">${esc(title)}</div><div>${options.map(([v, l, note]) => `<div class="opt" data-act="pick" data-value="${esc(v)}"><span class="radio ${v === selected ? "on" : ""}"></span><span>${esc(l)}</span>${note ? `<span class="note">${note}</span>` : ""}</div>`).join("")}</div><div class="acts"><button class="btn text" data-act="close-dialog">Cancel</button></div></div></div>`;
     el.classList.remove("hidden");
   }
   function closeDialog() { S.dialog = null; $("#overlay").innerHTML = ""; $("#overlay").classList.add("hidden"); }
