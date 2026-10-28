@@ -2,6 +2,19 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.26 (2026-10-28)
+
+- Dieter from fork release v0.6.429-antigravity.4: after **Re-enroll** (a new daemon ID under the same
+  account) the daemon registers the add-on's project checkouts again under its new ID at the first peer
+  sync round and drops the stale local registrations, so New task works without re-attaching anything by
+  hand. Conversations and schedules created before the re-enroll stay with the old ID as read-only
+  history; shared ownership cannot change, so that part is permanent (the Removed-machine badge from
+  0.6.429.24 marks them). Between the new enrollment and the first sync round (device trust must be
+  approved first) the daemon refuses writes instead of publishing them as the old ID; such writes used
+  to stall the sync with other machines for good.
+- The harness runtime archives of the new release are byte-identical to the previous one, so the staged
+  runtime is reused; only the daemon binaries change.
+
 ## 0.6.429.25 (2026-10-28)
 
 - Fix for 0.6.429.24: the "removed machine" detection only applies to an enrolled daemon (an unenrolled
