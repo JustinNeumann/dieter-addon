@@ -2,13 +2,10 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import { HarnessCapabilityUnsupportedError } from "@ai-sdk/harness";
 
 // Google Antigravity CLI (`agy`) as a HarnessV1 adapter.
-//
-// This is the add-on's copy of the fork's internal/harness/runtime/antigravity-runtime.mjs
-// (patch_runtime.py lays it over the pinned fork sources at image build time). Compared with the
-// fork release it adds host tools, per-step usage, compaction and recovery from a lost conversation.
 //
 // Every turn is one headless `agy --output-format stream-json` run: the prompt goes
 // to stdin, the conversation id from the first run's `init` event is passed back
@@ -18,10 +15,12 @@ import { HarnessCapabilityUnsupportedError } from "@ai-sdk/harness";
 //
 // Host-defined tools (present_content, the background process tools) reach agy as an MCP
 // server: the adapter serves the running turn's tools over a private HTTP endpoint on
-// 127.0.0.1, agy launches the stdio proxy antigravity-host-tools.mjs (registered once by the
-// bridge with `agy mcp add dieter …`), which forwards tools/list and tools/call to that
-// endpoint through DIETER_AGY_TOOLS_URL/DIETER_AGY_TOOLS_TOKEN in agy's environment. A call
-// becomes a `tool-call` event, the host executes it and `submitToolResult` answers agy.
+// 127.0.0.1 and agy launches the stdio proxy antigravity-host-tools.mjs, which forwards
+// tools/list and tools/call to that endpoint through DIETER_AGY_TOOLS_URL and
+// DIETER_AGY_TOOLS_TOKEN in agy's environment. The proxy is registered in agy's own config once
+// per worker process (`agy mcp add dieter <node> <proxy>`, an add-or-update of that one entry in
+// ~/.gemini/config/mcp_config.json). A call becomes a `tool-call` event, the host executes it
+// and `submitToolResult` answers agy.
 //
 // Turn suspension, history reads, mid-turn messages and image input are not available
 // through the CLI (images reach the agent as files, see local-attachments.mjs).
@@ -37,10 +36,35 @@ import { HarnessCapabilityUnsupportedError } from "@ai-sdk/harness";
 // the sum over the turn. Thinking is not streamed, only counted (thinking_tokens).
 // MCP calls appear as the tool "call_mcp_tool" with parameters {ServerName, ToolName, Arguments}.
 const HARNESS_ID = "antigravity";
-// Name under which the bridge registers antigravity-host-tools.mjs (`agy mcp add dieter …`).
+// Name of the MCP server through which agy reaches the host tools (antigravity-host-tools.mjs).
 export const HOST_TOOLS_SERVER = "dieter";
+const HOST_TOOLS_PROXY = fileURLToPath(new URL("./antigravity-host-tools.mjs", import.meta.url));
 const CONVERSATION_LOST = Symbol("conversation-lost");
 const hostSchemaPath = new RegExp(`/antigravity-cli/mcp/${HOST_TOOLS_SERVER}/[^/]+\\.json$`);
+
+// `agy mcp add` of the proxy, once per process; resolves with a problem description when it failed.
+let hostToolsRegistration;
+function registerHostTools(command) {
+  hostToolsRegistration ??= new Promise((resolve) => {
+    const child = spawn(
+      command,
+      ["mcp", "add", HOST_TOOLS_SERVER, process.execPath, HOST_TOOLS_PROXY],
+      { env: process.env, stdio: ["ignore", "ignore", "pipe"] },
+    );
+    const stderr = [];
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", (error) => resolve(`cannot run ${command} mcp add: ${error.message}`));
+    child.on("close", (code, signal) =>
+      resolve(
+        code === 0
+          ? undefined
+          : `${command} mcp add exited (${signal || code}): ${stderr.join("").trim()}`,
+      ),
+    );
+  });
+  return hostToolsRegistration;
+}
 
 // agy prints a structured `AGY_ERROR: {...}` line on stderr when a run fails. Turn it into one
 // sentence for the conversation; the raw diagnostics stay out of the user-visible text.
@@ -79,7 +103,7 @@ function turnError(message) {
 }
 
 export function createAntigravity(settings = {}) {
-  const command = settings.command || process.env.DIETER_ANTIGRAVITY_BIN || "agy"; // on PATH of the execution machine, like the other CLIs
+  const command = settings.command || "agy"; // `agy` on PATH of the execution machine, like the other CLIs
   const effort = settings.effort || undefined;
   const unsupported = (message) =>
     new HarnessCapabilityUnsupportedError({ harnessId: HARNESS_ID, message });
@@ -129,14 +153,30 @@ export function createAntigravity(settings = {}) {
         isResume: !!resume,
 
         async doPromptTurn(turn) {
-          if (current.child) throw new Error("Antigravity: a turn is already running in this session");
+          if (current.child)
+            throw new Error("Antigravity: a turn is already running in this session");
           const prompt = promptToText(turn.prompt);
           const withInstructions = (text) =>
             turn.instructions?.trim()
               ? `<instructions>\n${turn.instructions.trim()}\n</instructions>\n\n${text}`
               : text;
-          turn.emit({ type: "stream-start", modelId: turn.model });
-          const tools = turn.tools?.length ? [...turn.tools] : [];
+          let tools = turn.tools?.length ? [...turn.tools] : [];
+          const warnings = [];
+          if (tools.length) {
+            const problem = await registerHostTools(command);
+            if (problem) {
+              warnings.push({
+                type: "unsupported",
+                message: `Antigravity cannot reach the host tools (${problem}); they are not offered to the agent.`,
+              });
+              tools = [];
+            }
+          }
+          turn.emit({
+            type: "stream-start",
+            modelId: turn.model,
+            ...(warnings.length ? { warnings } : {}),
+          });
           const env = { ...process.env };
           let hostTurn;
           if (tools.length) {
@@ -144,7 +184,11 @@ export function createAntigravity(settings = {}) {
             const url = await hostTools.start();
             env.DIETER_AGY_TOOLS_URL = url;
             env.DIETER_AGY_TOOLS_TOKEN = hostTools.token;
-            hostTurn = createHostToolTurn({ tools, emit: turn.emit, conversationId: () => state.conversationId });
+            hostTurn = createHostToolTurn({
+              tools,
+              emit: turn.emit,
+              conversationId: () => state.conversationId,
+            });
             hostTools.setTurn(hostTurn);
           } else {
             hostTools?.setTurn(undefined);
@@ -156,11 +200,13 @@ export function createAntigravity(settings = {}) {
             if (turn.model) args.push("--model", turn.model);
             // agy model ids carry their reasoning level (gemini-3.8-flash-high, claude-opus-5-5-low, …) and agy
             // rejects every --effort that differs from it; such a model is run at its own level.
-            if (effort && !/-(low|medium|high)$/.test(turn.model || "")) args.push("--effort", effort);
+            if (effort && !/-(low|medium|high)$/.test(turn.model || ""))
+              args.push("--effort", effort);
             if (resumeConversation) args.push("--conversation", resumeConversation);
             if (allowAll) args.push("--dangerously-skip-permissions"); // Dieter's allow-all permission mode; headless agy denies tools otherwise
             // No system-prompt flag in headless mode: the instructions lead the first prompt of the conversation.
-            const text = state.instructionsApplied && resumeConversation ? prompt : withInstructions(prompt);
+            const text =
+              state.instructionsApplied && resumeConversation ? prompt : withInstructions(prompt);
             return runTurn({
               command,
               args,
@@ -202,7 +248,8 @@ export function createAntigravity(settings = {}) {
           return {
             done,
             submitToolResult: async (submission) => {
-              if (!hostTurn) throw unsupported("Antigravity: no host tool call is waiting for a result");
+              if (!hostTurn)
+                throw unsupported("Antigravity: no host tool call is waiting for a result");
               hostTurn.submitResult(submission);
             },
           };
@@ -289,7 +336,9 @@ function modelFacingResult(submission) {
     isError ||= typed.type.startsWith("error-");
     if (typed.type === "text" || typed.type === "error-text") text = String(typed.value ?? "");
     else if (typed.type === "content" && Array.isArray(typed.value))
-      text = typed.value.map((p) => (p?.type === "text" ? p.text : `[${p?.type || "part"}]`)).join("\n");
+      text = typed.value
+        .map((p) => (p?.type === "text" ? p.text : `[${p?.type || "part"}]`))
+        .join("\n");
     else text = JSON.stringify(typed.value ?? null);
   } else {
     const value = submission.output;
@@ -343,7 +392,8 @@ function createHostToolTurn({ tools, emit, conversationId }) {
     },
     close() {
       closed = true;
-      for (const entry of pending.values()) entry.resolve({ text: "the turn has ended", isError: true });
+      for (const entry of pending.values())
+        entry.resolve({ text: "the turn has ended", isError: true });
       pending.clear();
     },
   };
@@ -363,7 +413,8 @@ export function createHostToolServer() {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    if (req.headers.authorization !== `Bearer ${token}`) return reply(401, { error: "unauthorized" });
+    if (req.headers.authorization !== `Bearer ${token}`)
+      return reply(401, { error: "unauthorized" });
     if (req.method === "GET" && req.url === "/tools") {
       return reply(200, {
         tools: (turn?.tools ?? []).map((t) => ({

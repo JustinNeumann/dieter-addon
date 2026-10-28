@@ -31,7 +31,8 @@ async function listTools() {
   return (Array.isArray(tools) ? tools : []).map((t) => ({
     name: t.name,
     description: t.description || "",
-    inputSchema: t.inputSchema && typeof t.inputSchema === "object" ? t.inputSchema : { type: "object" },
+    inputSchema:
+      t.inputSchema && typeof t.inputSchema === "object" ? t.inputSchema : { type: "object" },
   }));
 }
 
@@ -70,7 +71,10 @@ async function handle(message) {
   } catch (error) {
     if (!isRequest) return;
     if (method === "tools/call")
-      return reply(id, { content: [{ type: "text", text: String(error?.message || error) }], isError: true });
+      return reply(id, {
+        content: [{ type: "text", text: String(error?.message || error) }],
+        isError: true,
+      });
     replyError(id, -32000, String(error?.message || error));
   }
 }

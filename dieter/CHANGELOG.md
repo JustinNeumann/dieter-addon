@@ -9,7 +9,7 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
   two get merged), with unit tests (`tests/unit.sh`):
   - **Host tools**: present_content and the background process tools work with Antigravity. The adapter
     serves a turn's tools on a private local endpoint, and `agy` reaches them as the MCP server `dieter`
-    (stdio proxy `antigravity-host-tools.mjs`, registered by the bridge with `agy mcp add` at start; it
+    (stdio proxy `antigravity-host-tools.mjs`, which the adapter registers once with `agy mcp add`; it
     offers no tools outside a Dieter turn). agy's own `call_mcp_tool` step and its read of the tool
     schema are not shown twice.
   - **Context usage**: each model request reports its own usage (`finish-step`), so the context shown for a
