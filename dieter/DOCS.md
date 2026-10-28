@@ -138,6 +138,10 @@ code, shown under **Tools → Devices**, in an app (Devices → Add a device) or
 gateway's host name in the container's `/etc/hosts` when it cannot be resolved there, for example a
 Tailscale name (`https://host.tailnet.ts.net:4443` with the host's Tailscale IP); the certificate is
 still verified against the name. Enrollment is kept in `/data/dieter/daemon`.
+When another device has removed the add-on's daemon from the account (Devices shows "Removed"),
+**Re-enroll** runs `dieter daemon unenroll` and shows the Enroll form again. A new enrollment gives the daemon a
+new daemon ID: projects and harness settings stay, and the daemon registers its checkouts again under the new ID
+at its first peer sync; conversations and schedules of the old ID stay as read-only history.
 
 ## Devices
 

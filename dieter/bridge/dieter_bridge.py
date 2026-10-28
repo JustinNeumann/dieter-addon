@@ -102,7 +102,7 @@ ENV_FILE = "/data/dieter.env"                    # provider credentials for the 
 # node_modules (+ Bun); the runtime sources of the same build are in the image (/opt/dieter-runtime,
 # from the fork tag, see Dockerfile) and are laid over it.
 HARNESS_REPO = "JustinNeumann/dieter"
-HARNESS_VERSION = os.environ.get("DIETER_VERSION", "0.6.429-antigravity.3")
+HARNESS_VERSION = os.environ.get("DIETER_VERSION", "0.6.429-antigravity.4")
 HARNESS_SHA = {"aarch64": "1a0615ef28fab530eeb2e54efcd348c87a83ec6c1731dc942929c1cc8d398822",
                "x86_64": "cfb22e380f648e40069b7b317c7ab0d3ae558dba427d84dd08bd4b74a4b74ef3"}
 HARNESS_ASSET = {"aarch64": "dieter-harness-runtime-linux-arm64.tar.gz", "x86_64": "dieter-harness-runtime-linux-amd64.tar.gz"}
@@ -530,7 +530,17 @@ def stage_harness_runtime():
     arch = platform.machine()
     if arch not in HARNESS_SHA or os.path.exists(os.path.join(HARNESS_DIR, ".staged")):
         return
-    url = f"https://github.com/{HARNESS_REPO}/releases/download/v{HARNESS_VERSION}/{HARNESS_ASSET[arch]}"
+    # A fork release that rebuilt the same archive (equal sha) takes over the staged runtime of the
+    # previous version instead of downloading ~775 MB again; build_runtime_dir() lays its sources over it.
+    parent = os.path.dirname(HARNESS_DIR)
+    for n in sorted(os.listdir(parent)) if os.path.isdir(parent) else []:
+        marker = os.path.join(parent, n, ".staged")
+        if n != HARNESS_VERSION and os.path.exists(marker) and open(marker).read() == HARNESS_SHA[arch]:
+            subprocess.run(["rm", "-rf", HARNESS_DIR], check=True)
+            os.rename(os.path.join(parent, n), HARNESS_DIR)
+            log(f"harness: reused the staged runtime {n} (same archive) for {HARNESS_VERSION}")
+            return
+    url =f"https://github.com/{HARNESS_REPO}/releases/download/v{HARNESS_VERSION}/{HARNESS_ASSET[arch]}"
     tmp = HARNESS_DIR + ".download.tar.gz"
     log(f"harness: downloading {HARNESS_ASSET[arch]} ({HARNESS_VERSION})")
     os.makedirs(os.path.dirname(HARNESS_DIR), exist_ok=True)

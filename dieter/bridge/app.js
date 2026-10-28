@@ -1344,7 +1344,7 @@
     }
   }
   async function gatewayUnenroll() {
-    if (!confirm("Drop this add-on's enrollment so it can enroll again? Its projects and conversations stay; you sign in with GitHub and approve the new pairing code.")) return;
+    if (!confirm("Drop this add-on's enrollment so it can enroll again? It gets a new daemon ID: its projects stay and are registered again under the new ID, its earlier conversations and schedules stay as read-only history. You sign in with GitHub and approve the new pairing code.")) return;
     try { await api("api/gateway/unenroll", {}); } catch (e) { snackbar(e.message); return; }
     S.gw = null; S.dev = null; snackbar("Enrollment dropped. Enroll the add-on again."); render();
   }

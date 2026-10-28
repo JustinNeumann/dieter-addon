@@ -52,3 +52,18 @@ cd internal/harness/runtime
 find . -maxdepth 1 -type f \( -name '*.mjs' -o -name 'package.json' -o -name 'package-lock.json' \) ! -name '*.test.mjs' \
   | LC_ALL=C sort | xargs sha256sum | sha256sum
 ```
+
+## Upstream screening
+
+Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
+and release artifacts that affect the add-on (scheduled card).
+
+- **2026-10-28**, screened through upstream **v0.6.431** (`7f2afded`, = main). Baseline: the pinned fork
+  release `0.6.429-antigravity.3` already contains upstream through `2d736128` (after v0.6.430), so the range
+  was `2d736128..7f2afded`: only Mail rendering in the apps (#171, #172), tests and fixtures; no change to
+  `internal/cli`, the daemon, `internal/harness` or the release artifacts. Nothing to adapt, and no rebase of
+  `antigravity-pr` needed for the add-on. The fork had a newer `0.6.429-antigravity.4` (`116680d2`, re-homes
+  checkouts after a same-account re-enrollment, `daemon unenroll --help`): bumped to it in 0.6.429.24
+  (tarball checksums from its `SHA256SUMS`; the sigstore bundle's digest and workflow identity checked, not
+  cryptographically verified (no cosign here); runtime sources checksum and harness archives unchanged; the
+  bridge reuses the staged runtime of an equal archive), Re-enroll texts in the page and DOCS.md.

@@ -4,3 +4,4 @@ dieter/tests/playwright-report/
 __pycache__/
 *.pyc
 .written-from-pi
+.cache/

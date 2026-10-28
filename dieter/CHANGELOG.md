@@ -2,6 +2,17 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.24 (2026-10-28)
+
+- Bundled Dieter is now the fork release `0.6.429-antigravity.4`: after **Re-enroll** (a new enrollment under
+  the same account) the daemon registers its checkouts again under its new daemon ID at the first peer sync,
+  so new tasks and the apps find the add-on's projects again instead of failing with "project has no
+  checkout on the target machine". Conversations and schedules of the previous daemon ID stay as read-only
+  history (the Re-enroll confirmation now says so). Until that first sync the daemon refuses writes instead
+  of publishing records no peer would accept.
+- The harness runtime archive of this release is unchanged, so the bridge takes over the already staged
+  runtime instead of downloading it again (~775 MB).
+
 ## 0.6.429.23 (2026-10-28)
 
 - The gateway sign-in dialog also shows the link as text with a **Copy link** button, for app views where
