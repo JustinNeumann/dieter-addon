@@ -215,6 +215,24 @@ New task with an empty title field, the `dieter_create_task` rest_command withou
 The choice is stored in `/data/bridge_settings.json`. Tasks that agents create with the `dieter` CLI do
 not pass the bridge and keep Dieter's own title.
 
+## Agent instructions
+
+Tools → Settings → **Agent instructions** edits the text Dieter puts at the start of every turn's
+instructions, for every agent (Claude Code, Codex, Antigravity) and every project. It is the daemon's own
+prompt template (`dieter prompt show` / `dieter prompt update`), so the Dieter apps show the same text:
+
+- **Every agent**: opens the instructions. Add your own rules here, e.g. at the end ("Always answer in
+  German.", the machines an agent may use, …). `{{project.instructions_block}}` (the project's
+  instructions) and `{{labels.instructions_block}}` (the card's label instructions) must stay in it exactly once.
+- **Board cards** / **Standalone chats**: follow it for a card on a board or a standalone chat (how the agent
+  uses the Dieter CLI, lanes and labels).
+
+`{{variable}}`s are replaced with the conversation's values (the editor lists them); an unknown variable or a
+missing block can't be saved. A change applies from each conversation's next turn. **Reset to Dieter's
+default** brings back the release's text, which then follows later releases; an edited text stays as it is
+across updates. A project or board with its own template (`dieter prompt project|board`) uses that instead of
+**Every agent**; the editor lists those.
+
 ## Home Assistant from the agent
 
 The agents can drive Home Assistant core with `hass-cli` (REST API through the Supervisor's proxy,

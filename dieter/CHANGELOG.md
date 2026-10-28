@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.36 (2026-10-28)
+
+- Agent instructions in Settings: Tools → Settings → **Agent instructions** edits the text that opens every
+  turn's instructions for every agent and project (Dieter's global prompt template), plus the parts for board
+  cards and standalone chats. The editor lists the template variables and the projects or boards with their own
+  template, refuses what the daemon would reject (unknown variable, missing instructions block), and resets a
+  text to Dieter's default. Bridge: `GET`/`POST /api/prompts` (`dieter prompt show`/`update`).
+
 ## 0.6.429.35 (2026-10-28)
 
 - Agents can read Home Assistant's logs: new command `ha-logs` in the image. It prints the system log (warnings

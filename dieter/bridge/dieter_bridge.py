@@ -47,6 +47,9 @@ Endpoints:
   GET  /api/focus?consume=1   {id|null} and forget it (valid 15 min)
   GET  /api/settings          {title_model, title_models: [{id, name, available, detail}]}
   POST /api/settings          {title_model: openai|ollama}  who titles cards created without a title
+  GET  /api/prompts           the daemon's prompt templates {template, board_skill, chat_skill, variables,
+                              overrides: [{kind: project|board, id, name, project?}]} (dieter prompt show)
+  POST /api/prompts           {template?, board_skill?, chat_skill?: text, reset?: [key]}  dieter prompt update
   GET  /api/claude/login      add-on only: state of a running `claude auth login` {running, url, done, auth}
   POST /api/claude/login      start the sign-in; returns the link the user opens on claude.com
   POST /api/claude/login/code {code}  hand the code from claude.com to the CLI; writes /data/.claude/.credentials.json
@@ -499,6 +502,52 @@ def settings_view():
         {"id": "ollama", "name": TITLE_MODELS["ollama"], "available": bool(entity),
          "detail": entity or ("No AI Task entity of the Ollama integration found; OpenAI titles instead" if ADDON and SUPERVISOR_TOKEN
                               else "Works in the Home Assistant add-on only")}]}
+
+
+# Agent instructions (Settings → Agent instructions): the daemon's own prompt templates, which it renders into
+# the instructions of every turn of every harness: the template (every agent; a project's or board's own
+# template replaces it), then the board skill (cards) or the chat skill (standalone chats).
+PROMPT_KEYS = {"template": ("promptTemplate", "--template", "template"),
+               "board_skill": ("boardSkillTemplate", "--board-skill", "board-skill"),
+               "chat_skill": ("chatSkillTemplate", "--chat-skill", "chat-skill")}
+
+
+def prompts_view():
+    d = run(["prompt", "show"]) or {}
+    projects = unwrap(run(["project", "list", "--format", "json"], timeout=15), "projects")
+    boards = unwrap(run(["board", "list", "--format", "json"], timeout=15), "boards")
+    names = {p.get("id"): p.get("name") for p in projects}
+    overrides = [{"kind": "project", "id": p.get("id"), "name": p.get("name")}
+                 for p in projects if (p.get("promptTemplate") or p.get("prompt_template") or "").strip()]
+    overrides += [{"kind": "board", "id": b.get("id"), "name": b.get("name"), "project": names.get(b.get("project_id") or b.get("projectId"))}
+                  for b in boards if (b.get("prompt_template") or b.get("promptTemplate") or "").strip()]
+    return {**{k: d.get(f) or "" for k, (f, _, _) in PROMPT_KEYS.items()}, "variables": d.get("variables") or [], "overrides": overrides}
+
+
+def prompts_update(body):
+    """{template?, board_skill?, chat_skill?: text, reset?: [key]}: `dieter prompt update`. A reset template
+    follows Dieter's default of later releases again."""
+    args = ["prompt", "update"]
+    for k, (_, flag, _) in PROMPT_KEYS.items():
+        if k in body:
+            v = body[k]
+            if not isinstance(v, str) or not v.strip():
+                raise ValueError(f"{k}: text required (or reset it)")
+            args.append(f"{flag}={v}")                # =: a text starting with "-" is no flag
+    reset = body.get("reset") or []
+    if not isinstance(reset, list) or any(k not in PROMPT_KEYS or k in body for k in reset):
+        raise ValueError("reset: list of " + ", ".join(PROMPT_KEYS) + " (not also set)")
+    for k in reset:
+        args += ["--reset", PROMPT_KEYS[k][2]]
+    if len(args) == 2:
+        raise ValueError("nothing to update")
+    try:
+        run(args)
+    except CliError as e:                         # "error: rpc error: code = InvalidArgument desc = template must …"
+        if "InvalidArgument" not in str(e):
+            raise
+        raise ValueError(re.sub(r"^(error: )?rpc error: code = \w+ desc = ", "", str(e)))
+    return prompts_view()
 
 
 def ollama_entity():
@@ -2228,6 +2277,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.ha_summary())
             if parts[1:] == ["settings"]:
                 return self.send_json(settings_view())
+            if parts[1:] == ["prompts"]:
+                return self.send_json(prompts_view())
             if parts[1:] == ["focus"]:
                 fid = FOCUS["id"] if FOCUS["id"] and time.time() - FOCUS["at"] < FOCUS_TTL_S else None
                 if q.get("consume", ["0"])[0] == "1":
@@ -2325,6 +2376,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(res)
             if parts[1:] == ["settings"]:
                 return self.send_json(settings_update(body))
+            if parts[1:] == ["prompts"]:
+                return self.send_json(prompts_update(body))
             if parts[1:] == ["boards", "order"]:
                 return self.send_json(board_order_update(body))
             if parts[1:] == ["focus"]:

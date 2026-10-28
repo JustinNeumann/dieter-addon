@@ -241,6 +241,7 @@
     const formState = S.modal === "repo" ? S.repo : S.creation;
     if (formState) $("#modal").querySelectorAll("[data-field]").forEach((f) => { const v = formState[f.dataset.field] ?? ""; if (f.value !== v) f.value = v; });
     if (S.sch?.form) document.querySelectorAll("[data-sfield]").forEach((f) => { const v = S.sch.form[f.dataset.sfield] ?? ""; if (f.value !== v) f.value = v; });
+    if (S.set?.draft) { document.querySelectorAll("[data-pfield]").forEach((f) => { if (f.value !== S.set.draft.text) f.value = S.set.draft.text; }); promptSync(); }
     if (S.dev) document.querySelectorAll("[data-dfield]").forEach((f) => { const v = S.dev[f.dataset.dfield] ?? ""; if (f.value !== v) f.value = v; });
     if (S.modal === "creation" && S.creation) { const c = S.creation; const ok = !!(c.prompt.trim() && c.project_id && (c.chat || c.board_id) && !S.busy); $("#modal").querySelectorAll('[data-act="submit-creation"]').forEach((b) => (b.disabled = !ok)); }
     if (S.modal === "repo" && S.repo) $("#modal").querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !repoReady(S.repo) || S.busy));
@@ -601,10 +602,18 @@
     }
     return `<div class="screen">${appbar({ title: "Devices", subtitle: d?.synced_at ? "Synced " + fmtWhen(d.synced_at) : "", back: opts.back, actions })}<div class="content" data-scroll="devices">${body}</div></div>`;
   }
-  // ---- Settings: the bridge's own settings (/api/settings); prompt and daemon settings live in the Dieter app
+  // ---- Settings: the bridge's own settings (/api/settings) and the daemon's prompt templates (/api/prompts);
+  // daemon settings live in the Dieter app
+  const PROMPTS = {
+    template: ["Every agent", "groups", "#FF9F0A", "Opens the instructions of every turn, for every agent (Claude, Codex, Antigravity) in every project. Add your own text, e.g. at the end; {{project.instructions_block}} and {{labels.instructions_block}} must stay in it exactly once."],
+    board_skill: ["Board cards", "view_kanban", "#0A84FF", "Follows the part above in the instructions of a card on a board: how the agent uses the Dieter CLI, lanes and labels."],
+    chat_skill: ["Standalone chats", "chat", "#30B158", "Follows the part above in the instructions of a standalone chat (no board, lanes or labels)."],
+  };
   function settingsScreen(route, opts) {
-    S.set ||= { data: undefined };
+    S.set ||= { data: undefined, prompts: undefined, draft: null };
+    if (route.prompt) return promptScreen(route, opts);
     const d = S.set.data; if (d === undefined) loadSettings();
+    const pr = S.set.prompts; if (pr === undefined) loadPrompts();
     let body;
     if (!d) body = spinnerCenter();
     else if (d.error) body = `<div class="banner warning" style="margin-top:12px">${ico("error", 22)}<div><div class="t">Settings unavailable</div><div class="m">${esc(d.error)}</div></div></div>`;
@@ -613,9 +622,44 @@
       const fallback = cur && !cur.available ? sectionFooter(cur.detail) : "";
       body = `${sectionHeader("Task titles")}<div class="group">${listRow({ title: "Title model", value: cur?.name || d.title_model, glyph: "title", tile: "#5E5CE6", act: "settings-pick", extra: `data-key="title_model"`, trailing: ico("expand_more", 20, "c-secondary") })}</div>
         ${fallback || sectionFooter("Names tasks and chats created without a title. OpenAI: Dieter's auto-title. Ollama (HA): a local model through Home Assistant's AI Task; the task is saved under its first line and renamed a moment later.")}
-        ${sectionFooter("Prompt and daemon settings live in the Dieter app.")}`;
+        ${sectionHeader("Agent instructions")}${!pr ? `<div class="group">${listRow({ title: "Loading…", glyph: "hourglass_empty" })}</div>`
+          : pr.error ? `<div class="group">${listRow({ title: "Instructions unavailable", subtitle: pr.error, glyph: "error", glyphTint: "var(--warning)", act: "prompts-reload" })}</div>`
+          : `<div class="group">${Object.entries(PROMPTS).map(([k, [title, glyph, tile]], i, all) => listRow({ title, subtitle: promptSummary(pr[k]), glyph, tile, position: pos(i, all.length), act: "prompt-edit", extra: `data-key="${k}"`, trailing: ico("chevron_right", 20, "c-secondary") })).join("")}</div>`}
+        ${sectionFooter("Dieter puts these at the start of every turn's instructions: first the part for every agent, then the one for board cards or standalone chats. Changes apply from each conversation's next turn.")}
+        ${sectionFooter("Daemon settings live in the Dieter app.")}`;
     }
     return `<div class="screen">${appbar({ title: "Settings", back: opts.back })}<div class="content" data-scroll="settings">${body}</div></div>`;
+  }
+  // the last line with text of its own (not just a variable like {{labels.instructions_block}}): where added text usually is
+  const promptSummary = (t) => (t || "").split("\n").map((l) => l.trim()).filter((l) => l.replace(/\{\{[\w.]+\}\}/g, "").trim()).slice(-1)[0] || "";
+  async function loadPrompts() {
+    S.set.prompts = null;
+    try { S.set.prompts = await api("api/prompts"); } catch (e) { S.set.prompts = { error: e.message }; }
+    render();
+  }
+  function promptScreen(route, opts) {
+    const key = route.prompt, [title, , , help] = PROMPTS[key], pr = S.set.prompts;
+    if (!pr || pr.error) { if (pr === undefined) loadPrompts(); return `<div class="screen">${appbar({ title, back: opts.back })}${pr?.error ? `<div class="content">${sectionFooter(pr.error)}</div>` : spinnerCenter()}</div>`; }
+    if (S.set.draft?.key !== key) S.set.draft = { key, text: pr[key] || "" };
+    const own = key === "template" && pr.overrides?.length ? sectionHeader("Own templates") + `<div class="group">${pr.overrides.map((o, i) => listRow({ title: o.name || o.id, subtitle: o.kind === "board" ? `Board${o.project ? " of " + o.project : ""}` : "Project", glyph: o.kind === "board" ? "view_kanban" : "folder", position: pos(i, pr.overrides.length) })).join("")}</div>`
+      + sectionFooter("These use their own template instead of this one (dieter prompt project|board … --inherit returns them to it).") : "";
+    return `<div class="screen">${appbar({ title, subtitle: "Agent instructions", back: opts.back, actions: `<button class="btn filled with-icon" style="margin-right:8px" data-act="prompt-save" disabled>${S.busy ? `<span class="spin"></span>` : ico("check", 18)}Save</button>` })}
+      <div class="content" data-scroll="prompt-${key}" style="padding-top:8px;padding-bottom:24px">
+      <div class="compose-card"><textarea id="p-text" class="code" data-pfield="text" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div>
+      ${sectionFooter(help)}${own}
+      ${sectionHeader("Variables")}<div class="m16"><div class="ccard t-footnote c-secondary" style="font-family:var(--mono);line-height:20px">${(pr.variables || []).map((v) => esc(`{{${v}}}`)).join("<br>")}</div></div>
+      ${sectionFooter("Replaced with the conversation's values when the instructions are put together; an unknown variable can't be saved.")}
+      <div class="group" style="margin-top:16px">${listRow({ title: "Reset to Dieter's default", subtitle: "Later Dieter releases then update it", glyph: "restart_alt", glyphTint: "var(--destructive)", act: "prompt-reset", extra: `data-key="${key}"` })}</div></div></div>`;
+  }
+  // the Save button is set after rendering, so typing doesn't change the markup (a live update keeps the field)
+  const promptReady = () => { const d = S.set?.draft, pr = S.set?.prompts; return !!(d && pr && !pr.error && d.text.trim() && d.text !== (pr[d.key] || "") && !S.busy); };
+  function promptSync() { const ok = promptReady(); document.querySelectorAll('[data-act="prompt-save"]').forEach((b) => (b.disabled = !ok)); }
+  async function savePrompt(reset) {
+    const d = S.set?.draft; if (!d || S.busy) return;
+    if (reset && !confirm(`Reset "${PROMPTS[d.key][0]}" to Dieter's default? Your text in it is lost.`)) return;
+    S.busy = true; render();
+    try { S.set.prompts = await api("api/prompts", reset ? { reset: [d.key] } : { [d.key]: d.text }); S.set.draft = null; S.busy = false; snackbar(reset ? "Reset to the default" : "Saved; applies from the next turn"); pop(); }
+    catch (e) { S.busy = false; snackbar("Not saved: " + e.message); render(); }
   }
   async function loadSettings() {
     S.set.data = null;
@@ -1636,6 +1680,10 @@
       case "files-hidden": S.showHidden = !S.showHidden; render(); break;
       case "schedule": { const r = top(); push({ kind: "tool", page: "schedules", scheduleId: id, projectId: r?.projectId }); break; }
       case "settings-pick": settingsPick(el.dataset.key); break;
+      case "prompts-reload": loadPrompts(); break;
+      case "prompt-edit": S.set.draft = null; push({ kind: "tool", page: "settings", prompt: el.dataset.key }); break;
+      case "prompt-save": savePrompt(false); break;
+      case "prompt-reset": savePrompt(true); break;
       case "dev-refresh": S.dev.data = undefined; render(); break;
       case "dev-approve": approveDevice(); break;
       case "dev-revoke": e.stopPropagation(); revokeDevice(id, el.dataset.name); break;
@@ -1693,6 +1741,7 @@
     const s = e.target.closest("[data-search]"); if (s) { S.search[s.dataset.search] = s.value; const f = e.target; render(); const n = $(`[data-search="${s.dataset.search}"]`); if (n && n !== f) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
     const qf = e.target.closest("[data-qfree]"); if (qf) { const q = (S.data.questions || []).find((z) => z.id === qf.dataset.qfree); if (q) { answerState(q)[qf.dataset.x].freeform = qf.value; const card = qf.closest("[data-question]"); const btn = card?.querySelector('[data-act="q-answer"]'); if (btn) btn.disabled = false; } return; }
     const df = e.target.closest("[data-dfield]"); if (df && S.dev) { S.dev[df.dataset.dfield] = df.value; const ok = df.value.replace(/[\s-]/g, "").length === 16 && !S.busy; document.querySelectorAll('[data-act="dev-approve"]').forEach((b) => (b.disabled = !ok)); return; }
+    const pf = e.target.closest("[data-pfield]"); if (pf && S.set?.draft) { S.set.draft.text = pf.value; promptSync(); return; }
     const sf = e.target.closest("[data-sfield]"); if (sf && S.sch?.form) { S.sch.form[sf.dataset.sfield] = sf.value; schedFormSync(); if (sf.dataset.sfield === "cron") schedPreviewDebounced(); return; }
     const f = e.target.closest("[data-field]"); if (f && S.modal === "repo" && S.repo) { S.repo[f.dataset.field] = f.value; document.querySelectorAll('[data-act="submit-repo"]').forEach((b) => (b.disabled = !repoReady(S.repo))); return; }
     if (f && S.creation) { S.creation[f.dataset.field] = f.value; const ready = S.creation.prompt.trim() && S.creation.project_id && (S.creation.chat || S.creation.board_id); document.querySelectorAll('[data-act="submit-creation"]').forEach((b) => (b.disabled = !ready)); }

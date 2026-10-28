@@ -518,3 +518,30 @@ test("Gateway: the Machines page offers enrollment; a non-https gateway is refus
   await page.locator('[data-act="gw-enroll-cancel"]').click();
   await expect(page.locator("#overlay")).toHaveClass(/hidden/);
 });
+
+test("Settings: agent instructions for every agent are edited, saved to the daemon and reset", async ({ page, request }) => {
+  const before = await (await request.get("api/prompts")).json();
+  expect(before.template).toContain("{{project.instructions_block}}");
+  expect(before.variables).toContain("project.name");
+  const bad = await request.post("api/prompts", { data: { template: "no blocks" } });
+  expect(bad.status()).toBe(400);
+  expect((await bad.json()).error).toContain("project.instructions_block");
+  await page.goto("");
+  await page.locator('#rail [data-act="tab"][data-tab="tools"]').click();
+  await page.locator('[data-act="tool"][data-page="settings"]').click();
+  await page.locator('[data-act="prompt-edit"][data-key="template"]').click();
+  const text = page.locator("#p-text");
+  await expect(text).toHaveValue(before.template);
+  await expect(page.locator('[data-act="prompt-save"]')).toBeDisabled();
+  const extra = `Always answer in German (${stamp}).`;
+  await text.fill(before.template + "\n\n" + extra);
+  await page.locator('[data-act="prompt-save"]').click();
+  await expect(page.locator("#snackbar")).toContainText("Saved");
+  await expect(page.locator('[data-act="prompt-edit"][data-key="template"]')).toContainText(extra);
+  expect((await (await request.get("api/prompts")).json()).template).toContain(extra);
+  await page.locator('[data-act="prompt-edit"][data-key="template"]').click();
+  page.once("dialog", (d) => d.accept());
+  await page.locator('[data-act="prompt-reset"]').click();
+  await expect(page.locator("#snackbar")).toContainText("Reset");
+  expect((await (await request.get("api/prompts")).json()).template).not.toContain(extra);
+});
