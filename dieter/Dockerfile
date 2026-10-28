@@ -78,6 +78,11 @@ RUN set -eu; \
     ln -s /opt/hass-cli/bin/hass-cli /usr/local/bin/hass-cli; \
     hass-cli --version
 
+# ha-logs: the add-on's own log reader for the agents (system log over the WebSocket API with filters; its
+# shebang is the hass-cli venv's Python, which has aiohttp)
+COPY tools/ha-logs /usr/local/bin/ha-logs
+RUN chmod 755 /usr/local/bin/ha-logs && ha-logs --help >/dev/null
+
 # The daemon and its agents run as this user, not as root (Claude Code refuses
 # --dangerously-skip-permissions as root); /data is handed to it at start.
 RUN useradd --uid 1000 --user-group --home-dir /data --no-create-home --shell /bin/bash dieter

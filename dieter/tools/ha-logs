@@ -1,0 +1,203 @@
+#!/opt/hass-cli/bin/python
+"""ha-logs: read Home Assistant's logs from inside the Dieter add-on.
+
+hass-cli cannot do this (it has no WebSocket log command and /api/error_log is a 404 on Home Assistant OS),
+so this talks to the core WebSocket API through the same HASS_SERVER/HASS_TOKEN as hass-cli:
+
+  * default: the system log (system_log/list), i.e. the warnings and errors Home Assistant keeps in memory,
+    repeated entries folded into one with a count. This is what the Settings > System > Logs page shows.
+  * --full: the plain log file via /api/error_log when core serves one (INFO lines too); on a setup without
+    a log file it says so.
+"""
+import argparse
+import asyncio
+import datetime as dt
+import json
+import os
+import re
+import sys
+
+import aiohttp
+
+LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+
+
+def die(msg, code=1):
+    print(f"ha-logs: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def parse_since(text):
+    """'90s', '30m', '2h', '1d' or an ISO date/time (container-local, or HA time without a zone) -> epoch seconds."""
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([smhd])", text.strip().lower())
+    if m:
+        return dt.datetime.now().timestamp() - float(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+    try:
+        return dt.datetime.fromisoformat(text.strip()).timestamp()
+    except ValueError:
+        die(f"--since: '{text}' is neither like 30m/2h/1d nor an ISO time")
+
+
+async def ws_call(server, token, messages, timeout):
+    """Authenticate once, send the messages in order and return their results."""
+    url = server.rstrip("/").replace("https://", "wss://", 1).replace("http://", "ws://", 1) + "/api/websocket"
+    out = []
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as s:
+            async with s.ws_connect(url, max_msg_size=64 * 1024 * 1024) as ws:
+                first = await ws.receive_json()
+                if first.get("type") != "auth_required":
+                    die(f"unexpected greeting from {url}: {first}")
+                await ws.send_json({"type": "auth", "access_token": token})
+                auth = await ws.receive_json()
+                if auth.get("type") != "auth_ok":
+                    die(f"Home Assistant refused the token: {auth.get('message', auth)}")
+                for i, msg in enumerate(messages, 1):
+                    await ws.send_json({"id": i, **msg})
+                    while True:
+                        r = await ws.receive_json()
+                        if r.get("id") == i:
+                            break
+                    out.append(r)
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+        die(f"cannot reach Home Assistant at {url}: {e or type(e).__name__}")
+    return out
+
+
+async def http_get(server, token, path, timeout):
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as s:
+            async with s.get(server.rstrip("/") + path, headers={"Authorization": f"Bearer {token}"}) as r:
+                return r.status, await r.text()
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+        die(f"cannot reach Home Assistant at {server}: {e or type(e).__name__}")
+
+
+def tzinfo(name):
+    try:
+        import zoneinfo
+        return zoneinfo.ZoneInfo(name)
+    except Exception:
+        return dt.timezone.utc
+
+
+def fmt_ts(ts, tz):
+    return dt.datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def system_log(args, server, token):
+    res = asyncio.run(ws_call(server, token, [{"type": "system_log/list"}, {"type": "get_config"}], args.timeout))
+    if not res[0].get("success"):
+        err = res[0].get("error", {})
+        if err.get("code") == "unknown_command":
+            die("Home Assistant has no system_log integration (it is part of default_config; "
+                "add 'system_log:' to configuration.yaml)")
+        die(f"system_log/list failed: {err.get('message', res[0])}")
+    tz = tzinfo((res[1].get("result") or {}).get("time_zone") or "UTC")
+    entries = res[0]["result"]
+    min_level = LEVELS[args.level.upper()]
+    grep = re.compile(args.grep, re.I) if args.grep else None
+    since = parse_since(args.since) if args.since else None
+    keep = []
+    for e in entries:
+        if LEVELS.get(e.get("level", "").upper(), 0) < min_level:
+            continue
+        if args.logger and args.logger.lower() not in e.get("name", "").lower():
+            continue
+        if since is not None and e.get("timestamp", 0) < since:
+            continue
+        text = "\n".join([e.get("name", ""), *e.get("message", []), e.get("exception", "")])
+        if grep and not grep.search(text):
+            continue
+        keep.append(e)
+    keep.sort(key=lambda e: e.get("timestamp", 0))      # oldest first, the newest entry ends the output
+    total = len(keep)
+    if args.limit and total > args.limit:
+        keep = keep[-args.limit:]
+    if args.json:
+        print(json.dumps(keep, indent=2, ensure_ascii=False))
+        return
+    for e in keep:
+        count = e.get("count", 1)
+        when = fmt_ts(e["timestamp"], tz)
+        if count > 1:
+            first = fmt_ts(e["first_occurred"], tz)
+            when += f" (x{count}" + (f", first {first}" if first != when else "") + ")"
+        msgs = e.get("message", [])
+        print(f"{when} {e.get('level', '?'):8} {e.get('name', '?')}: {msgs[0] if msgs else ''}")
+        for extra in msgs[1:]:
+            print(f"    {extra}")
+        src = e.get("source") or []
+        if len(src) == 2:
+            print(f"    at {src[0]}:{src[1]}")
+        if args.trace and e.get("exception"):
+            print("    " + e["exception"].rstrip().replace("\n", "\n    "))
+    note = f"{total} entries" + (f", showing the last {len(keep)}" if len(keep) < total else "")
+    hint = "" if args.trace else "; --trace adds the tracebacks"
+    print(f"-- {note} from the system log (warnings and errors only; --full for the log file){hint}", file=sys.stderr)
+
+
+def full_log(args, server, token):
+    status, text = asyncio.run(http_get(server, token, "/api/error_log", args.timeout))
+    if status == 404:
+        die("this Home Assistant serves no log file (/api/error_log is a 404; Home Assistant OS logs to the "
+            "journal only). Run ha-logs without --full for the warnings and errors of the system log.")
+    if status != 200:
+        die(f"/api/error_log answered {status}: {text[:200]}")
+    lines = text.splitlines()
+    min_level = LEVELS[args.level.upper()] if args.level != "warning" or args.level_given else 0
+    pat = re.compile(r"^\S+ \S+ (DEBUG|INFO|WARNING|ERROR|CRITICAL) ")
+    grep = re.compile(args.grep, re.I) if args.grep else None
+    logger = args.logger.lower() if args.logger else None
+    since = parse_since(args.since) if args.since else None
+    out, keeping = [], True
+    for ln in lines:
+        m = pat.match(ln)
+        if m:                                   # a new record; the lines after it (tracebacks) follow its fate
+            keeping = LEVELS[m.group(1)] >= min_level
+            if keeping and since is not None:
+                try:
+                    keeping = dt.datetime.fromisoformat(" ".join(ln.split()[:2]).replace(",", ".")).timestamp() >= since
+                except ValueError:
+                    pass
+            keeping = keeping and (logger is None or logger in ln.lower())
+        if keeping:
+            out.append(ln)
+    if grep:
+        out = [ln for ln in out if grep.search(ln)]
+    if args.limit and len(out) > args.limit:
+        out = out[-args.limit:]
+    print("\n".join(out))
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        prog="ha-logs", description="Read the Home Assistant logs (system log: warnings and errors; --full: log file).",
+        epilog="examples:\n  ha-logs --level error --since 1h\n  ha-logs --logger zha --trace\n"
+               "  ha-logs --grep 'could not be validated' --limit 5\n  ha-logs --full --grep mqtt --limit 100",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--level", type=str.lower, choices=[l.lower() for l in LEVELS], default=None,
+                    help="lowest level to show (default warning; --full: all)")
+    ap.add_argument("--logger", "-l", help="only loggers whose name contains this (e.g. zha, homeassistant.components.mqtt)")
+    ap.add_argument("--grep", "-g", help="only entries matching this regular expression (case-insensitive)")
+    ap.add_argument("--since", "-s", help="only entries newer than this: 30m, 2h, 1d or an ISO time")
+    ap.add_argument("--limit", "-n", type=int, default=30,
+                    help="the last N entries (--full: lines), 0 for all (default 30)")
+    ap.add_argument("--trace", "-t", action="store_true", help="include the tracebacks")
+    ap.add_argument("--json", action="store_true", help="raw JSON entries (system log only)")
+    ap.add_argument("--full", action="store_true", help="the log file via /api/error_log, if core serves one")
+    ap.add_argument("--timeout", type=float, default=30, help="seconds (default 30)")
+    args = ap.parse_args()
+    args.level_given = args.level is not None
+    args.level = args.level or "warning"
+    server, token = os.environ.get("HASS_SERVER"), os.environ.get("HASS_TOKEN")
+    if not server or not token:
+        die("HASS_SERVER and HASS_TOKEN are not set (hass-cli needs them as well)")
+    (full_log if args.full else system_log)(args, server, token)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BrokenPipeError:
+        pass

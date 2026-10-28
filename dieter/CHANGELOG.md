@@ -2,6 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.35 (2026-10-28)
+
+- Agents can read Home Assistant's logs: new command `ha-logs` in the image. It prints the system log (warnings
+  and errors, as in Settings → System → Logs) over the WebSocket API with filters instead of `hass-cli raw ws
+  system_log/list`'s unfiltered YAML dump: `--level`, `--logger`, `--grep`, `--since 1h`, `-n`, `--trace`, `--json`;
+  `--full` reads the log file where core serves one (not on Home Assistant OS). The Claude Code note in
+  `CLAUDE.md` (replaced only while unedited) mentions it, and no longer says WebSocket commands don't work through
+  the proxy: they do.
+
 ## 0.6.429.34 (2026-10-28)
 
 - Boards in any order: drag a board row on the Projects list or a project's page to a new place (mouse: press

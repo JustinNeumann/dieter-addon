@@ -30,7 +30,7 @@ not be root anyway.
 | bridge `/opt/bridge/dieter_bridge.py` | `0.0.0.0:8099` (Ingress port); REST + SSE API, serves the page, `/api/ha` for sensors |
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the bridge on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR`; staged runtimes of earlier versions are removed, and the Bun it carries is installed as the daemon's managed Bun (`/data/dieter/runtime/tools/bun/<bun version>`), which Oh My Pi's model discovery would otherwise download the whole archive for |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |
-| `hass-cli` 1.0.0 (HA core REST API) | `/usr/local/bin`; authenticated with the add-on's token, see below |
+| `hass-cli` 1.0.0 (HA core REST API), `ha-logs` (HA logs) | `/usr/local/bin`; authenticated with the add-on's token, see below |
 | runtime sources of the same build (`/opt/dieter-runtime`, from the fork tag, checksum-verified) | `runner.mjs` + adapters, laid over the archive's `node_modules`; the **Antigravity** adapter is the add-on's own copy (`patches/antigravity-runtime.mjs`, laid over the fork's at image build by `patches/patch_runtime.py`) |
 | project checkouts | `/data/projects/<name>` |
 
@@ -220,14 +220,23 @@ not pass the bridge and keep Dieter's own title.
 The agents can drive Home Assistant core with `hass-cli` (REST API through the Supervisor's proxy,
 `HASS_SERVER=http://supervisor/core`, `HASS_TOKEN` = the add-on's token, `homeassistant_api: true`).
 Examples: `hass-cli state list`, `hass-cli state get sensor.x`, `hass-cli service call light.turn_on
---arguments entity_id=light.x`, `hass-cli raw get /api/config`. WebSocket commands (`hass-cli raw ws …`)
-do not work through the proxy. The bridge forwards the two variables to the harness workers
+--arguments entity_id=light.x`, `hass-cli raw get /api/config`; WebSocket commands work too
+(`hass-cli raw ws <type>`). The bridge forwards the two variables to the harness workers
 (`DIETER_HARNESS_ENV`), so every agent inherits them; Claude Code additionally gets a note in
 `/data/.claude/CLAUDE.md` (replaced only while it is the add-on's own text; edit or empty it as you like).
 The token reaches every service of HA core, so word your tasks accordingly. The Supervisor API is off
 (`hassio_api: false`): no `ha` CLI, no add-on, restart or host management from the agents. Home
 Assistant's `/config` is not mounted in the container; edit configuration through another machine (SSH)
 or the API.
+
+**Logs:** `ha-logs` (`tools/ha-logs`, installed in the image) reads Home Assistant's system log over the
+WebSocket API, the data behind Settings → System → Logs: `ha-logs --level error --since 1h`,
+`ha-logs --logger zha --trace`, `ha-logs --grep 'pattern' -n 100`, `ha-logs --json`; `--help` lists everything.
+Entries are oldest first (the newest ends the output), repeats are folded into one with a count, times are in
+Home Assistant's time zone. The system log holds WARNING and above since the last start (50 entries by default,
+`system_log: max_entries` in `configuration.yaml`); INFO and DEBUG lines are not in it. `ha-logs --full` reads
+`/api/error_log` for the whole log file, which Home Assistant OS does not provide (it logs to the journal, and the
+Supervisor's `/core/logs` needs `hassio_api`, which stays off). The Claude Code note in `CLAUDE.md` mentions it.
 
 ## Backups
 

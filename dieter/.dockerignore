@@ -1,4 +1,4 @@
-# Kept out of the image build context (the Dockerfile copies bridge/, patches/ and run.sh).
+# Kept out of the image build context (the Dockerfile copies bridge/, patches/, tools/ and run.sh).
 tests/
 patches/*.test.mjs
 __pycache__/

@@ -1376,8 +1376,14 @@ CLAUDE_HINT_TEXT = """# Home Assistant
 This container is the Dieter add-on inside Home Assistant. `hass-cli` is installed and authenticated
 (REST API of Home Assistant core; `HASS_SERVER`/`HASS_TOKEN` are set): `hass-cli state list`,
 `hass-cli state get sensor.x`, `hass-cli service call light.turn_on --arguments entity_id=light.x`,
-`hass-cli raw get /api/config`. WebSocket commands are not available through this proxy. There is no
+`hass-cli raw get /api/config`, `hass-cli raw ws <command type>` for WebSocket commands. There is no
 Supervisor access (no `ha` CLI): add-ons, Home Assistant restarts and the host are out of reach.
+
+Home Assistant's logs: run `ha-logs` (not `hass-cli raw ws system_log/list`, which dumps everything as YAML).
+It prints the system log, i.e. the warnings and errors since Home Assistant started, newest last:
+`ha-logs --level error --since 1h`, `ha-logs --logger zha --trace`, `ha-logs --grep 'pattern' -n 100`,
+`ha-logs --json`. It has no INFO or DEBUG lines; `ha-logs --full` reads the log file if core serves one
+(on Home Assistant OS it does not). `ha-logs --help` lists the options.
 
 Home Assistant's own config files are not mounted here; use the API above, or SSH to another machine.
 
@@ -1389,7 +1395,8 @@ returned by tools (a Read of an image file, browser screenshots) are shown as we
 """
 # earlier texts of that file: a file with one of these is ours and gets replaced, an edited one is kept
 CLAUDE_HINT_OLD = {"b0b13e392971aa06e72ca1d0ac265f15e563c90f653210dff669f46224b250c6",
-                   "f6634308d5b763f0261f9f53999c661316086d8730469c9f07109559eb0c8de9"}
+                   "f6634308d5b763f0261f9f53999c661316086d8730469c9f07109559eb0c8de9",
+                   "07ac39b466d4bb34ba050f376d5b198d9c251a59d2f76255502db31cb9d1c0ea"}
 
 
 def write_claude_hint():
