@@ -2,6 +2,11 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.22 (2026-10-28)
+
+- Fix: **Re-enroll** failed with `type object 'Enroll' has no attribute 'unenroll'`; the method had been
+  added to the wrong class.
+
 ## 0.6.429.21 (2026-10-28)
 
 - Tools → Machines → Gateway offers **Re-enroll** when another device has removed the add-on's daemon from
