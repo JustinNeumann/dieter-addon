@@ -933,7 +933,7 @@
   const isToolPart = (p) => (p.type || "").startsWith("tool-") || p.type === "tool" || p.type === "dynamic-tool" || !!p.toolCallId || !!p.tool_call_id;
   const isReasoningPart = (p) => p.type === "reasoning" || p.type === "thinking";
   function stepOf(p, i, mid) {
-    if (isToolPart(p)) return { id: `${mid}:${i}`, kind: "tool", part: p, routine: !/approval/.test(p.state || "") };
+    if (isToolPart(p)) return { id: `${mid}:${i}`, kind: "tool", part: p, mid, routine: !/approval/.test(p.state || "") && !p.image };
     if (isReasoningPart(p)) return { id: `${mid}:${i}`, kind: "reasoning", text: p.text || "", routine: true };
     if (p.type === "text") return { id: `${mid}:${i}`, kind: "text", text: p.text || "", routine: false };
     if (["file", "attachment", "image"].includes(p.type)) return { id: `${mid}:${i}`, kind: "attachment", part: p, routine: false };
@@ -973,7 +973,9 @@
       const state = (p.state || "").toLowerCase(); const failed = /error|failed/.test(state) || !!(p.errorText || p.error_text); const approval = /approval/.test(state);
       const status = failed ? "Tool failed" : approval ? "Approval requested" : /input-available|running|executing/.test(state) ? "running" : /completed|success|done|output-available/.test(state) || p.hasOutput || p.has_output ? "completed" : "";
       const preview = (p.inputPreview || p.input_preview || p.input || p.summary || "").toString().replace(/\s+/g, " ").slice(0, 140);
-      return `<button class="tool-row" data-act="tool" data-preview="${esc(preview)}"><span class="ms s15 c-secondary">terminal</span><span class="ttl">${esc(title)}${preview ? " · " + esc(preview) : ""}</span><span class="st ${failed || approval ? "attn" : ""}">${esc(status)}</span></button>`;
+      const tc = p.toolCallId || p.tool_call_id;
+      const img = p.image && tc && S.conv.id ? chatImg(`api/${S.conv.kind || "card"}/${S.conv.id}/tool-image?message=${encodeURIComponent(s.mid)}&tool=${encodeURIComponent(tc)}`, title) : "";
+      return `<button class="tool-row" data-act="tool" data-preview="${esc(preview)}"><span class="ms s15 c-secondary">${p.image ? "image" : "terminal"}</span><span class="ttl">${esc(title)}${preview ? " · " + esc(preview) : ""}</span><span class="st ${failed || approval ? "attn" : ""}">${esc(status)}</span></button>${img}`;
     }
     if (s.kind === "reasoning") return s.text.trim() ? `<div class="reasoning"><span class="bar"></span><div class="txt clamp2" style="-webkit-line-clamp:12">${esc(s.text)}</div></div>` : "";
     if (s.kind === "attachment") return `<div class="mpill" style="height:auto;padding:8px 10px">${ico("insert_drive_file", 18)}<span>${esc(s.part.filename || "Attachment")}</span></div>`;
@@ -1096,10 +1098,33 @@
     return "Thinking…";
   }
 
+  // images in the chat: tool outputs (see stepHtml) and Markdown ![alt](path) of a reply. A path names a file of the
+  // card's checkout (relative, or absolute under one of its roots) and is served by the bridge's image endpoint.
+  const IMG_MD = /!\[([^\]\n]*)\]\(<?([^)\s>]+)>?(?:\s+"[^"]*")?\)/g;
+  const IMG = { dims: {}, failed: new Set() };
+  function imageSrc(src) {
+    if (/^(https?:|data:image\/)/i.test(src)) return src;
+    if (!S.conv.id) return "";
+    let path = src.replace(/^file:\/\//, ""); try { path = decodeURIComponent(path); } catch (e) { /* a literal % */ }
+    path = path.replace(/^\.\//, "");
+    if (path.startsWith("/")) { const root = (S.conv.data?.roots || []).find((r) => path.startsWith(r + "/")); if (!root) return ""; path = path.slice(root.length + 1); }
+    return `api/${S.conv.kind || "card"}/${S.conv.id}/image?path=${encodeURIComponent(path)}`;
+  }
+  function chatImg(src, alt) {
+    if (!src || IMG.failed.has(src)) return `<div class="mpill" style="height:auto;padding:8px 10px">${ico("broken_image", 18)}<span>${esc(alt || "Image unavailable")}</span></div>`;
+    const d = IMG.dims[src];
+    return `<img class="chat-img" src="${esc(src)}" alt="${esc(alt)}" title="${esc(alt)}" data-act="img-view"${d ? ` width="${d[0]}" height="${d[1]}"` : ""}>`;
+  }
+  function viewImage(src) {
+    const el = $("#overlay"); S.dialog = { title: "Image" };
+    el.innerHTML = `<div class="scrim imgview" data-act="close-dialog"><img src="${esc(src)}" alt="" data-act="close-dialog"></div>`; el.classList.remove("hidden");
+  }
   // minimal markdown (RichText)
   function richText(md) {
     const lines = String(md || "").replace(/\r/g, "").split("\n"); const out = []; let i = 0;
-    const inline = (t) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    const images = (t) => { const xs = t.split(IMG_MD); return xs.map((x, k) => k % 3 === 0 ? inlineText(x) : k % 3 === 2 ? chatImg(imageSrc(x), xs[k - 1]) : "").join(""); };
+    const inline = (t) => t.split(/(`[^`]+`)/).map((x, k) => k % 2 ? inlineText(x) : images(x)).join(""); // no images inside code spans
+    const inlineText = (t) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     while (i < lines.length) {
       const l = lines[i];
       if (/^```/.test(l)) { const buf = []; i++; while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]); i++; out.push(`<pre><code>${esc(buf.join("\n"))}</code></pre>`); continue; }
@@ -1508,6 +1533,7 @@
       case "jump": S.conv.following = true; scrollToEnd(); render(); break;
       case "expand": S.conv.expanded[id] = !S.conv.expanded[id]; render(); break;
       case "tool": if (el.dataset.preview) snackbar(el.dataset.preview); break;
+      case "img-view": viewImage(el.getAttribute("src")); break;
       case "pane": push({ kind: "pane", id, pane: el.dataset.pane }); break;
       case "tool-page": case "tool": break;
       case "machine": push({ kind: "machine", id }); break;
@@ -1561,6 +1587,12 @@
     }
     if (act === "tool" && el.dataset.page) { const base = el.dataset.project ? { kind: "project", id: el.dataset.project } : null; if (S.tab === "tools" || !base) { S.tab = S.tab === "inbox" || S.tab === "tools" ? S.tab : S.tab; } showFrom(base && S.tab === "projects" ? base : null, { kind: "tool", page: el.dataset.page, projectId: el.dataset.project }); }
   });
+  // chat images: remember the size (no jump when the timeline re-renders), follow the end, keep failures as a pill
+  document.addEventListener("load", (e) => {
+    const t = e.target; if (!t.classList?.contains("chat-img")) return;
+    IMG.dims[t.getAttribute("src")] = [t.naturalWidth, t.naturalHeight]; if (S.conv.following) scrollToEnd();
+  }, true);
+  document.addEventListener("error", (e) => { const t = e.target; if (t.classList?.contains("chat-img")) { IMG.failed.add(t.getAttribute("src")); render(); } }, true);
   document.addEventListener("input", (e) => {
     const s = e.target.closest("[data-search]"); if (s) { S.search[s.dataset.search] = s.value; const f = e.target; render(); const n = $(`[data-search="${s.dataset.search}"]`); if (n && n !== f) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
     const qf = e.target.closest("[data-qfree]"); if (qf) { const q = (S.data.questions || []).find((z) => z.id === qf.dataset.qfree); if (q) { answerState(q)[qf.dataset.x].freeform = qf.value; const card = qf.closest("[data-question]"); const btn = card?.querySelector('[data-act="q-answer"]'); if (btn) btn.disabled = false; } return; }

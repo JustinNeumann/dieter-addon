@@ -2,6 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.29 (2026-10-28)
+
+- The chat shows images from the agent. Tool calls whose output carries an image (Claude Code's Read of an
+  image file, browser screenshots) show it under the tool row and are no longer folded into the activity
+  summary; Markdown `![caption](path)` in a reply shows the file from the conversation's checkout (relative
+  path, or absolute inside the checkout or worktree). Tap to view full screen. New bridge endpoints
+  `/api/{card|chat}/ID/tool-image` and `/api/{card|chat}/ID/image`.
+- The add-on's `~/.claude/CLAUDE.md` (replaced only while unedited) tells Claude Code that it can put images in its reply.
+
 ## 0.6.429.28 (2026-10-28)
 
 - Tools → Machines no longer shows "No machines" for up to a minute after the add-on starts: the first

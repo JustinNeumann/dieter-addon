@@ -173,6 +173,20 @@ uploads them to the bridge (`/data/dieter/uploads`, removed once sent) and passe
 `--attach`; the harness saves them in the conversation's workspace and tells the agent where they are.
 Images up to about 450 KB show as previews in the conversation, larger ones as a pill with the name.
 
+## Images from the agent
+
+The conversation shows images the agent produces, without a special tool:
+
+- **Tool results with an image** (Claude Code's Read of a PNG/JPEG, screenshots of browser MCP tools)
+  appear under the tool row instead of being folded into the activity summary. The bridge fetches the
+  image from the tool output (`card|chat tool-output`) via `/api/{card|chat}/ID/tool-image`.
+- **Markdown images in a reply**, `![caption](path)`: the path names a file of the conversation's
+  checkout, relative or absolute inside it (`/api/{card|chat}/ID/image?path=`); `https:` and
+  `data:image/` URLs are shown as they are. A path outside the checkout shows a pill.
+
+Tap an image to view it full screen. The add-on's `~/.claude/CLAUDE.md` tells Claude Code about the
+Markdown form; Codex and Antigravity don't get that hint yet.
+
 ## SSH key of the add-on
 
 On its first start the add-on generates an ed25519 key pair in `/data/.ssh` (it survives updates and

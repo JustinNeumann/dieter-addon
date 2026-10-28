@@ -25,6 +25,8 @@ Endpoints:
   GET  /api/card/ID/changes   changed files of the card's checkout
   GET  /api/project/ID/changes
   GET  /api/card/ID/diff?path=FILE
+  GET  /api/{card|chat}/ID/image?path=REL   an image file of the checkout (the page shows Markdown ![](path) of a reply)
+  GET  /api/{card|chat}/ID/tool-image?message=M&tool=T&i=N   N-th image in a tool call's output (Read of a PNG, screenshots)
   GET  /api/machines          enrolled machines (also part of /api/state)
   GET  /app.css, /app.js      the page's assets
   POST /api/card              create {project, board, title, prompt, provider, model, effort, workspace, lane, attachments?}
@@ -310,6 +312,8 @@ def norm_conversation(snapshot):
                     else:
                         slim[k] = json.dumps(v, ensure_ascii=False, default=str)[:2000]
                 slim["type"] = t or "other"
+                if (p.get("hasOutput") or p.get("has_output")) and IMAGE_HINT.search(str(p.get("outputPreview") or p.get("output_preview") or "")):
+                    slim["image"] = True
                 parts.append(slim)
         msgs.append({"id": m.get("id"), "role": m.get("role"), "created_at": meta.get("createdAt"),
                      "usage": (meta.get("usage") or {}).get("totalTokens"), "parts": parts})
@@ -323,7 +327,82 @@ def norm_conversation(snapshot):
         "subagents": conv.get("subagents") or [],
         "card": norm_card(card, "card" if "lane" in card else "chat") if card else None,
         "project": (detail.get("project") or {}).get("name"), "board": (detail.get("board") or {}).get("name"),
+        "roots": checkout_roots(detail),
     }
+
+
+# a tool output that carries an image: Claude Code's Read of an image file ({"type":"image","file":{"base64":…}}),
+# MCP results with image content blocks (Playwright screenshots), data: URLs
+IMAGE_HINT = re.compile(r'"type"\s*:\s*"image"|"isImage"\s*:\s*true|data:image/|"(?:base64|data)"\s*:\s*"(?:iVBORw0KGgo|/9j/|R0lGOD|UklGR)')
+IMAGE_MAGIC = (("iVBORw0KGgo", "image/png"), ("/9j/", "image/jpeg"), ("R0lGOD", "image/gif"), ("UklGR", "image/webp"))
+TOOL_IMAGE_MAX = 4
+
+
+def checkout_roots(detail):
+    """Absolute directories of the card's checkout (worktree first): the page turns an absolute image path
+    the agent writes in its reply into the path relative to the checkout that `dieter file` wants."""
+    card = detail.get("card") or detail.get("chat") or {}
+    proj = detail.get("project") or {}
+    roots = []
+    if (card.get("workspaceMode") or (card.get("workspace") or {}).get("mode")) == "worktree" and card.get("id"):
+        roots.append(os.path.join(DIETER_HOME, "worktrees", card.get("projectId") or proj.get("id") or "", card["id"]))
+    for c in proj.get("checkouts") or []:
+        if c.get("path") and c.get("id") == card.get("checkoutId"):
+            roots.append(c["path"])
+    if proj.get("path"):
+        roots.append(proj["path"])
+    return [r.rstrip("/") for r in dict.fromkeys(roots) if r]
+
+
+def find_images(v, out):
+    """Images in a decoded tool output: dicts with base64 data and an image MIME type, data: URLs, bare base64."""
+    if len(out) >= TOOL_IMAGE_MAX:
+        return out
+    if isinstance(v, dict):
+        mime = next((x for x in (v.get(k) for k in ("mimeType", "mime_type", "media_type", "mediaType", "type"))
+                     if isinstance(x, str) and x.startswith("image/")), None)
+        data = next((x for x in (v.get(k) for k in ("base64", "data")) if isinstance(x, str) and len(x) > 64), None)
+        if data and (mime or v.get("type") == "image"):
+            out.append((mime or sniff_image(data) or "image/png", data))
+            return out
+        for x in v.values():
+            find_images(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            find_images(x, out)
+    elif isinstance(v, str) and len(v) > 64:
+        m = re.match(r"data:(image/[\w.+-]+);base64,", v)
+        if m:
+            out.append((m.group(1), v[m.end():]))
+        elif sniff_image(v):
+            out.append((sniff_image(v), v))
+        elif v[:1] in "[{":
+            try:
+                find_images(json.loads(v), out)   # MCP results nest their content as a JSON string
+            except ValueError:
+                pass
+    return out
+
+
+def sniff_image(b64):
+    return next((mime for magic, mime in IMAGE_MAGIC if b64.startswith(magic)), None)
+
+
+def tool_images(kind, cid, message, tool):
+    """[(mime, bytes)] of one tool call's output (`card|chat tool-output`)."""
+    out = run([kind, "tool-output", "--message", message, "--tool-call", tool, cid], timeout=60) or {}
+    raw = out.get("outputJson") or ""
+    try:
+        decoded = json.loads(base64.b64decode(raw)) if raw else out.get("output")
+    except ValueError:
+        decoded = None
+    imgs = []
+    for mime, data in find_images(decoded, []):
+        try:
+            imgs.append((mime, base64.b64decode(data)))
+        except ValueError:
+            pass
+    return imgs
 
 
 # --------------------------------------------------------------------------- Home Assistant (add-on only)
@@ -1274,13 +1353,21 @@ This container is the Dieter add-on inside Home Assistant. `hass-cli` is install
 Supervisor access (no `ha` CLI): add-ons, Home Assistant restarts and the host are out of reach.
 
 Home Assistant's own config files are not mounted here; use the API above, or SSH to another machine.
+
+# Images in the chat
+
+The add-on's chat page shows images: put `![caption](path/to/image.png)` in your reply (a path in the
+working tree, relative or absolute) to show a screenshot, chart or other image you saved there. Images
+returned by tools (a Read of an image file, browser screenshots) are shown as well.
 """
 # earlier texts of that file: a file with one of these is ours and gets replaced, an edited one is kept
-CLAUDE_HINT_OLD = {"b0b13e392971aa06e72ca1d0ac265f15e563c90f653210dff669f46224b250c6"}
+CLAUDE_HINT_OLD = {"b0b13e392971aa06e72ca1d0ac265f15e563c90f653210dff669f46224b250c6",
+                   "f6634308d5b763f0261f9f53999c661316086d8730469c9f07109559eb0c8de9"}
 
 
 def write_claude_hint():
-    """Tell Claude Code (global memory ~/.claude/CLAUDE.md, HOME=/data) that hass-cli exists. Written
+    """Tell Claude Code (global memory ~/.claude/CLAUDE.md, HOME=/data) that hass-cli exists and the page shows
+    Markdown images. Written
     when missing or still one of our earlier texts; a file the user edited or emptied is kept."""
     if not (ADDON and SUPERVISOR_TOKEN):
         return
@@ -1950,6 +2037,37 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_image(self, mime, body, max_age):
+        """Image bytes for an <img> in the chat. SVG may carry script: the sandbox CSP keeps it inert when opened directly."""
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", f"private, max-age={max_age}")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_image_file(self, cid, path):
+        """GET /api/{card|chat}/ID/image?path=REL: an image file of the checkout (Markdown ![](path) in a reply)."""
+        res = file_read(cid, None, path)
+        if res.get("too_large"):
+            return self.send_json({"error": "file too large"}, 413)
+        if not res.get("mime", "").startswith("image/") or res.get("data") is None:
+            return self.send_json({"error": "not an image"}, 415)
+        return self.send_image(res["mime"], base64.b64decode(res["data"]), 60)
+
+    def send_tool_image(self, kind, cid, message, tool, i):
+        """GET /api/{card|chat}/ID/tool-image?message=M&tool=T&i=N: the N-th image of a tool call's output
+        (Read of an image file, screenshots of browser tools). Tool outputs don't change: cached for a day."""
+        if not re.fullmatch(r"[\w.:-]{1,200}", message or "") or not re.fullmatch(r"[\w.:-]{1,200}", tool or ""):
+            return self.send_json({"error": "bad id"}, 400)
+        imgs = tool_images(kind, cid, message, tool)
+        n = int(i) if str(i).isdigit() else 0
+        if n >= len(imgs):
+            return self.send_json({"error": "no image"}, 404)
+        return self.send_image(imgs[n][0], imgs[n][1], 86400)
+
     def send_text(self, body, code=200, ctype="text/plain; charset=utf-8"):
         body = body.encode() if isinstance(body, str) else body
         self.send_response(code)
@@ -2083,6 +2201,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(file_list(cid, None, q.get("path", [""])[0], q.get("hidden", ["0"])[0] == "1"))
                 if parts[3] == "file":
                     return self.send_json(file_read(cid, None, q.get("path", [""])[0]))
+                if parts[3] == "image":
+                    return self.send_image_file(cid, q.get("path", [""])[0])
+                if parts[3] == "tool-image":
+                    return self.send_tool_image(kind, cid, q.get("message", [""])[0], q.get("tool", [""])[0], q.get("i", ["0"])[0])
                 if parts[3] == "diff" and kind == "card":
                     path = q.get("path", [""])[0]
                     if not path:
