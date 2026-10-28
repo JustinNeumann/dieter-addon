@@ -1206,7 +1206,7 @@
     clearFiles("conv");
     S.conv = { ...S.conv, id, kind, data: null, draft: load("draft-" + id, ""), following: true, expanded: {}, agent: null, awaiting: false, files: [], outbox: [] };
     if (conv(id)?.orphaned) { S.conv.data = { messages: [], orphaned: true }; render(); return; }
-    api(`api/${kind}/${id}`).then((d) => { if (S.conv.id !== id) return; S.conv.data = d; markSeen(id); render(); scrollToEnd(); })
+    api(`api/${kind}/${id}`).then((d) => { if (S.conv.id !== id || S.conv.es?.full) return; S.conv.data = d; markSeen(id); render(); scrollToEnd(); })
       .catch((e) => { if (S.conv.id === id) { S.conv.data = { messages: [], error: e.message }; render(); } });
     if (SNAP) return;
     openConversationStream(id, kind);
@@ -1214,15 +1214,30 @@
   // The watch stream ends when a turn finishes or fails; reconnect after a moment while keeping
   // the messages on screen (resetting the conversation here blanked the pane on failures).
   function openConversationStream(id, kind) {
-    const es = new EventSource(`api/${kind}/${id}/stream`); S.conv.alive = Date.now();
+    const es = new EventSource(`api/${kind}/${id}/stream?delta=1`); S.conv.alive = Date.now();
     es.addEventListener("ping", () => { if (S.conv.es === es) S.conv.alive = Date.now(); });
-    es.addEventListener("conversation", (e) => { if (S.conv.id !== id) return; S.conv.alive = Date.now(); const d = JSON.parse(e.data); if (!d || (!d.status && !(d.messages || []).length)) return; S.conv.data = d; S.conv.awaiting = false; markSeen(id); render(); if (S.conv.following) scrollToEnd(); });
+    // the stream's complete conversation is newer than a GET still on its way (es.full: such a GET is dropped)
+    es.addEventListener("conversation", (e) => { if (S.conv.id !== id) return; S.conv.alive = Date.now(); const d = JSON.parse(e.data); es.full = true; if (!d || (!d.status && !(d.messages || []).length)) return; S.conv.data = d; S.conv.awaiting = false; markSeen(id); render(); if (S.conv.following) scrollToEnd(); });
+    // after it only what changed: fields, and messages by id (one the page has: its parts from index "from" on)
+    es.addEventListener("delta", (e) => {
+      if (S.conv.id !== id || S.conv.es !== es || !es.full || !S.conv.data?.messages) return; S.conv.alive = Date.now();
+      const d = JSON.parse(e.data); const msgs = S.conv.data.messages.slice(); const at = new Map(msgs.map((m, i) => [m.id, i]));
+      for (let m of d.messages || []) {
+        if (m.from != null) {
+          const old = msgs[at.get(m.id)];
+          if (!old || old.parts.length < m.from) { reopenConversation(); return; } // not what the bridge thinks the page holds
+          const { from, ...rest } = m; m = { ...rest, parts: old.parts.slice(0, from).concat(m.parts) };
+        }
+        if (at.has(m.id)) msgs[at.get(m.id)] = m; else { at.set(m.id, msgs.length); msgs.push(m); }
+      }
+      S.conv.data = { ...S.conv.data, ...d, messages: msgs }; S.conv.awaiting = false; markSeen(id); render(); if (S.conv.following) scrollToEnd();
+    });
     es.addEventListener("end", () => {
       if (S.conv.id !== id || S.conv.es !== es) return;
       es.close(); S.conv.es = null;
       setTimeout(() => {
         if (S.conv.id !== id || S.conv.es) return;
-        api(`api/${kind}/${id}`).then((d) => { if (S.conv.id === id) { S.conv.data = d; markSeen(id); render(); } }).catch(() => {});
+        api(`api/${kind}/${id}`).then((d) => { if (S.conv.id === id && !S.conv.es?.full) { S.conv.data = d; markSeen(id); render(); } }).catch(() => {});
         openConversationStream(id, kind);
       }, 3000);
     });
@@ -1234,7 +1249,7 @@
   function reopenConversation() {
     const { id, kind } = S.conv; if (!id || SNAP) return;
     if (S.conv.es) { S.conv.es.close(); S.conv.es = null; }
-    api(`api/${kind}/${id}`).then((d) => { if (S.conv.id === id) { S.conv.data = d; render(); if (S.conv.following) scrollToEnd(); } }).catch(() => {});
+    api(`api/${kind}/${id}`).then((d) => { if (S.conv.id === id && !S.conv.es?.full) { S.conv.data = d; render(); if (S.conv.following) scrollToEnd(); } }).catch(() => {});
     openConversationStream(id, kind);
   }
   function checkStreams(staleMs) {

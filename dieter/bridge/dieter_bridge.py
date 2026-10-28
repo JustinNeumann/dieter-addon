@@ -17,11 +17,13 @@ Two homes, detected by /data/options.json:
 
 Endpoints:
   GET  /                      the page
-  GET  /api/state             everything the board needs (polled every POLL_S from the CLI)
+  GET  /api/state             everything the board needs (polled from the CLI whenever `dieter watch changes`
+                              reports a change, else every IDLE_POLL_S, or POLL_S while that stream is down)
   GET  /api/events            SSE: "state" whenever the board changed, heartbeats
   GET  /api/ha                compact summary for HA sensors
   GET  /api/{card|chat}/ID    conversation (last 200 messages) + detail
-  GET  /api/{card|chat}/ID/stream?after=SEQ   SSE of `dieter ... watch` frames
+  GET  /api/{card|chat}/ID/stream?after=SEQ&delta=1   SSE of `dieter ... watch` frames: "conversation" (complete),
+                              with delta=1 then "delta" (the changed messages and the conversation's other fields)
   GET  /api/card/ID/changes   changed files of the card's checkout
   GET  /api/project/ID/changes
   GET  /api/card/ID/diff?path=FILE
@@ -98,7 +100,9 @@ DAEMON_ADDR = os.environ.get("DIETER_DAEMON_ADDR", "127.0.0.1:4242")
 BIND = os.environ.get("BRIDGE_BIND", "0.0.0.0")
 PORT = int(os.environ.get("BRIDGE_PORT", "8099" if ADDON else "4250"))
 HA_IP = os.environ.get("BRIDGE_HA_IP", "192.168.0.10")
-POLL_S = float(os.environ.get("BRIDGE_POLL_S", "8"))
+POLL_S = float(os.environ.get("BRIDGE_POLL_S", "8"))               # board poll while the change stream is down
+IDLE_POLL_S = float(os.environ.get("BRIDGE_IDLE_POLL_S", "30"))     # safety net while `dieter watch changes` runs
+POLL_GAP_S = float(os.environ.get("BRIDGE_POLL_GAP_S", "1"))        # rest between two polls (a burst of changes is one poll)
 SLOW_POLL_S = float(os.environ.get("BRIDGE_SLOW_POLL_S", "60"))
 KEY_FILE = os.environ.get("BRIDGE_KEY_FILE", "/data/bridge_api_key" if ADDON else os.path.expanduser("~/.config/dieter-bridge/api_key"))
 SUPERVISOR = "http://supervisor"
@@ -347,6 +351,33 @@ def norm_conversation(snapshot):
         "project": (detail.get("project") or {}).get("name"), "board": (detail.get("board") or {}).get("name"),
         "roots": checkout_roots(detail),
     }
+
+
+def conversation_held(page):
+    """What a page holds after a complete conversation: {"fields": {...}, "messages": {id: message}}."""
+    return {"fields": {k: v for k, v in page.items() if k != "messages"}, "messages": {m["id"]: m for m in page["messages"]}}
+
+
+def conversation_delta(held, page):
+    """The "delta" event that brings a page holding `held` to `page` (its messages: the changed ones), or None.
+    Fields only when they changed. A message the page has gets the parts from the first changed one,
+    {..., "from": N, "parts": parts[N:]} with its other fields (the page keeps its first N parts). Updates `held`."""
+    fields = {k: v for k, v in page.items() if k != "messages" and (k not in held["fields"] or held["fields"][k] != v)}
+    held["fields"].update(fields)
+    msgs = []
+    for m in page["messages"]:
+        old = held["messages"].get(m["id"])
+        if old == m:
+            continue
+        held["messages"][m["id"]] = m
+        if old:
+            n = 0
+            while n < min(len(old["parts"]), len(m["parts"])) and old["parts"][n] == m["parts"][n]:
+                n += 1
+            if n:
+                m = {**m, "from": n, "parts": m["parts"][n:]}
+        msgs.append(m)
+    return {**fields, "messages": msgs} if fields or msgs else None
 
 
 # a tool output that carries an image: Claude Code's Read of an image file ({"type":"image","file":{"base64":…}}),
@@ -628,7 +659,7 @@ def retitle(kind, cid, prompt, entity):
             return
         run([kind, "rename", "--title", title, cid], timeout=30, parse=False)
         log("title:", cid, repr(title))
-        STATE.poll_fast()
+        STATE.patch(cid, title=title)
     except Exception as e:
         log("title:", cid, entity, e)
     finally:
@@ -1847,7 +1878,7 @@ def schedule_create(b):
     if b.get("mail"):
         args.append("--mail=true")
     out = run(args, timeout=60) or {}
-    STATE.poll_fast()   # the new card / schedule state must be in the next /api/state, not only after the next poll
+    STATE.refresh(wait=True)   # the new card / schedule state must be in the next /api/state, not only after the next poll
     return {"ok": True, "schedule": norm_schedule(out.get("schedule") if isinstance(out, dict) and "schedule" in out else out)}
 
 
@@ -1855,7 +1886,7 @@ def schedule_action(sid, action):
     if not SCHEDULE_ID_RE.match(sid) or action not in SCHEDULE_ACTIONS:
         raise CliError("bad request")
     out = run(["schedule", action, sid], timeout=60)
-    STATE.poll_fast()   # the new card / schedule state must be in the next /api/state, not only after the next poll
+    STATE.refresh(wait=True)   # the new card / schedule state must be in the next /api/state, not only after the next poll
     if action == "run":
         return {"ok": True, "run": norm_run(out if isinstance(out, dict) else {})}
     if action == "delete":
@@ -1952,6 +1983,38 @@ class State:
         self.runtime_seen = {}       # card id -> runtime, to detect finished turns
         self.last_finished = None    # {"id","title","at","kind"}
         self.last_review = None
+        self.polling = threading.Lock()   # one fast poll at a time: they would only queue up in the daemon
+        self.wake = threading.Event()     # a change was reported: poll now (after POLL_GAP_S)
+        self.wanted = 0                   # refresh() requests ...
+        self.polled = 0                   # ... covered by a finished poll (one that started after them)
+        self.project_ids = []             # the last poll's projects: their lists start without waiting for `project list`
+        self.polled_lanes = {}            # card id -> lane as the last poll saw it (without patches), for dieter_card_review
+        self.patches = {}                 # card id -> (fields, at): changes made here that a poll may not have seen yet
+
+    def refresh(self, wait=False, timeout=30):
+        """Something changed: poll again as soon as possible. wait=True returns once a poll that started after
+        this call has finished, so the change is in the next /api/state."""
+        with self.lock:
+            self.wanted += 1
+            want = self.wanted
+        self.wake.set()
+        if wait:
+            with self.lock:
+                self.cond.wait_for(lambda: self.polled >= want, timeout=timeout)
+
+    def patch(self, cid, **fields):
+        """Show a change made through the bridge (move, rename, archive) at once instead of after the next poll.
+        Polls that started before it keep it applied, the first one that started after it has it from the daemon."""
+        now = time.time()
+        with self.lock:
+            prev = self.patches.get(cid, ({}, 0))[0]
+            self.patches[cid] = ({**prev, **fields}, now)
+            if self.data.get("ok"):
+                self.data = {**self.data, **{k: [{**c, **fields} if c["id"] == cid else c for c in self.data.get(k, [])]
+                                             for k in ("cards", "chats")}}
+                self.rev += 1
+                self.cond.notify_all()
+        self.refresh()
 
     def snapshot(self):
         with self.lock:
@@ -1970,17 +2033,48 @@ class State:
             noted[what] = str(err)
             log(f"{what}: {err}")
 
-    def poll_fast(self):
-        try:
-            status = run(["status", "--format", "json"], timeout=15) or {}
-            projects = [p for p in unwrap(run(["project", "list", "--format", "json"], timeout=15), "projects")]
-            boards = unwrap(run(["board", "list", "--format", "json"], timeout=15), "boards")
-            # `card list` / `chat list` without --project answer for one project only (the CLI's default),
-            # so every further project's cards would never reach the page: list per project and merge.
-            cards, chats = [], []
+    def fetch(self):
+        """status, projects, boards, cards and chats from the CLI. The calls run in parallel: one after the other
+        they took ~7 s with three projects on a Pi 5. `card list` without --project answers for one project only
+        (the CLI's default), so it runs per project and the lists are merged; the last poll's projects start at
+        once, a project that is new since then once `project list` has answered. `chat list` without --project
+        lists every project's chats, in ~0.4 s where each --project call took ~2 s."""
+        def card_list(pid):
+            return ex.submit(run, ["card", "list", "--project", pid, "--format", "json", "--limit", "200"], timeout=20)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            f_status = ex.submit(run, ["status", "--format", "json"], timeout=15)
+            f_projects = ex.submit(run, ["project", "list", "--format", "json"], timeout=15)
+            f_boards = ex.submit(run, ["board", "list", "--format", "json"], timeout=15)
+            f_chats = ex.submit(run, ["chat", "list", "--format", "json"], timeout=15)
+            f_cards = {pid: card_list(pid) for pid in self.project_ids}
+            projects = unwrap(f_projects.result(), "projects")
             for p in projects:
-                cards += [norm_card(c) for c in unwrap(run(["card", "list", "--project", p["id"], "--format", "json", "--limit", "200"], timeout=20), "cards")]
-                chats += [norm_card(c, "chat") for c in unwrap(run(["chat", "list", "--project", p["id"], "--format", "json"], timeout=15), "chats")]
+                if p["id"] not in f_cards:
+                    f_cards[p["id"]] = card_list(p["id"])
+            status = f_status.result() or {}
+            boards = unwrap(f_boards.result(), "boards")
+            cards = [norm_card(c) for p in projects for c in unwrap(f_cards[p["id"]].result(), "cards")]
+            pids = {p["id"] for p in projects}
+            chats = [norm_card(c, "chat") for c in unwrap(f_chats.result(), "chats")]
+            chats = [c for c in chats if c["project_id"] in pids]   # as before: only the listed projects' chats
+        self.project_ids = [p["id"] for p in projects]
+        return status, projects, boards, cards, chats
+
+    def poll_fast(self):
+        with self.polling:
+            with self.lock:
+                want = self.wanted
+            try:
+                self._poll_fast()
+            finally:
+                with self.lock:
+                    self.polled = max(self.polled, want)
+                    self.cond.notify_all()
+
+    def _poll_fast(self):
+        started = time.time()
+        try:
+            status, projects, boards, cards, chats = self.fetch()
         except CliError as e:
             with self.lock:
                 if self.data.get("ok") or self.data.get("error") != str(e):
@@ -2014,7 +2108,7 @@ class State:
             if seq is not None:
                 seq_seen[c["id"]] = seq
         with self.lock:
-            prev_lanes = {c["id"]: c["lane"] for c in self.data.get("cards", [])} if self.data.get("ok") else {}
+            prev_lanes = self.polled_lanes if self.data.get("ok") else {}
         for c in cards:
             if c["lane"] == "review" and prev_lanes and prev_lanes.get(c["id"]) not in (None, "review"):
                 review = {"id": c["id"], "title": c["title"], "at": now, "project": (pmap.get(c["project_id"]) or {}).get("name")}
@@ -2045,6 +2139,14 @@ class State:
             data["last_finished"] = self.last_finished
             data["last_review"] = self.last_review
             data["boards"] = order_boards(data["boards"])   # under the lock: a reorder during this poll is not undone
+            self.polled_lanes = {c["id"]: c["lane"] for c in cards}
+            for cid, (fields, at) in list(self.patches.items()):
+                if at < started:                               # this poll asked the daemon after the change
+                    del self.patches[cid]
+                    continue
+                for c in cards + chats:
+                    if c["id"] == cid:
+                        c.update(fields)
             changed = json.dumps({k: v for k, v in data.items() if k != "generated_at"}, sort_keys=True, default=str) != \
                       json.dumps({k: v for k, v in self.data.items() if k != "generated_at"}, sort_keys=True, default=str)
             self.data = data
@@ -2112,15 +2214,24 @@ class State:
                 self.cond.notify_all()
 
     def loop(self):
-        last_slow = 0
+        """Fast polls: right after a reported change (refresh(), POLL_GAP_S after the previous poll so a burst of
+        changes is one poll), else every IDLE_POLL_S while the change stream runs and every POLL_S without it."""
+        threading.Thread(target=self.slow_loop, daemon=True).start()
+        last = 0
         while True:
+            self.wake.wait(max(0, last + (IDLE_POLL_S if Watch.live else POLL_S) - time.time()))
+            time.sleep(max(0, last + POLL_GAP_S - time.time()))
+            self.wake.clear()
+            self.poll_fast()
+            last = time.time()
+
+    def slow_loop(self):
+        """Machine, quota, harnesses: on their own thread, so a slow quota probe (up to a minute) does not hold up the board."""
+        while True:
+            self.poll_slow()
             # the first `harness list` / `machine info` after a daemon start often time out: retry quickly while the
             # catalog or the machine list is empty (else Machines shows "No machines" for a whole slow round)
-            if time.time() - last_slow > (SLOW_POLL_S if self.slow["harnesses"] and self.slow["machines"] else 10):
-                self.poll_slow()
-                last_slow = time.time()
-            self.poll_fast()
-            time.sleep(POLL_S)
+            time.sleep(SLOW_POLL_S if self.slow["harnesses"] and self.slow["machines"] else 10)
 
     def wait_change(self, rev, timeout):
         with self.lock:
@@ -2129,6 +2240,67 @@ class State:
 
 
 STATE = State()
+
+
+class Watch:
+    """`dieter watch changes`: the daemon's change frames (the stream the native apps hold). A change of the shared
+    records (projects, boards, cards, checkouts), of a card this machine runs, or of a conversation's status asks
+    for a poll at once, so the page follows within a few seconds instead of a poll interval. Activity frames that
+    only stream a running turn's text do not (the open conversation has its own stream), and neither does a card
+    summary whose only news is its lastActivityAt: a running agent bumps it every few seconds, and polling on each
+    bump kept the daemon a whole core busier (the timed poll brings activity times along)."""
+    live = False   # caught up and running: the timed poll is only a safety net
+
+    @staticmethod
+    def summary_key(record):
+        try:
+            values = [json.loads(base64.b64decode(v.get("valueJson") or "") or b"null") for v in record.get("versions") or []]
+        except ValueError:
+            return None
+        return json.dumps([{k: x for k, x in v.items() if k != "lastActivityAt"} if isinstance(v, dict) else v for v in values], sort_keys=True)
+
+    @classmethod
+    def loop(cls):
+        backoff = 2
+        while True:
+            started = time.time()
+            rc = None
+            try:
+                p = subprocess.Popen([DIETER, "watch", "changes"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+                status, summaries = {}, {}
+                for line in p.stdout:
+                    try:
+                        frame = json.loads(line)
+                    except ValueError:
+                        continue
+                    changed = any(frame.get(k) for k in ("ownedCards", "ownedCheckouts", "resetRecords", "resetLocal"))
+                    for r in frame.get("records") or []:
+                        if not isinstance(r, dict) or not str(r.get("id", "")).endswith(".summary"):
+                            changed = True
+                            continue
+                        key = cls.summary_key(r)
+                        if key is None or summaries.get(r["id"]) != key:
+                            summaries[r["id"]] = key
+                            changed = True
+                    for a in frame.get("activities") or []:
+                        if isinstance(a, dict) and status.get(a.get("cardId")) != a.get("status"):
+                            status[a.get("cardId")] = a.get("status")
+                            changed = True
+                    if frame.get("caughtUp"):   # before that, the replay of what the daemon holds
+                        if not cls.live:
+                            cls.live = True
+                            log("watch: following the daemon's changes")
+                            changed = True
+                        if changed:
+                            STATE.refresh()
+                rc = p.wait()
+            except Exception as e:
+                rc = repr(e)
+            if cls.live:
+                log(f"watch: ended ({rc}), polling every {POLL_S:.0f}s until it is back")
+            cls.live = False
+            backoff = 2 if time.time() - started > 60 else min(backoff * 2, 60)
+            time.sleep(backoff)
 
 
 # --------------------------------------------------------------------------- auth
@@ -2388,7 +2560,7 @@ class Handler(BaseHTTPRequestHandler):
                     snap = run([kind, "poll", "--last", "200", cid], timeout=30) or {}
                     return self.send_json(norm_conversation(snap.get("snapshot", snap)))
                 if parts[3] == "stream":
-                    return self.stream_conversation(kind, cid, q.get("after", [None])[0])
+                    return self.stream_conversation(kind, cid, q.get("after", [None])[0], q.get("delta", ["0"])[0] == "1")
                 if parts[3] == "changes" and kind == "card":
                     return self.send_json(self.changes(cid))
                 if parts[3] == "files":
@@ -2453,15 +2625,15 @@ class Handler(BaseHTTPRequestHandler):
                     res = add_folder(body.get("folder"))
                 else:
                     res = add_project(body.get("git_url") or "", body.get("name") or "", body.get("branch") or "")
-                STATE.poll_fast()
+                STATE.refresh(wait=True)
                 return self.send_json(res)
             if parts[1:] == ["board"]:
                 res = create_board(body)
-                STATE.poll_fast()
+                STATE.refresh(wait=True)
                 return self.send_json(res)
             if len(parts) == 4 and parts[1] == "board" and parts[3] == "git":
                 res = board_git(parts[2], body)
-                STATE.poll_fast()
+                STATE.refresh(wait=True)
                 return self.send_json(res)
             if parts[1:] == ["settings"]:
                 return self.send_json(settings_update(body))
@@ -2512,18 +2684,18 @@ class Handler(BaseHTTPRequestHandler):
                         out = run(args + [cid], timeout=120, parse=False)
                     finally:
                         upload_forget(files)
-                    STATE.poll_fast()
+                    STATE.refresh()
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action == "move" and kind == "card":
                     lane = body.get("lane")
                     if lane not in LANES:
                         return self.send_json({"error": "lane must be one of " + ", ".join(LANES)}, 400)
                     out = run(["card", "move", "--lane", lane, cid], timeout=30, parse=False)
-                    STATE.poll_fast()
+                    STATE.patch(cid, lane=lane)
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action == "start" and kind == "card":
                     out = run(["card", "start", cid], timeout=60, parse=False)
-                    STATE.poll_fast()
+                    STATE.patch(cid, lane="running")
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action == "update":
                     title = (body.get("title") or "").strip()
@@ -2546,11 +2718,17 @@ class Handler(BaseHTTPRequestHandler):
                             args += ["--prompt", prompt.strip()]
                         args.append(cid)
                     out = run(args, timeout=30, parse=False)
-                    STATE.poll_fast()
+                    if title:
+                        STATE.patch(cid, title=title)
+                    else:
+                        STATE.refresh()
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action in ("cancel", "archive"):
                     out = run([kind, action, cid], timeout=60, parse=False)
-                    STATE.poll_fast()
+                    if action == "archive":
+                        STATE.patch(cid, archived=True)
+                    else:
+                        STATE.refresh()
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action == "read" and kind == "card":
                     seq = str(body.get("seq", "")).strip()
@@ -2613,7 +2791,7 @@ class Handler(BaseHTTPRequestHandler):
         if entity and cid:
             TITLE_PENDING[cid] = first_line_title(b["prompt"])
             threading.Thread(target=retitle, args=(kind, cid, b["prompt"], entity), daemon=True).start()
-        STATE.poll_fast()
+        STATE.refresh(wait=True)   # the page opens the new card from /api/state
         return {"ok": True, "id": cid, "card": norm_card(c or {}, kind)}
 
     def card_project(self, cid):
@@ -2666,7 +2844,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.sse("ping", {"t": time.time()})
                 last_beat = time.time()
 
-    def stream_conversation(self, kind, cid, after):
+    def stream_conversation(self, kind, cid, after, delta=False):
         args = [DIETER, kind, "watch", "--last", "200"]
         if after and str(after).isdigit():
             args += ["--after-seq", str(after)]
@@ -2683,7 +2861,7 @@ class Handler(BaseHTTPRequestHandler):
                 lines.put(raw)
             lines.put(None)
         threading.Thread(target=pump, daemon=True).start()
-        current = None
+        current = held = None
         try:
             while True:
                 try:
@@ -2707,7 +2885,9 @@ class Handler(BaseHTTPRequestHandler):
                 snap = frame.get("snapshot")
                 if isinstance(snap, dict) and isinstance(snap.get("conversation"), dict):
                     current = snap
-                    self.sse("conversation", norm_conversation(current))
+                    page = norm_conversation(current)
+                    self.sse("conversation", page)
+                    held = conversation_held(page)
                     continue
                 if current is None:
                     continue
@@ -2727,8 +2907,17 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             index[m.get("id")] = len(msgs)
                             msgs.append(m)
-                if changed or "status" in frame:
+                if not (changed or "status" in frame):
+                    continue
+                if not delta:
                     self.sse("conversation", norm_conversation(current))
+                    continue
+                # delta=1: only what changed against what the page holds. The whole conversation (~200 KB of a
+                # long one, three times a second) was most of what a phone received and parsed while it showed
+                # a running agent, and the running turn alone is one message of a few hundred parts.
+                d = conversation_delta(held, norm_conversation({**current, "conversation": {**conv, "messages": changed}}))
+                if d:
+                    self.sse("delta", d)
             err = (p.stderr.read() or "").strip()
             self.sse("end", {"error": err[:300] if err else None})
         finally:
@@ -2773,11 +2962,12 @@ def main():
             if Daemon.wait_healthy():
                 setup_projects()
                 STATE.poll_slow()
-                STATE.poll_fast()
+                STATE.refresh()
         threading.Thread(target=after_daemon, daemon=True).start()
     else:
         log(f"dieter bridge on {BIND}:{PORT}, dieter={DIETER}, HA={HA_IP}, owner={owner_login()}")
     threading.Thread(target=STATE.loop, daemon=True).start()
+    threading.Thread(target=Watch.loop, daemon=True).start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
     srv.daemon_threads = True
     srv.serve_forever()
