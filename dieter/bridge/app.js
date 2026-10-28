@@ -214,7 +214,14 @@
     const stk = stack();
     const listIdx = stk.map(isList).lastIndexOf(true);
     let listHtml, detailHtml = null;
-    if (twoPane() && listIdx >= 0) {
+    const boardFull = twoPane() && listIdx >= 0 && stk[listIdx].kind === "board";
+    document.body.classList.toggle("fullpane", boardFull);
+    if (boardFull) {
+      // Kanban board on a tablet: the lanes side by side use the whole width; opening a card shows it full width, back returns to the board
+      const r = top();
+      listHtml = screen(r, { back: stk.length > 1, full: true });
+      document.body.classList.remove("immersive");
+    } else if (twoPane() && listIdx >= 0) {
       const list = stk[listIdx], details = stk.slice(listIdx + 1), detail = details[details.length - 1];
       listHtml = screen(list, { back: listIdx > 0, inList: true });
       detailHtml = detail ? screen(detail, { back: details.length > 1, inDetail: true }) : emptyDetail();
@@ -415,8 +422,9 @@
     const lanes = (b.lanes && b.lanes.length ? b.lanes : Object.keys(LANES)).map((id) => ({ id, name: LANES[id] || id, cards: sortCards(cards.filter((c) => c.lane === id), b.id, id) }));
     const page = S.lanePage[b.id] || "running";
     const wide = (opts.inList ? 400 : innerWidth - (hasRail() ? 80 : 0)) >= 700;
+    const single = wide && !!opts.full;
     let lanesHtml;
-    if (wide) lanesHtml = `<div class="lanes-parallel">${lanes.map((l) => `<div class="lane"><div class="lh"><span class="nm">${esc(l.name)}</span><span class="ct">${l.cards.length}</span></div>${laneList(l, b)}</div>`).join("")}</div>`;
+    if (wide) lanesHtml = `<div class="lanes-parallel ${single ? "full" : ""}">${lanes.map((l) => `<div class="lane"><div class="lh"><span class="nm">${esc(l.name)}</span><span class="ct">${l.cards.length}</span><span class="grow"></span><button class="iconbtn small" title="${(S.boardSort[b.id + ":" + l.id] ?? true) ? "Newest first" : "Oldest first"}" data-act="sort" data-board="${b.id}" data-lane="${l.id}">${ico("sort", 20)}</button><button class="iconbtn small" title="New task" data-act="new">${ico("add", 20)}</button></div>${laneList(l, b, true)}</div>`).join("")}</div>`;
     else {
       const tabs = lanes.map((l) => `<button class="tab ${page === l.id ? "on" : ""}" data-act="lane" data-board="${b.id}" data-lane="${l.id}">${esc(l.name)}${l.cards.length ? `<span class="cnt">${l.cards.length}</span>` : ""}</button>`).join("");
       const lane = lanes.find((l) => l.id === page) || lanes[0];
@@ -430,11 +438,11 @@
     const key = (c) => Math.max(Date.parse(c.updated_at || 0) || 0, Date.parse(c.last_activity_at || 0) || 0);
     return list.sort((a, b) => (desc ? key(b) - key(a) : key(a) - key(b)));
   }
-  function laneList(l, b) {
+  function laneList(l, b, noHead = false) {
     const desc = S.boardSort[b.id + ":" + l.id] ?? true;
     const head = `<div class="lane-head"><span class="n">${counts(l.cards.length, "card")}</span><button class="sort" data-act="sort" data-board="${b.id}" data-lane="${l.id}">${ico("sort", 14)}${desc ? "Newest first" : "Oldest first"}</button></div>`;
     const body = l.cards.length ? l.cards.map((c) => workCard(c)).join("") : emptyState("view_kanban", `No ${l.name.toLowerCase()} cards`, "Cards you move here appear in this lane.");
-    return `<div class="lane-list">${head}${body}</div>`;
+    return `<div class="lane-list">${noHead ? "" : head}${body}</div>`;
   }
   function workCard(c) {
     const tone = rtTone(c.runtime), color = toneColor(tone), badge = rtBadge(c.runtime);

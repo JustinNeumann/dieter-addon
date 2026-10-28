@@ -111,6 +111,7 @@ a { color: var(--info); }
 body.immersive #bottombar { display: none; }
 @media (min-width: 600px) { #rail { display: flex; } #bottombar { display: none !important; } }
 @media (min-width: 840px) { #list { flex: none; width: 400px; } #divider { display: block; } #detail { display: flex; } }
+@media (min-width: 840px) { body.fullpane #list { flex: 1; width: auto; } body.fullpane #divider, body.fullpane #detail { display: none; } }
 
 /* ------------------------------------------------------------- screens, app bars */
 .screen { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--background); }
@@ -256,11 +257,16 @@ body.immersive #bottombar { display: none; }
 .livedot.s14 { width: 14px; height: 14px; } .livedot.s9 { width: 9px; height: 9px; } .livedot.s7 { width: 7px; height: 7px; }
 @keyframes pulse { from { transform: scale(.6); opacity: .09; } to { transform: scale(1.2); opacity: .25; } }
 .sdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; flex: none; }
-.lanes-parallel { display: flex; gap: 14px; padding: 8px 0 0 16px; overflow-x: auto; height: 100%; align-items: stretch; }
-.lanes-parallel .lane { width: 300px; flex: none; border-radius: 24px; background: color-mix(in srgb, var(--fill) 60%, transparent); display: flex; flex-direction: column; min-height: 0; }
-.lanes-parallel .lane .lh { display: flex; align-items: center; padding: 14px 12px 2px 18px; }
-.lanes-parallel .lane .lh .nm { flex: 1; font: 500 16px/24px var(--body); letter-spacing: .15px; }
-.lanes-parallel .lane .lh .ct { font: 400 14px/20px var(--body); color: var(--secondary-label); }
+.lanes-parallel { display: flex; gap: 12px; padding: 4px 16px 16px; overflow-x: auto; flex: 1; min-height: 0; align-items: stretch; }
+.lanes-parallel .lane { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; }
+.lanes-parallel.full .lane { flex: 1 1 0; min-width: 260px; width: auto; }
+.lanes-parallel .lane .lh { display: flex; align-items: center; gap: 2px; padding: 0 0 6px 4px; }
+.lanes-parallel .lane .lh .nm { font: 600 15px/24px var(--body); letter-spacing: .1px; }
+.lanes-parallel .lane .lh .ct { margin-left: 8px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; text-align: center; font: 500 12px/20px var(--body); background: var(--fill); color: var(--secondary-label); }
+.lanes-parallel .lane .lh .grow { flex: 1; }
+.lanes-parallel .lane .lane-list { padding: 0 2px 8px; }
+.lanes-parallel .lane .ccard { background: var(--surface-container-lowest); border: 1px solid color-mix(in srgb, var(--separator) 45%, transparent); border-radius: 12px; }
+.lanes-parallel .lane .ccard.clickable:hover { background: color-mix(in srgb, var(--on-surface) 4%, var(--surface-container-lowest)); }
 .lanes-parallel .lane .lane-list { overflow: auto; flex: 1; }
 
 /* ------------------------------------------------------------- inbox rows */
