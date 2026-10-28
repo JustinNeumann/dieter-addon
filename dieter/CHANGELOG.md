@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.34 (2026-10-28)
+
+- Boards in any order: drag a board row on the Projects list or a project's page to a new place (mouse: press
+  and drag; touch: long press, then drag; a plain swipe still scrolls). The order applies everywhere the page
+  lists boards (pickers, Switch board) and is kept by the bridge in `/data/bridge_settings.json`, so every device
+  shows the same order; a new board is added at the end of its project. Bridge: `POST /api/boards/order`.
+
 ## 0.6.429.33 (2026-10-28)
 
 - Chats are sorted newest first (by last activity), in the Pinned section and inside each project group.

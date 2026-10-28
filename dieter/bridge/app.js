@@ -192,6 +192,7 @@
   // ------------------------------------------------------------------ rendering shell
   const shell = $("#shell");
   function render() {
+    if (S.drag) { S.drag.pending = true; return; } // a live update must not swap the rows under a drag
     const st = S.data;
     // a live update must not steal the focus from a field being typed in (Android closes the keyboard)
     const active = document.activeElement;
@@ -388,7 +389,7 @@
     const rows = boards.map((b, i) => {
       const cards = (S.data.cards || []).filter((c) => c.board_id === b.id && !c.archived);
       const attention = cards.filter((c) => c.lane === "review" || isActive(c.runtime)).length;
-      return listRow({ title: b.name, glyph: "view_kanban", glyphTint: stableColor(b.id), value: String(cards.length), position: pos(i + 1, n), act: "board", extra: `data-id="${b.id}"`, trailing: countBadge(attention, "var(--warning)") });
+      return listRow({ title: b.name, glyph: "view_kanban", glyphTint: stableColor(b.id), value: String(cards.length), position: pos(i + 1, n), act: "board", extra: `data-id="${b.id}" data-drag="board" data-project="${p.id}"`, trailing: countBadge(attention, "var(--warning)") });
     }).join("");
     return `<div class="group" style="padding-top:10px">${head}${rows}</div>`;
   }
@@ -401,7 +402,7 @@
     const rows = boards.map((b, i) => {
       const cards = (S.data.cards || []).filter((c) => c.board_id === b.id && !c.archived); const running = cards.filter((c) => c.lane === "running").length;
       const attention = cards.filter((c) => c.lane === "review" || isActive(c.runtime)).length;
-      return listRow({ title: b.name, subtitle: [counts(cards.length, "card"), running ? `${running} running` : null].filter(Boolean).join(" · "), glyph: "view_kanban", tile: stableColor(b.id), position: pos(i, boards.length), act: "board", extra: `data-id="${b.id}"`, trailing: countBadge(attention, "var(--warning)") });
+      return listRow({ title: b.name, subtitle: [counts(cards.length, "card"), running ? `${running} running` : null].filter(Boolean).join(" · "), glyph: "view_kanban", tile: stableColor(b.id), position: pos(i, boards.length), act: "board", extra: `data-id="${b.id}" data-drag="board" data-project="${p.id}"`, trailing: countBadge(attention, "var(--warning)") });
     }).join("");
     const tools = ["files", "changes", "schedules"].map((t, i) => listRow({ title: TOOL_PAGES[t][0], glyph: TOOL_PAGES[t][1], tile: TOOL_PAGES[t][2], position: pos(i, 3), act: "tool", extra: `data-page="${t}" data-project="${p.id}"` })).join("");
     const checkouts = p.checkouts.map((c, i) => listRow({ title: cardMachineName(c), subtitle: compactPath(c.path), glyph: "computer", position: pos(i, p.checkouts.length), trailing: `<span class="dot" style="background:${machineOnline(c.daemon_id) ? "var(--success)" : "var(--tertiary-label)"}"></span>` })).join("");
@@ -1526,6 +1527,78 @@
   async function action(path, body, done) {
     try { await api(path, body); S.conv.awaiting = path.endsWith("/start"); await refreshState(); render(); done?.(); } catch (e) { snackbar(e.message); }
   }
+
+  // ------------------------------------------------------------------ board order (drag and drop)
+  // A board row is dragged with the mouse at once, on touch after a long press (a plain swipe scrolls).
+  // The order is kept by the bridge (POST api/boards/order), so every device shows the same order.
+  const DRAG_HOLD_MS = 350, DRAG_SLOP = 8;
+  document.addEventListener("pointerdown", (e) => {
+    const row = e.target.closest("[data-drag]");
+    if (!row || S.drag || e.button > 0 || e.target.closest("button")) return;
+    const siblings = [...row.parentElement.querySelectorAll(`:scope > [data-drag="${row.dataset.drag}"][data-project="${row.dataset.project}"]`)];
+    if (siblings.length < 2) return;
+    const g = { row, siblings, x: e.clientX, y: e.clientY, id: e.pointerId, touch: e.pointerType !== "mouse", started: false };
+    const end = () => { clearTimeout(g.timer); removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", cancel); };
+    const move = (ev) => {
+      if (ev.pointerId !== g.id) return;
+      if (!g.started) {
+        const far = Math.hypot(ev.clientX - g.x, ev.clientY - g.y) > DRAG_SLOP;
+        if (far && g.touch) return end();     // a swipe before the long press: scrolling
+        if (far) dragStart(g, ev);
+        return;
+      }
+      dragMove(ev.clientY);
+    };
+    const up = (ev) => { if (ev.pointerId !== g.id) return; end(); if (g.started) dragEnd(true); };
+    const cancel = (ev) => { if (ev.pointerId !== g.id) return; end(); if (g.started) dragEnd(false); };
+    if (g.touch) g.timer = setTimeout(() => { dragStart(g, e); navigator.vibrate?.(15); }, DRAG_HOLD_MS);
+    addEventListener("pointermove", move); addEventListener("pointerup", up); addEventListener("pointercancel", cancel);
+  });
+  function dragStart(g, e) {
+    g.started = true;
+    const r = g.row.getBoundingClientRect();
+    S.drag = { ...g, grab: e.clientY - r.top, before: g.siblings.map((n) => n.dataset.id), lastY: e.clientY };
+    g.row.classList.add("dragging"); document.body.classList.add("drag-active");
+    dragMove(e.clientY);
+  }
+  function dragMove(y) {
+    const d = S.drag; if (!d) return; d.lastY = y;
+    const { row } = d; row.style.transform = "";
+    // move the row in the DOM past every neighbour whose middle the pointer crossed, then let it follow the pointer
+    for (;;) {
+      const rows = [...row.parentElement.querySelectorAll(":scope > [data-drag]")].filter((n) => d.siblings.includes(n));
+      const i = rows.indexOf(row), prev = rows[i - 1], next = rows[i + 1];
+      if (prev && y - d.grab < prev.getBoundingClientRect().top + prev.offsetHeight / 2) prev.before(row);
+      else if (next && y - d.grab + row.offsetHeight > next.getBoundingClientRect().top + next.offsetHeight / 2) next.after(row);
+      else break;
+    }
+    const rows = [...row.parentElement.querySelectorAll(":scope > [data-drag]")].filter((n) => d.siblings.includes(n));
+    const first = rows[0], last = rows[rows.length - 1];
+    const lo = first.getBoundingClientRect().top, hi = last.getBoundingClientRect().bottom - row.offsetHeight;
+    row.style.transform = `translateY(${Math.max(lo, Math.min(hi, y - d.grab)) - row.getBoundingClientRect().top}px)`;
+    // the rounded corners follow the new positions (the project head is the group's first item on the Projects tab)
+    const head = row.parentElement.firstElementChild.dataset.drag ? 0 : 1;
+    rows.forEach((n, i) => { n.classList.remove("first", "middle", "last", "single"); n.classList.add(pos(i + head, rows.length + head)); });
+  }
+  function dragEnd(commit) {
+    const d = S.drag; if (!d) return;
+    d.row.classList.remove("dragging"); d.row.style.transform = ""; document.body.classList.remove("drag-active");
+    const after = [...d.row.parentElement.querySelectorAll(":scope > [data-drag]")].filter((n) => d.siblings.includes(n)).map((n) => n.dataset.id);
+    S.drag = null; S.dragEndedAt = Date.now();
+    $("#list")._html = $("#detail")._html = null; // the rows were moved by hand: build them again from the state
+    const changed = commit && after.join() !== d.before.join();
+    if (changed) {
+      // this project's boards take their slots in the new order; the other projects' boards keep theirs
+      const all = S.data.boards || [], mine = new Set(after); const queue = after.map((id) => all.find((b) => b.id === id));
+      S.data.boards = all.map((b) => (mine.has(b.id) ? queue.shift() : b));
+      api("api/boards/order", { ids: S.data.boards.map((b) => b.id) }).catch((e) => { snackbar("Board order not saved: " + e.message); refreshState().then(render); });
+    }
+    render();
+  }
+  // no click on the dropped row (it would open the board), no context menu or text selection while holding a row
+  document.addEventListener("click", (e) => { if (Date.now() - (S.dragEndedAt || 0) < 400 && e.target.closest("[data-drag]")) { e.stopPropagation(); e.preventDefault(); } }, true);
+  document.addEventListener("contextmenu", (e) => { if (S.drag || e.target.closest("[data-drag]") && matchMedia("(pointer: coarse)").matches) e.preventDefault(); });
+  document.addEventListener("touchmove", (e) => { if (S.drag) e.preventDefault(); }, { passive: false });
 
   // ------------------------------------------------------------------ events
   document.addEventListener("click", (e) => {

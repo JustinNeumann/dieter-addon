@@ -421,3 +421,7 @@ body.has-bottombar #snackbar { bottom: 96px; }
 .qopt { display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 8px 10px; border-radius: 12px; background: var(--surface-container-high); color: var(--label); border: 1px solid transparent; }
 .qopt > span { display: flex; flex-direction: column; gap: 2px; }
 .qopt.on { border-color: var(--primary); background: var(--accent-container); }
+/* board rows: drag to reorder (mouse at once, touch after a long press) */
+[data-drag] { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.gitem.dragging { position: relative; z-index: 5; box-shadow: 0 6px 20px rgb(0 0 0 / .35); background: color-mix(in srgb, var(--on-surface) 10%, var(--cell)); cursor: grabbing; }
+body.drag-active, body.drag-active * { cursor: grabbing !important; }

@@ -87,6 +87,68 @@ test("a new board is added next to Main from the project menu (Review lane switc
   expect(bad.status()).toBe(400);
 });
 
+test("boards are reordered by drag and drop (mouse, touch long press); the order is kept by the bridge", async ({ page, request, browser }) => {
+  const proj = (await state(request)).projects.find((p) => p.name === `Scratch-${stamp}`);
+  for (const name of ["Zeta", "Alpha"]) expect((await request.post("api/board", { data: { project: proj.id, name } })).ok()).toBeTruthy();
+  const order = async () => (await state(request)).boards.filter((b) => b.project_id === proj.id).map((b) => b.name);
+  const rowsOf = (p) => p.locator(`#list [data-drag="board"][data-project="${proj.id}"]`);
+  const names = async (p) => (await rowsOf(p).locator(".title").allTextContents()).map((t) => t.trim());
+  const before = await order();
+  expect(before.length).toBe(4);
+  // the Projects list itself (on a wide screen the boot opens a board ~150 ms after the state arrived: wait for it)
+  const projectsList = async (p) => {
+    await p.goto("");
+    await expect(p.locator("#list .appbar").first()).toBeVisible({ timeout: 15_000 });
+    await p.waitForTimeout(800);
+    await p.locator('[data-act="tab"][data-tab="projects"]:visible').click();
+    while (await p.locator('#list [data-act="back"]').isVisible()) await p.locator('#list [data-act="back"]').click();
+    await expect(rowsOf(p)).toHaveCount(4);
+  };
+  await projectsList(page);
+  expect(await names(page)).toEqual(before);
+  // mouse: drag the last board above the first
+  await rowsOf(page).nth(3).scrollIntoViewIfNeeded();
+  const last = await rowsOf(page).nth(3).boundingBox(), first = await rowsOf(page).nth(0).boundingBox();
+  await page.mouse.move(last.x + 40, last.y + last.height / 2);
+  await page.mouse.down();
+  for (let y = last.y + last.height / 2; y > first.y + 4; y -= 10) await page.mouse.move(last.x + 40, y);
+  await page.mouse.up();
+  const dragged = [before[3], ...before.slice(0, 3)];
+  await expect.poll(() => names(page)).toEqual(dragged);
+  await expect.poll(order).toEqual(dragged);
+  await expect(page.locator("#list .appbar").first()).toContainText("Projects"); // the drop did not open the board
+  await projectsList(page); // after a reload too
+  expect(await names(page)).toEqual(dragged);
+
+  // touch: a swipe scrolls, a long press picks the row up (phone layout)
+  const ctx = await browser.newContext({ baseURL: test.info().project.use.baseURL, viewport: { width: 400, height: 800 }, hasTouch: true, isMobile: true });
+  const phone = await ctx.newPage();
+  await projectsList(phone);
+  await rowsOf(phone).nth(3).scrollIntoViewIfNeeded();
+  const cdp = await ctx.newCDPSession(phone);
+  const touch = async (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] });
+  const drag = async (from, to, hold) => {
+    const a = await rowsOf(phone).nth(from).boundingBox(), b = await rowsOf(phone).nth(to).boundingBox();
+    const x = a.x + 60, y0 = a.y + a.height / 2, y1 = b.y + b.height * (to > from ? 0.9 : 0.1);
+    await touch("touchStart", x, y0);
+    await phone.waitForTimeout(hold);
+    const steps = 12;
+    for (let i = 1; i <= steps; i++) { await touch("touchMove", x, y0 + ((y1 - y0) * i) / steps); await phone.waitForTimeout(16); }
+    await touch("touchEnd");
+  };
+  await drag(0, 3, 0); // a plain swipe: no reorder
+  await phone.waitForTimeout(500);
+  expect(await names(phone)).toEqual(dragged);
+  await rowsOf(phone).nth(3).scrollIntoViewIfNeeded();
+  await drag(0, 2, 600); // long press, then drag the first board down two places
+  const touched = [dragged[1], dragged[2], dragged[0], dragged[3]];
+  await expect.poll(() => names(phone)).toEqual(touched);
+  await expect.poll(order).toEqual(touched);
+  await ctx.close();
+  const bad = await request.post("api/boards/order", { data: { ids: [] } });
+  expect(bad.status()).toBe(400);
+});
+
 test("a task runs on the mock harness and its conversation streams", async ({ page, request }) => {
   await page.goto("");
   await page.locator('[data-act="project"]').first().click();

@@ -42,6 +42,7 @@ Endpoints:
   POST /api/project           {git_url, name?, branch?}  add-on only: clone into /data/projects/<name> and register
                               {folder}  new empty Git repository /data/projects/<folder> (existing folder adopted)
   POST /api/board             {project, name, workflow?: review|direct}  a new board of the project (like the app's New board)
+  POST /api/boards/order     {ids: [board id, ...]}  the boards' order on the page (dragged); kept in the settings file
   POST /api/focus             {id}   remember which card the next page load should open (push deep link)
   GET  /api/focus?consume=1   {id|null} and forget it (valid 15 min)
   GET  /api/settings          {title_model, title_models: [{id, name, available, detail}]}
@@ -448,7 +449,17 @@ def settings():
         d = json.load(open(SETTINGS_FILE))
     except (OSError, ValueError):
         d = {}
-    return {"title_model": d.get("title_model") if d.get("title_model") in TITLE_MODELS else "openai"}
+    order = d.get("board_order")
+    return {"title_model": d.get("title_model") if d.get("title_model") in TITLE_MODELS else "openai",
+            "board_order": [str(x) for x in order] if isinstance(order, list) else []}
+
+
+def settings_save(cur):
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cur, f)
+    os.replace(tmp, SETTINGS_FILE)
 
 
 def settings_update(body):
@@ -458,12 +469,27 @@ def settings_update(body):
             raise ValueError("title_model: " + " or ".join(TITLE_MODELS))
         cur["title_model"] = body["title_model"]
         TITLER["at"] = 0                          # look the entity up again
-    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-    tmp = SETTINGS_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(cur, f)
-    os.replace(tmp, SETTINGS_FILE)
+    settings_save(cur)
     return settings_view()
+
+
+def order_boards(boards, order=None):
+    """Boards in the order dragged on the page (settings' board_order); boards not in it (new ones) follow
+    in the daemon's order, so a new board shows up last in its project."""
+    rank = {bid: i for i, bid in enumerate(settings()["board_order"] if order is None else order)}
+    return [b for _, b in sorted(enumerate(boards), key=lambda x: (rank.get(x[1].get("id"), len(rank)), x[0]))]
+
+
+def board_order_update(body):
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not ids or not all(isinstance(x, str) and x for x in ids):
+        raise ValueError("ids: list of board ids required")
+    cur = settings()
+    # Ids of boards not on the page (another project's, retired) keep their rank after the given ones
+    cur["board_order"] = list(dict.fromkeys(ids + [x for x in cur["board_order"] if x not in ids]))
+    settings_save(cur)
+    STATE.reorder_boards(cur["board_order"])
+    return {"ok": True, "board_order": cur["board_order"]}
 
 
 def settings_view():
@@ -1879,10 +1905,19 @@ class State:
                 self.last_review = review
             data["last_finished"] = self.last_finished
             data["last_review"] = self.last_review
+            data["boards"] = order_boards(data["boards"])   # under the lock: a reorder during this poll is not undone
             changed = json.dumps({k: v for k, v in data.items() if k != "generated_at"}, sort_keys=True, default=str) != \
                       json.dumps({k: v for k, v in self.data.items() if k != "generated_at"}, sort_keys=True, default=str)
             self.data = data
             if changed:
+                self.rev += 1
+                self.cond.notify_all()
+
+    def reorder_boards(self, order):
+        """Apply a new board order to the current state at once (no CLI round trip) and push it to the pages."""
+        with self.lock:
+            if self.data.get("boards"):
+                self.data = {**self.data, "boards": order_boards(self.data["boards"], order)}
                 self.rev += 1
                 self.cond.notify_all()
 
@@ -2283,6 +2318,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(res)
             if parts[1:] == ["settings"]:
                 return self.send_json(settings_update(body))
+            if parts[1:] == ["boards", "order"]:
+                return self.send_json(board_order_update(body))
             if parts[1:] == ["focus"]:
                 fid = str(body.get("id") or "").strip()
                 if not fid.startswith("c_"):
