@@ -143,7 +143,8 @@ still verified against the name. Enrollment is kept in `/data/dieter/daemon`.
 
 **Tools → Devices** shows the add-on daemon's trust state, the account's machines, apps and recovery
 key, the devices waiting to join, and **Add a device**: type the 16-character code a new app or
-machine shows and approve it; **Remove** takes a device out of the roster. Only type a code you see on
+machine shows and approve it; **Remove** takes a device out of the roster (removed devices are not
+listed, only counted). Only type a code you see on
 your own new device. This works when the add-on's daemon is itself a trusted device of your account,
 which needs `dieter daemon enroll` against your gateway; an add-on without enrollment (the default)
 shows "Not enrolled", and the code is then approved on an enrolled machine (`dieter device approve

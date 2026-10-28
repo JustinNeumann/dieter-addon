@@ -1278,7 +1278,7 @@ def _enum(v, prefix):
 def norm_device(d):
     return {"id": d.get("deviceId") or d.get("device_id") or "", "kind": _enum(d.get("kind"), "DEVICE_KIND_").lower(),
             "platform": d.get("platform") or "", "name": d.get("name") or "", "this": bool(d.get("thisDevice") or d.get("this_device")),
-            "added_by": d.get("addedBy") or d.get("added_by") or "", "requested_at": d.get("requestedAt") or d.get("requested_at"),
+            "revoked": bool(d.get("revoked")), "added_by": d.get("addedBy") or d.get("added_by") or "", "requested_at": d.get("requestedAt") or d.get("requested_at"),
             "expires_at": d.get("expiresAt") or d.get("expires_at"), "request_id": d.get("id") if str(d.get("id") or "").startswith("pr_") else ""}
 
 
@@ -1292,9 +1292,12 @@ def device_status():
         return {"state": "NOT_ENROLLED" if "enrolled" in msg.lower() else "UNAVAILABLE", "error": msg, "devices": [], "requests": []}
     if not isinstance(st, dict):
         return {"state": "UNAVAILABLE", "error": str(st)[:300], "devices": [], "requests": []}
+    # The roster keeps revoked devices (flag "revoked"), e.g. every earlier pairing of a reinstalled app:
+    # list the active ones, count the others.
+    devs = [norm_device(d) for d in st.get("devices") or [] if isinstance(d, dict)]
     out = {"state": _enum(st.get("state"), "TRUST_STATE_") or "UNKNOWN", "device_id": st.get("deviceId") or "",
            "head": st.get("headSequence"), "synced_at": st.get("syncedAt"), "code": st.get("pairingCode") or st.get("code") or "",
-           "devices": [norm_device(d) for d in st.get("devices") or [] if isinstance(d, dict)], "requests": []}
+           "devices": [d for d in devs if not d["revoked"]], "revoked_count": sum(d["revoked"] for d in devs), "requests": []}
     try:
         rq = run(["device", "requests", "--format", "json"], timeout=30) or {}
         out["requests"] = [norm_device(r) for r in unwrap(rq, "requests") if isinstance(r, dict)]

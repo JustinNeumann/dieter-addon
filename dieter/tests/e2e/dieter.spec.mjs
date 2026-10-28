@@ -396,6 +396,7 @@ test("the most recently used project is listed first, preselected in New task an
 test("Devices shows the daemon's trust state and refuses a code it cannot approve", async ({ page, request }) => {
   const d = await (await request.get("api/devices")).json();
   expect(["NOT_ENROLLED", "NO_ROSTER", "PENDING", "TRUSTED", "UNAVAILABLE"]).toContain(d.state);
+  expect(d.devices.filter(x => x.revoked)).toEqual([]); // revoked devices are counted, not listed
   const bad = await request.post("api/devices/approve", { data: { code: "nope" } });
   expect(bad.ok()).toBe(false);
   const bad2 = await request.post("api/devices/approve", { data: { code: "AAAA-BBBB-CCCC-DDDD" } });

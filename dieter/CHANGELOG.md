@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.19 (2026-10-28)
+
+- Devices no longer lists removed devices. The roster keeps every revoked device (flag `revoked`), so an
+  app that was paired again after a reinstall showed up once per pairing, with a Remove button that could
+  only fail. The list now shows the active devices and how many removed ones it leaves out; two active
+  devices with the same name are told apart by the end of their device id.
+
 ## 0.6.429.18 (2026-10-28)
 
 - Oh My Pi model discovery no longer re-downloads the harness runtime. The daemon runs OMP with its managed

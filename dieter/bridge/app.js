@@ -582,8 +582,10 @@
         ${sectionFooter("Only type a code you see on your own new device: whoever's code you approve gets full access to your machines.")}`;
       const reqs = d.requests || [];
       const waiting = reqs.length ? sectionHeader("Waiting for approval") + `<div class="group">${reqs.map((r, i) => listRow({ title: r.name || r.id, subtitle: [r.kind, r.platform, r.expires_at ? "expires " + fmtWhen(r.expires_at) : ""].filter(Boolean).join(" · "), glyph: DEVICE_KIND_ICON[r.kind] || "devices", glyphTint: "var(--warning)", position: pos(i, reqs.length) })).join("")}</div>${sectionFooter("Codes are never listed here; the new device shows its own.")}` : "";
-      const devs = d.devices || [];
-      const list = devs.length ? sectionHeader("Devices") + `<div class="group">${devs.map((x, i) => listRow({ title: x.name || x.id, subtitle: [x.kind === "daemon" ? "machine" : x.kind === "client" ? "app" : x.kind, x.platform, x.this ? "this daemon" : ""].filter(Boolean).join(" · "), glyph: DEVICE_KIND_ICON[x.kind] || "devices", position: pos(i, devs.length), trailing: can && !x.this && x.kind !== "recovery" ? `<button class="iconbtn" data-act="dev-revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}" title="Remove">${ico("delete", 22)}</button>` : "" })).join("")}</div>` : "";
+      const devs = (d.devices || []).filter(x => !x.revoked);
+      const named = devs.reduce((m, x) => (m[x.name] = (m[x.name] || 0) + 1, m), {}); // same name twice: tell them apart by id
+      const removed = d.revoked_count ? sectionFooter(`${d.revoked_count} removed ${d.revoked_count === 1 ? "device is" : "devices are"} not listed.`) : "";
+      const list = devs.length ? sectionHeader("Devices") + `<div class="group">${devs.map((x, i) => listRow({ title: x.name || x.id, subtitle: [x.kind === "daemon" ? "machine" : x.kind === "client" ? "app" : x.kind, x.platform, x.this ? "this daemon" : "", x.name && named[x.name] > 1 ? "…" + x.id.slice(-6) : ""].filter(Boolean).join(" · "), glyph: DEVICE_KIND_ICON[x.kind] || "devices", position: pos(i, devs.length), trailing: can && !x.this && x.kind !== "recovery" ? `<button class="iconbtn" data-act="dev-revoke" data-id="${esc(x.id)}" data-name="${esc(x.name)}" title="Remove">${ico("delete", 22)}</button>` : "" })).join("")}</div>${removed}` : "";
       body = banner + code + approve + waiting + list;
     }
     return `<div class="screen">${appbar({ title: "Devices", subtitle: d?.synced_at ? "Synced " + fmtWhen(d.synced_at) : "", back: opts.back, actions })}<div class="content" data-scroll="devices">${body}</div></div>`;
