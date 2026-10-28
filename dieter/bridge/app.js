@@ -1362,10 +1362,30 @@
     if (c.kind !== "chat") { items.push({ title: "Move to" }); Object.entries(LANES).forEach(([id, name]) => items.push({ id: "lane-" + id, label: name, checked: c.lane === id, onClick: () => action(`api/card/${c.id}/move`, { lane: id }) })); items.push("-"); }
     if (isActive(c.runtime)) items.push({ id: "cancel", label: "Stop agent", icon: "stop", destructive: true, onClick: () => action(`api/${c.kind}/${c.id}/cancel`, {}) });
     if (c.lane === "todo" && !c.initial_prompt_sent) items.push({ id: "start", label: "Start agent", icon: "play_arrow", onClick: () => action(`api/card/${c.id}/start`, {}) });
+    items.push({ id: "edit", label: "Edit…", icon: "edit", onClick: () => editCard(c) });
     items.push({ id: "pin", label: S.pins[c.id] ? "Unpin" : "Pin", icon: "push_pin", onClick: () => { S.pins[c.id] = !S.pins[c.id]; if (!S.pins[c.id]) delete S.pins[c.id]; save("pins", S.pins); render(); } });
     items.push({ id: "copy", label: "Copy ID", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(c.id) });
     items.push("-", { id: "archive", label: "Archive", icon: "archive", destructive: true, onClick: () => action(`api/${c.kind}/${c.id}/archive`, {}) });
     return items;
+  }
+  // The title can always be changed; the task brief only until the first turn has started (a chat has no brief).
+  function editCard(c) {
+    const brief = c.kind === "card" && !c.initial_prompt_sent; const el = $("#overlay");
+    S.dialog = { title: "Edit card" };
+    el.innerHTML = `<div class="scrim" data-act="close-dialog"><div class="dialog"><div class="dt">${c.kind === "chat" ? "Rename chat" : "Edit card"}</div>
+      <div class="outlined-field"><label>Title</label><input id="e-title" value="${esc(c.title || "")}"></div>
+      ${brief ? `<div class="outlined-field"><label>Task</label><textarea id="e-prompt" rows="6">${esc(c.initial_prompt || "")}</textarea></div>` : c.kind === "card" ? `<div class="t-body c-secondary">The task can't be changed once the agent has started.</div>` : ""}
+      <div class="acts"><button class="btn text" data-act="close-dialog">Cancel</button><button class="btn filled" data-act="edit-save" data-id="${esc(c.id)}">Save</button></div></div></div>`;
+    el.classList.remove("hidden"); setTimeout(() => $("#e-title")?.focus(), 50);
+  }
+  async function saveCardEdit(id) {
+    const c = conv(id); if (!c) return closeDialog();
+    const title = ($("#e-title")?.value || "").trim(), ta = $("#e-prompt"); const prompt = ta ? ta.value.trim() : undefined;
+    if (!title) return snackbar("The title can't be empty.");
+    if (prompt === "") return snackbar("The task can't be empty.");
+    const body = {}; if (title !== c.title) body.title = title; if (prompt !== undefined && prompt !== (c.initial_prompt || "").trim()) body.prompt = prompt;
+    closeDialog(); if (!Object.keys(body).length) return;
+    await action(`api/${c.kind}/${id}/update`, body, () => { if (S.conv.id === id) { S.conv.id = null; syncConversation(); } });
   }
   async function action(path, body, done) {
     try { await api(path, body); S.conv.awaiting = path.endsWith("/start"); await refreshState(); render(); done?.(); } catch (e) { snackbar(e.message); }
@@ -1429,6 +1449,7 @@
       case "picker": openPicker(el.dataset.key); break;
       case "pick": { const d = S.dialog; closeDialog(); d?.onPick(el.dataset.value); break; } // close first: onPick may open the next dialog (model → effort)
       case "close-dialog": if (el.tagName === "BUTTON" || e.target === el) { if ($("[data-claude-login]")) claudeLoginCancel(); else closeDialog(); } break; // the Cancel button or the scrim itself; clicks inside the dialog body do nothing
+      case "edit-save": saveCardEdit(id); break;
       case "close-snack": $("#snackbar").classList.remove("show"); break;
       case "when": S.creation.runNow = el.dataset.i === "0"; render(); break;
       case "workspace": S.creation.workspace = el.dataset.i === "0" ? "worktree" : "project"; render(); break;
