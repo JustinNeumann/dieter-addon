@@ -1788,6 +1788,7 @@ class State:
             machine = norm_machine(run(["machine", "info"], timeout=20))
         except CliError as e:
             machine = {"error": str(e)}
+            self.note("machine", e)
         try:
             quota = norm_quota(run(["quota", "list", "--format", "json"], timeout=20))
         except CliError as e:
@@ -1836,8 +1837,9 @@ class State:
     def loop(self):
         last_slow = 0
         while True:
-            # the first `harness list` after a daemon start often times out: retry quickly while the catalog is empty
-            if time.time() - last_slow > (SLOW_POLL_S if self.slow["harnesses"] else 10):
+            # the first `harness list` / `machine info` after a daemon start often time out: retry quickly while the
+            # catalog or the machine list is empty (else Machines shows "No machines" for a whole slow round)
+            if time.time() - last_slow > (SLOW_POLL_S if self.slow["harnesses"] and self.slow["machines"] else 10):
                 self.poll_slow()
                 last_slow = time.time()
             self.poll_fast()

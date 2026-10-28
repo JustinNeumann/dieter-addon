@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.28 (2026-10-28)
+
+- Tools → Machines no longer shows "No machines" for up to a minute after the add-on starts: the first
+  `dieter machine info` often runs before the daemon listens, and the bridge only retried quickly while the
+  harness catalog was empty. It now also retries every 10 s while the machine list is empty, and logs a failed
+  `machine info` once (it was silent). This was the intermittent e2e failure "Tools pages: Machines…".
+- architecture.mmd: the daemon box names the bundled release (0.6.429-antigravity.4).
+
 ## 0.6.429.27 (2026-10-28)
 
 - Antigravity harness, now the add-on's own copy of the fork's adapter (`patches/antigravity-runtime.mjs`,
