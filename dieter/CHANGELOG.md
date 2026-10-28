@@ -2,6 +2,18 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.18 (2026-10-28)
+
+- Oh My Pi model discovery no longer re-downloads the harness runtime. The daemon runs OMP with its managed
+  Bun (`/data/dieter/runtime/tools/bun/1.4.3`) and, when that is missing, fetches the whole 775 MB runtime
+  archive just to get it, ignoring `DIETER_HARNESS_RUNTIME_DIR`. On the Pi that never finished within the
+  10 min discovery limit, so it started over every round (about every 6 minutes), around the clock: 43 GB
+  received in 5 hours, plus a 775 MB leftover download. At startup the bridge now installs the Bun from the
+  staged archive the way the daemon does (postinstall, `bun --version` check, rename under the daemon's
+  install lock) and removes leftovers of interrupted daemon attempts.
+- Staged harness runtimes of earlier versions (`/data/dieter/harness-staged/<version>`, 2.2 GB each) are
+  removed once the current one is staged.
+
 ## 0.6.429.17 (2026-10-28)
 
 - Edit tasks in the UI: the card menu has an "Edit…" entry (as in the Dieter app). It changes the title, and

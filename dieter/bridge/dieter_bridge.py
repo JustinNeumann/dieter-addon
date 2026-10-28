@@ -448,6 +448,66 @@ def build_runtime_dir():
     log(f"harness: runtime sources staged in {RUNTIME_DIR} ({len(names)} files)")
 
 
+def prune_harness_staged():
+    """Remove the staged runtimes of earlier versions (≈ 2.2 GB each) once this version is staged."""
+    parent = os.path.dirname(HARNESS_DIR)
+    if not os.path.exists(os.path.join(HARNESS_DIR, ".staged")):
+        return
+    for n in sorted(os.listdir(parent)):
+        if n != HARNESS_VERSION:
+            subprocess.run(["rm", "-rf", os.path.join(parent, n)], check=True, timeout=600)
+            log(f"harness: removed the staged runtime {n}")
+
+
+def seed_managed_bun():
+    """The daemon's OMP discovery wants Bun in $DIETER_HOME/runtime/tools/bun/<version> and otherwise
+    downloads the whole harness runtime archive (~775 MB) for it, every discovery round (~6 min), and
+    on the Pi never finishes inside its 10 min limit. The staged archive carries the same package, so
+    publish it there the way the daemon does (internal/harness/bun.go): stage, run Bun's postinstall,
+    check `bun --version`, rename into place, all under the daemon's install lock."""
+    import fcntl, json, tempfile
+    staged = os.path.join(HARNESS_DIR, "bun")
+    if not os.path.exists(os.path.join(HARNESS_DIR, ".staged")) or not os.path.isdir(staged):
+        return
+    version = json.load(open(os.path.join(HARNESS_DIR, "manifest.json")))["bunVersion"]
+    root = os.path.join(DIETER_HOME, "runtime", "tools", "bun")
+    final = os.path.join(root, version)
+
+    def valid(d):
+        try:
+            out = subprocess.run([os.path.join(d, "node_modules", ".bin", "bun"), "--version"],
+                                 capture_output=True, text=True, timeout=10)
+            return out.returncode == 0 and out.stdout.strip() == version
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    with open(os.path.join(root, f".install-{version}.lock"), "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("harness: managed Bun is being installed by the daemon, not seeding it")
+            return
+        # leftovers of interrupted daemon attempts: stages, quarantined installs, archive downloads
+        for n in os.listdir(root):
+            if n.startswith((".stage-", ".corrupt-", ".download-")):
+                subprocess.run(["rm", "-rf", os.path.join(root, n)], check=True, timeout=300)
+        if valid(final):
+            return
+        subprocess.run(["rm", "-rf", final], check=True, timeout=300)
+        stage = tempfile.mkdtemp(prefix=f".stage-{version}-", dir=root)
+        try:
+            subprocess.run(["cp", "-a", staged + "/.", stage], check=True, timeout=600)
+            subprocess.run(["node", os.path.join("node_modules", "bun", "install.js")], cwd=stage,
+                           check=True, capture_output=True, timeout=600)
+            if not valid(stage):
+                raise RuntimeError(f"the staged Bun does not report version {version}")
+            os.rename(stage, final)
+        finally:
+            subprocess.run(["rm", "-rf", stage], timeout=300)
+    log(f"harness: managed Bun {version} seeded in {final}")
+
+
 def setup_antigravity():
     """Antigravity CLI credentials from the option (the JSON of ~/.gemini/antigravity-cli/antigravity-oauth-token)."""
     tok = (OPTS.get("antigravity_token") or "").strip()
@@ -2159,6 +2219,14 @@ def main():
             setup_antigravity()
         except Exception as e:
             log("harness: staging failed, the daemon will download it itself:", e)
+        try:
+            prune_harness_staged()
+        except Exception as e:
+            log("harness: removing old staged runtimes failed:", e)
+        try:
+            seed_managed_bun()
+        except Exception as e:
+            log("harness: seeding the managed Bun failed, OMP discovery will download it itself:", e)
         threading.Thread(target=Daemon().loop, daemon=True).start()
 
         def after_daemon():
