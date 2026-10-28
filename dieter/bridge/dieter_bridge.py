@@ -1939,6 +1939,27 @@ class Handler(BaseHTTPRequestHandler):
                     out = run(["card", "start", cid], timeout=60, parse=False)
                     STATE.poll_fast()
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
+                if action == "update":
+                    title = (body.get("title") or "").strip()
+                    prompt = body.get("prompt")
+                    if not title and prompt is None:
+                        return self.send_json({"error": "title or prompt required"}, 400)
+                    if kind == "chat":
+                        if prompt is not None or not title:
+                            return self.send_json({"error": "a chat can only be renamed"}, 400)
+                        args = ["chat", "rename", "--title", title, cid]
+                    else:
+                        args = ["card", "update"]
+                        if title:
+                            args += ["--title", title]
+                        if prompt is not None:
+                            if not prompt.strip():
+                                return self.send_json({"error": "task must not be empty"}, 400)
+                            args += ["--prompt", prompt.strip()]
+                        args.append(cid)
+                    out = run(args, timeout=30, parse=False)
+                    STATE.poll_fast()
+                    return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action in ("cancel", "archive"):
                     out = run([kind, action, cid], timeout=60, parse=False)
                     STATE.poll_fast()

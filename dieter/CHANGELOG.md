@@ -2,6 +2,11 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.17 (2026-10-28)
+
+- Edit tasks in the UI: the card menu has an "Edit…" entry (as in the Dieter app). It changes the title, and
+  the task of a Todo card that has not been started; a started card keeps its task, a chat can only be renamed.
+
 ## 0.6.429.16 (2026-10-28)
 
 - Antigravity usage: the quota is shown again when the daemon is enrolled in a gateway. The bridge only probed
