@@ -1329,6 +1329,9 @@
     box(`<div class="t-body" style="padding:8px 0;display:flex;flex-direction:column;gap:12px">
         <div>1. Open the gateway's sign-in page and authorize this daemon with GitHub.${st.code ? ` If it asks for a code, enter <b class="t-mono">${esc(st.code)}</b>.` : ""}</div>
         <a class="btn filled with-icon" href="${esc(st.url)}" target="_blank" rel="noopener" style="text-decoration:none;justify-content:center">${ico("open_in_new", 18)}Open sign-in page</a>
+        <div class="t-footnote c-secondary">The button does nothing in some app views: copy the link and open it in a browser instead.</div>
+        <div class="outlined-field"><label>Sign-in link</label><input id="gw-link" value="${esc(st.url)}" readonly spellcheck="false" onfocus="this.select()"></div>
+        <button class="btn text with-icon" style="align-self:flex-end" data-act="gw-link-copy">${ico("content_copy", 18)}Copy link</button>
         <div data-gw-progress><span class="spin"></span> 2. Waiting for the authorization… the daemon restarts afterwards.</div></div>
       <div class="acts"><button class="btn text" data-act="gw-enroll-cancel">Cancel</button></div>`);
     for (let i = 0; i < 600; i++) {
@@ -1344,6 +1347,11 @@
     if (!confirm("Drop this add-on's enrollment so it can enroll again? Its projects and conversations stay; you sign in with GitHub and approve the new pairing code.")) return;
     try { await api("api/gateway/unenroll", {}); } catch (e) { snackbar(e.message); return; }
     S.gw = null; S.dev = null; snackbar("Enrollment dropped. Enroll the add-on again."); render();
+  }
+  async function gatewayLinkCopy() {
+    const inp = $("#gw-link"); if (!inp) return;
+    try { await navigator.clipboard.writeText(inp.value); snackbar("Link copied."); }
+    catch (e) { inp.focus(); inp.select(); try { document.execCommand("copy"); snackbar("Link copied."); } catch (e2) { snackbar("Copy failed: select the link and copy it by hand."); } }
   }
   async function gatewayEnrollCancel() { closeDialog(); try { await api("api/gateway/enroll/cancel", {}); } catch (e) { /* ignore */ } S.gw = null; render(); }
   function sshKeySection() {
@@ -1532,6 +1540,7 @@
       case "ssh-copy": sshCopy(); break;
       case "ssh-test": sshTest(); break;
       case "gw-enroll": gatewayEnroll(); break;
+      case "gw-link-copy": gatewayLinkCopy(); break;
       case "gw-unenroll": gatewayUnenroll(); break;
       case "gw-enroll-cancel": gatewayEnrollCancel(); break;
       case "claude-login": claudeLogin(); break;

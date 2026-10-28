@@ -2,6 +2,11 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.23 (2026-10-28)
+
+- The gateway sign-in dialog also shows the link as text with a **Copy link** button, for app views where
+  the "Open sign-in page" button (a new-tab link) does nothing.
+
 ## 0.6.429.22 (2026-10-28)
 
 - Fix: **Re-enroll** failed with `type object 'Enroll' has no attribute 'unenroll'`; the method had been
