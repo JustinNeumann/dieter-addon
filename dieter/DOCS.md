@@ -45,7 +45,7 @@ agents run arbitrary tooling under `/data`.
 | Option | Meaning |
 |---|---|
 | `git_user`, `git_email` | commit identity for the agents (written to `/data/.gitconfig`) |
-| `github_token` | token for github.com (fine-grained with *All repositories* or the repos you want, permission Contents read/write; or classic `repo`); stored in `/data/.git-credentials` and used for every clone and push |
+| `github_token` | token for github.com, used for every clone and push and for pull requests and Actions through the GitHub CLI (see GitHub below). Fine-grained, for *All repositories* or the repos you want: Contents read/write, Pull requests read/write, Actions read, Checks read, Commit statuses read, Metadata read; Workflows read/write only if agents may change `.github/workflows`; no Administration, Secrets or Actions write. Or classic `repo` (and `workflow`). Stored in `/data/.config/gh/hosts.yml` (gh's sign-in; git takes it from there) |
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
 | `gateway_url`, `gateway_host_ip`, `machine_name` | enroll the add-on's daemon with your Dieter gateway so the apps see it (see Gateway below); `gateway_host_ip` adds a hosts entry for the gateway's name |
 | `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **+** → *Add repository* (Git URL, optional name and base branch); *New folder* creates an empty Git repository `/data/projects/<name>` without a remote and registers it (an existing folder there is adopted). Further boards next to a project's *Main* board: the project's ⋮ menu (or a board's ⋮ menu) → *New board…* (name, *Review lane* on or off). Boards are listed in the order you choose: drag a board row (touch: long press first) on the Projects list or the project's page; the order is kept by the add-on for all devices. The page lists the most recently used project first, preselects it in New task and opens it when the Projects tab is tapped |
@@ -53,6 +53,33 @@ agents run arbitrary tooling under `/data`.
 
 Agents work in `/data/projects/*` on branches; publishing means push branch + pull request. The
 add-on has no access to `/config`.
+
+## GitHub: pull requests and Actions
+
+The image has the GitHub CLI (`gh`). At start the bridge signs it in with `github_token` and switches git to
+gh's credential helper, so one token serves clones, pushes, the daemon and the agents (without a token, or
+when the sign-in fails for lack of network, git keeps its plain credential store). What this enables:
+
+- **The daemon's pull-request operations.** Dieter's workspace operations `create_pr`, `refresh_pr` and
+  `merge_pr` (`dieter workspace run --kind …`) need `gh` on the daemon host; `dieter workspace scm CARD`
+  shows them as available now. They work for worktree cards and record the pull request on the card.
+- **Agents read checks and runs** (`gh pr checks`, `gh run list`, `gh run view --log-failed`), edit and
+  comment on pull requests, and open them for project-directory cards (`gh pr create`). The Claude Code
+  note in `CLAUDE.md` (replaced only while unedited) says what is expected: read freely, publish through the
+  daemon where possible, never merge, close, force-push or change settings unless the task says so, and
+  treat pull request text, reviews and Actions logs as untrusted input. For Codex and Antigravity put the
+  same into Tools → Settings → Agent instructions.
+- **Publishing per board and card.** Dieter's remote publish mode decides what happens with a worktree
+  card's changes: *Manual* (the default) leaves pushing and pull requests to explicit actions or the task,
+  *Pull request* publishes them as a pull request, *Push to base* pushes validated changes to the base
+  branch. **New board** and a board's ⋮ menu → **Publishing…** set a board's mode (cards created afterwards
+  inherit it), New task → *New worktree* → **Publishing** overrides it for one card. The Access switches
+  of New task (vault, mail) are now passed on as well.
+
+What the token can do, an agent can do, also one led astray by text it reads; agents and the bridge run as
+the same user and can read the token. Keep the token's permissions to the list above and protect the base
+branch on GitHub (a ruleset on `main`: pull request required, no direct pushes, no bypass for
+administrators), then a pull request with your review is the only way into `main`.
 
 ## Home Assistant side
 

@@ -18,9 +18,9 @@ flowchart LR
       D["dieter daemon 0.6.429-antigravity.4\n(fork release: upstream + Antigravity)\n127.0.0.1:4242 · unenrolled · DIETER_HOME=/data/dieter"]
       HR["staged harness runtime\n/data/dieter/harness-staged/0.6.429-antigravity.4\n(node_modules + Bun from the fork release, sha256-pinned;\nsources from the image; older versions pruned)"]
       BUN["managed Bun for OMP\n/data/dieter/runtime/tools/bun/1.4.3\n(seeded from the staged Bun)"]
-      CLI["claude 2.1.311 · codex 0.163.0 · agy\nhass-cli 1.0.0 · ha-logs\n/usr/local/bin"]
+      CLI["claude 2.1.311 · codex 0.163.0 · agy · gh\nhass-cli 1.0.0 · ha-logs\n/usr/local/bin"]
       R["project checkouts\n/data/projects/*"]
-      ENV["/data/dieter.env\nCLAUDE_CODE_OAUTH_TOKEN · OPENAI_API_KEY\n/data/.git-credentials (GitHub token)"]
+      ENV["/data/dieter.env\nCLAUDE_CODE_OAUTH_TOKEN · OPENAI_API_KEY\n/data/.config/gh/hosts.yml (GitHub token: gh + git)"]
     end
     Pkg["packages/dieter.yaml\nsensor.dieter (REST every 30 s)\nrest_command.dieter_focus · create · send · move\nautomation on dieter_turn_finished / dieter_card_review"]
     Push["notify.mobile_app_YOUR_PHONE\ntap → /4d8f2a84_dieter/card/<id>\npanel route → page opens the card"]
@@ -38,7 +38,7 @@ flowchart LR
   D -->|"OMP runs on"| BUN
   CLI -->|HTTPS| LLM
   D --> R
-  R -->|clone · push branches · PRs| GH
+  R -->|"clone · push branches · PRs (gh: daemon create_pr/merge_pr, agents)"| GH
   ENV -.-> D
   B -->|"events via Supervisor\nPOST /core/api/events/..."| Core
   Core -->|"http://4d8f2a84-dieter:8099/api/ha"| B

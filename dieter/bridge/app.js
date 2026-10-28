@@ -1278,10 +1278,12 @@
     const projects = S.data?.projects || []; const first = projects.find((p) => p.id === S.creation?.project_id) || mruProject() || projects[0];
     const harness = (S.data?.harnesses || []).find((h) => h.id === "claude-code") || S.data?.harnesses?.[0];
     S.creation = { chat, title: "", prompt: "", runNow: true, project_id: first?.id || "", board_id: (S.data?.boards || []).find((b) => b.project_id === first?.id)?.id || "",
-      checkout_id: first?.checkouts?.[0]?.id || "", provider: load("provider", harness?.id || "claude-code"), model: "", effort: "", workspace: "project", branch: "", base: "", vault: false, mail: false };
+      checkout_id: first?.checkouts?.[0]?.id || "", provider: load("provider", harness?.id || "claude-code"), model: "", effort: "", workspace: "project", branch: "", base: "", publish: "", vault: false, mail: false };
     const h = (S.data?.harnesses || []).find((x) => x.id === S.creation.provider); S.creation.model = load("model-" + S.creation.provider, h?.default_model || h?.models?.[0]?.id || "");
     S.modal = "creation"; render(); setTimeout(() => $("#c-prompt")?.focus(), 50);
   }
+  const PUBLISH_MODES = [["manual", "Manual", "The agent pushes or opens a pull request only when asked"], ["pull_request", "Pull request", "Changes are published as a pull request"], ["push_base", "Push to base", "Validated changes are pushed to the base branch"]];
+  const publishLabel = (v) => PUBLISH_MODES.find((m) => m[0] === v)?.[1] || "";
   function creationScreen() {
     const c = S.creation; const chat = c.chat; const p = project(c.project_id);
     const boards = (S.data.boards || []).filter((b) => b.project_id === c.project_id); const b = boards.find((x) => x.id === c.board_id);
@@ -1302,7 +1304,8 @@
       ${sectionHeader("Agent")}<div class="group">${picker("Agent", HARNESS_NAMES[c.provider] || harness?.name || c.provider, "provider", "auto_awesome", "first")}${picker("Model", model?.name || c.model, "model", "memory", efforts.length ? "middle" : "last")}${efforts.length ? picker("Effort", c.effort ? c.effort[0].toUpperCase() + c.effort.slice(1) : "Default", "effort", "bolt", "last") : ""}</div>
       ${sectionHeader("Workspace")}<div class="m16"><div class="ccard" style="border-radius:22px;padding:12px;display:flex;flex-direction:column;gap:10px">${seg(["New worktree", "Project directory"], c.workspace === "worktree" ? 0 : 1, "workspace")}
         ${c.workspace === "worktree" ? `<div class="outlined-field"><label>Branch</label><input data-field="branch" placeholder="Branch (automatic)"></div><div class="outlined-field"><label>Base branch</label><input data-field="base" placeholder="Base branch"></div>` : ""}</div></div>
-      ${sectionFooter(c.workspace === "worktree" ? "The agent works on its own branch in a separate worktree." : "The agent edits the project directory in place.")}
+      ${c.workspace === "worktree" ? `<div class="group" style="margin-top:12px">${picker("Publishing", c.publish ? publishLabel(c.publish) : `Board default (${publishLabel(b?.publish) || "Manual"})`, "publish", "publish", "single")}</div>` : ""}
+      ${sectionFooter(c.workspace === "worktree" ? "The agent works on its own branch in a separate worktree." + (c.publish === "pull_request" ? " Its changes are published as a pull request." : c.publish === "push_base" ? " Validated changes are pushed to the base branch." : "") : "The agent edits the project directory in place.")}
       ${sectionHeader("Access")}<div class="group">${listRow({ title: "Allow vault access", subtitle: "The agent may use the account's passwords and TOTP codes", position: "first", trailing: `<button class="switch ${c.vault ? "on" : ""}" data-act="toggle" data-field="vault"></button>` })}
         ${listRow({ title: "Allow mail to you", subtitle: "The agent may send you read-only reports in Mail", position: "last", trailing: `<button class="switch ${c.mail ? "on" : ""}" data-act="toggle" data-field="mail"></button>` })}</div>${sectionFooter("Set only when creating.")}
       <div class="m16" style="padding:16px 16px"><button class="btn filled large" style="width:100%;margin-top:8px" data-act="submit-creation" ${ready ? "" : "disabled"}>${S.busy ? `<span class="spin"></span>` : ""}${chat || c.runNow ? "Start working" : "Add to Todo"}</button></div></div></div>`;
@@ -1312,7 +1315,8 @@
     S.busy = true; render();
     try {
       const body = { project: c.project_id, title: c.title.trim(), prompt: c.prompt.trim(), provider: c.provider, model: c.model, effort: c.effort, workspace: c.workspace, start: c.chat || c.runNow, checkout: c.checkout_id };
-      if (!c.chat) body.board = c.board_id; if (c.workspace === "worktree" && c.branch) body.branch = c.branch;
+      if (!c.chat) body.board = c.board_id; if (c.workspace === "worktree") { if (c.branch) body.branch = c.branch; if (c.base) body.base = c.base; if (c.publish) body.publish = c.publish; }
+      if (c.vault) body.vault = true; if (c.mail) body.mail = true;
       save("provider", c.provider); save("model-" + c.provider, c.model); touchProject(c.project_id);
       if (S.files.length) body.attachments = await uploadFiles("form");
       const r = await api(c.chat ? "api/chat" : "api/card", body);
@@ -1325,7 +1329,7 @@
   function addRepository() { S.repo = { git_url: "", name: "", branch: "" }; S.modal = "repo"; render(); setTimeout(() => $("#r-url")?.focus(), 50); }
   function addFolder() { S.repo = { kind: "folder", name: "" }; S.modal = "repo"; render(); setTimeout(() => $("#r-name")?.focus(), 50); }
   // ---- New board (ProjectAdministration.kt NewBoardSheet): name + Review lane (review workflow) of a project
-  function newBoard(projectId) { if (!project(projectId)) return; S.repo = { kind: "board", project_id: projectId, name: "", review: true }; S.modal = "repo"; render(); setTimeout(() => $("#r-name")?.focus(), 50); }
+  function newBoard(projectId) { if (!project(projectId)) return; S.repo = { kind: "board", project_id: projectId, name: "", review: true, publish: "manual" }; S.modal = "repo"; render(); setTimeout(() => $("#r-name")?.focus(), 50); }
   const repoReady = (r) => !!r && (r.kind === "folder" || r.kind === "board" ? r.name.trim() : r.git_url.trim());
   function repoScreen() {
     const r = S.repo; const ready = false; // toggled on the DOM after rendering
@@ -1334,8 +1338,8 @@
       <div class="m16" style="display:flex;flex-direction:column;gap:12px;padding-top:8px">
         <div class="outlined-field"><label>Name</label><input id="r-name" data-field="name" placeholder="Board name" maxlength="120"></div>
       </div>
-      <div class="group" style="margin-top:16px">${listRow({ title: "Review lane", subtitle: "Cards move to Review before Done", trailing: `<button class="switch ${r.review ? "on" : ""}" data-act="board-review"></button>` })}</div>
-      ${sectionFooter(`A new board of ${esc(project(r.project_id)?.name || "the project")} next to its other boards, with the lanes Todo, Running${r.review ? ", Review" : ""} and Done.`)}
+      <div class="group" style="margin-top:16px">${listRow({ title: "Review lane", subtitle: "Cards move to Review before Done", position: "first", trailing: `<button class="switch ${r.review ? "on" : ""}" data-act="board-review"></button>` })}${listRow({ title: "Publishing", value: publishLabel(r.publish), glyph: "publish", position: "last", act: "board-publish", trailing: ico("expand_more", 20, "c-secondary") })}</div>
+      ${sectionFooter(`A new board of ${esc(project(r.project_id)?.name || "the project")} next to its other boards, with the lanes Todo, Running${r.review ? ", Review" : ""} and Done. ${PUBLISH_MODES.find((m) => m[0] === r.publish)?.[2] || ""}.`)}
       <div class="m16" style="padding:16px 16px"><button class="btn filled large" style="width:100%" data-act="submit-repo" ${ready ? "" : "disabled"}>${S.busy ? `<span class="spin"></span>` : ""}${S.busy ? "Creating…" : "Create board"}</button></div></div></div>`;
     if (r.kind === "folder") return `<div class="screen">${appbar({ title: "New folder", cancel: true, confirm: `<button class="btn filled with-icon" style="margin-right:8px" data-act="submit-repo" ${ready ? "" : "disabled"}>${ico("create_new_folder", 18)}Create</button>` })}
       <div class="content" data-scroll="repo" style="padding-top:8px;padding-bottom:24px">
@@ -1359,7 +1363,7 @@
     S.busy = true; render();
     if (r.kind === "board") {
       try {
-        const res = await api("api/board", { project: r.project_id, name: r.name.trim(), workflow: r.review ? "review" : "direct" });
+        const res = await api("api/board", { project: r.project_id, name: r.name.trim(), workflow: r.review ? "review" : "direct", publish: r.publish || "manual" });
         S.modal = null; S.repo = null; S.busy = false;
         await refreshState(); touchProject(r.project_id);
         if (res.id) { S.tab = "projects"; showFrom({ kind: "project", id: r.project_id }, { kind: "board", id: res.id }); } else render();
@@ -1383,6 +1387,7 @@
     else if (key === "checkout") { title = "Run on"; options = (project(c.project_id)?.checkouts || []).map((x) => [x.id, cardMachineName(x) + ((project(c.project_id)?.checkouts || []).length > 1 ? " · " + x.name : "")]); selected = c.checkout_id; }
     else if (key === "provider") { title = "Agent"; options = (S.data.harnesses || []).map((h) => [h.id, h.name]); selected = c.provider; }
     else if (key === "model") { title = "Model"; options = modelOpts((S.data.harnesses || []).find((h) => h.id === c.provider)); selected = c.model; }
+    else if (key === "publish") { title = "Publishing"; options = [["", `Board default (${publishLabel(board(c.board_id)?.publish) || "Manual"})`], ...PUBLISH_MODES]; selected = c.publish; }
     else if (key === "effort") { title = "Effort"; const m = (S.data.harnesses || []).find((h) => h.id === c.provider)?.models.find((x) => x.id === c.model); options = [["", "Default"], ...(m?.efforts || []).map((e) => [e, e[0].toUpperCase() + e.slice(1)])]; selected = c.effort; }
     showDialog(title, options, selected, (v) => {
       if (key === "project") { c.project_id = v; c.board_id = (S.data.boards || []).find((b) => b.project_id === v)?.id || ""; c.checkout_id = project(v)?.checkouts?.[0]?.id || ""; }
@@ -1717,6 +1722,7 @@
       case "submit-repo": submitRepository(); break;
       case "new-board": newBoard(id); break;
       case "board-review": if (S.repo?.kind === "board") { S.repo.review = !S.repo.review; render(); } break;
+      case "board-publish": if (S.repo?.kind === "board") showDialog("Publishing", PUBLISH_MODES, S.repo.publish, (v) => { S.repo.publish = v; render(); }); break;
       case "ssh-copy": sshCopy(); break;
       case "ssh-test": sshTest(); break;
       case "gw-enroll": gatewayEnroll(); break;
@@ -1749,7 +1755,7 @@
   function openMenu(el) {
     const menu = el.dataset.menu, id = el.dataset.id;
     if (menu === "card" || menu === "conversation") { const c = conv(id); if (!c) return; showMenu(el, [...(menu === "conversation" ? [{ id: "changes", label: "Changes", icon: "difference", onClick: () => push({ kind: "pane", id, pane: "changes" }) }, { id: "files", label: "Files", icon: "folder", onClick: () => push({ kind: "tool", page: "files", cardId: id, projectId: c.project_id }) }, { id: "refresh", label: "Refresh", icon: "refresh", onClick: () => { S.conv.id = null; syncConversation(); } }, "-"] : []), ...cardMenu(c)]); }
-    else if (menu === "board") { const b = board(id); const boards = (S.data.boards || []); showMenu(el, [{ title: "Switch board" }, ...boards.map((x) => ({ id: "b-" + x.id, label: x.name, sub: project(x.project_id)?.name, checked: x.id === id, onClick: () => { const st = stack(); S.stacks[S.tab] = st.map((r) => (r.kind === "board" ? { kind: "board", id: x.id } : r)); render(); } })), "-", { id: "new-board", label: "New board…", icon: "add", onClick: () => newBoard(b?.project_id) }, { id: "archived", label: "Archived cards", icon: "archive", onClick: () => snackbar("Archived cards are listed in the Dieter app.") }]); }
+    else if (menu === "board") { const b = board(id); const boards = (S.data.boards || []); showMenu(el, [{ title: "Switch board" }, ...boards.map((x) => ({ id: "b-" + x.id, label: x.name, sub: project(x.project_id)?.name, checked: x.id === id, onClick: () => { const st = stack(); S.stacks[S.tab] = st.map((r) => (r.kind === "board" ? { kind: "board", id: x.id } : r)); render(); } })), "-", { id: "publish", label: "Publishing…", sub: publishLabel(b?.publish), icon: "publish", onClick: () => showDialog("Publishing", PUBLISH_MODES, b?.publish || "manual", async (v) => { try { await api(`api/board/${id}/git`, { publish: v }); await refreshState(); snackbar(`New cards on ${b?.name || "the board"}: ${publishLabel(v).toLowerCase()}.`); } catch (e) { snackbar(e.message); } }) }, { id: "new-board", label: "New board…", icon: "add", onClick: () => newBoard(b?.project_id) }, { id: "archived", label: "Archived cards", icon: "archive", onClick: () => snackbar("Archived cards are listed in the Dieter app.") }]); }
     else if (menu === "schedule") { const d = S.sch?.detail?.[id]; const s = d?.schedule; if (!s) return; showMenu(el, [{ id: "run", label: "Run now", icon: "play_arrow", onClick: () => scheduleAction(id, "run", (r) => snackbar(r.run?.message ? `Run: ${r.run.message}` : "Run started")) },
       { id: "toggle", label: s.enabled ? "Pause" : "Resume", icon: s.enabled ? "pause" : "play_circle", onClick: () => scheduleAction(id, s.enabled ? "pause" : "resume") }, "-",
       { id: "delete", label: "Delete schedule", icon: "delete", destructive: true, onClick: () => { if (!confirm(`Delete the schedule "${s.name}"? Its cards and history stay.`)) return; scheduleAction(id, "delete", () => { const st = stack(); S.stacks[S.tab] = st.slice(0, -1); snackbar("Schedule deleted"); }); } }]); }

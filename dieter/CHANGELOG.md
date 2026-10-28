@@ -2,6 +2,20 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.38 (2026-10-28)
+
+- GitHub CLI for the daemon and the agents: `gh` 2.103.3 is in the image, signed in at start with the
+  `github_token` option (`/data/.config/gh/hosts.yml`; git takes the token from gh instead of
+  `/data/.git-credentials`, which is removed; without `gh` or network the plain store stays). Dieter's own
+  pull-request operations (`create_pr`, `refresh_pr`, `merge_pr`, until now "GitHub CLI is not installed on the
+  daemon host") work, and agents read checks and Actions runs and edit pull requests. The Claude Code note in
+  `CLAUDE.md` (replaced only while unedited) explains the expected use. The token needs Pull requests
+  read/write and Actions read on top of Contents, see the Documentation tab.
+- Publishing mode (Dieter's remote publish mode: manual, pull request, push to base) on the page: New board sets
+  it, a board's ⋮ menu → **Publishing…** changes it (`POST /api/board/ID/git`), New task → New worktree →
+  **Publishing** overrides it for the card. New task now also passes the Access switches (vault, mail) and the
+  base branch to the card, which it had silently dropped.
+
 ## 0.6.429.37 (2026-10-28)
 
 - Push notifications open their own task: the Home Assistant package now links each push to

@@ -17,7 +17,8 @@ ARG NODE_VERSION=22.23.4
 
 # glibc base (musl breaks the OMP harness; trixie for Python 3.13, which hass-cli needs); git, tmux and
 # python3 for the daemon and the bridge, openssh-client for Git over SSH and for reaching other machines
-# with the add-on's key (/data/.ssh), python3-venv for hass-cli
+# with the add-on's key (/data/.ssh), python3-venv for hass-cli; the GitHub CLI (below) for the daemon's
+# pull-request operations and the agents
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git tmux python3 python3-venv xz-utils procps openssh-client \
     && rm -rf /var/lib/apt/lists/*
@@ -66,6 +67,22 @@ RUN set -eu; \
     tar -xzf /tmp/agy.tar.gz -C /tmp antigravity && install -m 755 /tmp/antigravity /usr/local/bin/agy; \
     rm -f /tmp/agy.tar.gz /tmp/antigravity; \
     claude --version && codex --version && agy --version
+
+# GitHub CLI: the daemon's pull-request operations (create_pr, refresh_pr, merge_pr) need `gh` on the host, and
+# the agents read checks, Actions runs and pull requests with it. The bridge signs it in with the github_token
+# option (HOME=/data) and lets git take the token from it. Release tarball, sha256 from the release's checksums.
+ARG GH_VERSION=2.103.3
+RUN set -eu; \
+    case "${BUILD_ARCH}" in \
+      aarch64) G=arm64; GSHA=ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63 ;; \
+      amd64)   G=amd64; GSHA=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d ;; \
+    esac; \
+    curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${G}.tar.gz"; \
+    echo "${GSHA}  /tmp/gh.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/gh.tar.gz -C /tmp "gh_${GH_VERSION}_linux_${G}/bin/gh"; \
+    install -m 755 "/tmp/gh_${GH_VERSION}_linux_${G}/bin/gh" /usr/local/bin/gh; \
+    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${G}"; \
+    gh --version
 
 # hass-cli for the agents (REST API of HA core; the bridge sets HASS_SERVER to the Supervisor's core
 # proxy and HASS_TOKEN to the add-on's token, homeassistant_api in config.yaml). PyPI, version-pinned.

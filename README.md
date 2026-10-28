@@ -20,7 +20,7 @@ repository.yaml   add-on repository metadata
 dieter/           the add-on
   config.yaml       metadata, Ingress on 8099, options/schema, image: (prebuilt image)
   Dockerfile        HA Debian base image (multi-arch), node 22 + dieter (sha256-pinned, cosign-verified release), claude 2.1.311,
-                    codex 0.163.0, agy 1.4.8 (Antigravity), git, tmux, python3; bridge in /opt/bridge
+                    codex 0.163.0, agy 1.4.8 (Antigravity), gh 2.103.3, git, tmux, python3; bridge in /opt/bridge
   run.sh            entry point (exec the bridge, which runs the daemon)
   apparmor.txt      AppArmor profile (Docker's default capabilities, no mounts)
   bridge/           the bridge and page (dieter_bridge.py: REST + SSE API, Ingress, /api/ha)
