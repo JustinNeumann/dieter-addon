@@ -2,6 +2,10 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.33 (2026-10-28)
+
+- Chats are sorted newest first (by last activity), in the Pinned section and inside each project group.
+
 ## 0.6.429.31 (2026-10-28)
 
 - New board, as in the Dieter app: the project's ⋮ menu (Projects list and project page) and the board's ⋮ menu
