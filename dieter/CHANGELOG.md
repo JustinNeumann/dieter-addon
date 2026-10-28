@@ -2,6 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.39 (2026-10-28)
+
+- Tools → Machines: a machine's screen showed the add-on host's own system and load figures (Cortex-A76,
+  4 cores, 8 GB) for every machine. It now asks for that machine's telemetry (`GET /api/machine/ID/info`,
+  `dieter machine info ID`, refreshed every 20 s while open), so the workstation shows its own CPU, memory,
+  storage and GPU. The route caption no longer reads "loopback": a daemon's loopback address is of no use to
+  anyone else, so a machine without a LAN or Tailscale candidate shows "relay", which is how the apps and
+  the add-on reach it.
+
 ## 0.6.429.38 (2026-10-28)
 
 - GitHub CLI for the daemon and the agents: `gh` 2.103.3 is in the image, signed in at start with the

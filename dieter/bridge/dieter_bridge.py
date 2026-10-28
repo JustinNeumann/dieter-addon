@@ -28,6 +28,7 @@ Endpoints:
   GET  /api/{card|chat}/ID/image?path=REL   an image file of the checkout (the page shows Markdown ![](path) of a reply)
   GET  /api/{card|chat}/ID/tool-image?message=M&tool=T&i=N   N-th image in a tool call's output (Read of a PNG, screenshots)
   GET  /api/machines          enrolled machines (also part of /api/state)
+  GET  /api/machine/ID/info   live host telemetry of one enrolled machine (`dieter machine info ID`)
   GET  /app.css, /app.js      the page's assets
   POST /api/card              create {project, board, title, prompt, provider, model, effort, workspace, branch?, base?, publish?, vault?, mail?, lane, attachments?}
                               without a title: --auto-title, or with Settings → Ollama (HA) renamed in the background (title_entity)
@@ -275,6 +276,17 @@ def norm_machine(m):
         "uptime_s": int(m.get("uptimeSeconds") or 0), "gpu": gpu, "daemon_version": (m.get("daemonBuild") or {}).get("releaseVersion"),
         "collected_at": m.get("collectedAt"),
     }
+
+
+def machine_info(mid):
+    """Telemetry of one enrolled machine. The local daemon's own figures come from the slow poll (already
+    collected, no CLI round trip); any other machine is asked through the gateway."""
+    if mid in ("local", local_daemon_info()[0]):
+        return STATE.slow.get("machine") or {"error": "no telemetry yet"}
+    try:
+        return norm_machine(run(["machine", "info", mid], timeout=20)) or {"error": "no telemetry"}
+    except CliError as e:
+        return {"error": str(e)}
 
 
 DIAG_NOISE = re.compile(r"\s*HarnessAgent: `sandbox` is deprecated\. Supply `sandboxSession` to createSession\(\) instead\.\s*")
@@ -2068,7 +2080,7 @@ class State:
             ml = run(["machine", "list", "--format", "json"], timeout=20) or {}
             machines = [{"id": d.get("id"), "name": d.get("name"), "online": bool(d.get("online")), "last_seen_at": d.get("lastSeenAt"),
                          "version": d.get("releaseVersion"),
-                         "route": ", ".join(sorted({c.get("network", "") for c in d.get("directCandidates", []) or []} - {""})) or None}
+                         "route": ", ".join(sorted({c.get("network", "") for c in d.get("directCandidates", []) or []} - {"", "loopback"})) or "relay"}
                         for d in unwrap(ml, "daemons")]
         except CliError as e:
             machines = []
@@ -2325,6 +2337,8 @@ class Handler(BaseHTTPRequestHandler):
             if parts[1:] == ["machines"]:
                 rev, data = STATE.snapshot()
                 return self.send_json({"machines": data.get("machines", [])})
+            if len(parts) == 4 and parts[1] == "machine" and parts[3] == "info":
+                return self.send_json(machine_info(parts[2]))
             if len(parts) == 4 and parts[1] == "project" and parts[3] == "changes":
                 return self.send_json({"raw": changeset(None, parts[2])})
             if parts[1:] == ["schedules"]:
