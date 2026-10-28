@@ -44,7 +44,11 @@ Caveat on this Pi: the scheduled `sync_from_github.sh` resets `/config` from the
 Dieter itself is the fork release `vX.Y.Z-antigravity.N` of `JustinNeumann/dieter` (workflow "Fork server
 release", triggered by pushing such a tag on a branch that carries the Antigravity adapter). Bumping it
 means: new `DIETER_VERSION`, `DIETER_COMMIT`, tarball checksums from its `SHA256SUMS` and the runtime
-sources checksum in `dieter/Dockerfile`, the two archive checksums in `dieter/bridge/dieter_bridge.py`.
+sources checksum in `dieter/Dockerfile`, the two archive checksums in `dieter/bridge/dieter_bridge.py`,
+and `dieter/patches/patch_runtime.py`: it replaces the fork's `antigravity-runtime.mjs` with the add-on's
+copy and fails the build when the fork's file no longer has the recorded sha256, so changes of the fork's
+adapter get merged into `dieter/patches/antigravity-runtime.mjs` (then record the new hash). Run
+`dieter/tests/unit.sh` (needs a staged runtime's `node_modules`) after touching the adapter.
 The sources checksum is computed from the fork checkout at the tag:
 
 ```bash

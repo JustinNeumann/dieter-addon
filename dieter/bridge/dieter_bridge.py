@@ -649,8 +649,14 @@ def seed_managed_bun():
     log(f"harness: managed Bun {version} seeded in {final}")
 
 
+ANTIGRAVITY_HOST_TOOLS = ["/usr/local/bin/node", os.path.join(RUNTIME_SRC, "antigravity-host-tools.mjs")]
+
+
 def setup_antigravity():
-    """Antigravity CLI credentials from the option (the JSON of ~/.gemini/antigravity-cli/antigravity-oauth-token)."""
+    """Antigravity CLI credentials from the option (the JSON of ~/.gemini/antigravity-cli/antigravity-oauth-token),
+    and the MCP server through which agy reaches Dieter's host tools (present_content, background processes):
+    the runtime's Antigravity adapter serves a turn's tools to the stdio proxy antigravity-host-tools.mjs, which
+    `agy mcp add` registers once in agy's global config (~/.gemini/config/mcp_config.json; add-or-update)."""
     tok = (OPTS.get("antigravity_token") or "").strip()
     if not tok:
         return
@@ -658,6 +664,13 @@ def setup_antigravity():
     with open(os.open(ANTIGRAVITY_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
         f.write(tok if tok.endswith("\n") else tok + "\n")
     log("env: Antigravity credentials installed")
+    if not os.path.exists(ANTIGRAVITY_HOST_TOOLS[1]):
+        return
+    r = subprocess.run(["agy", "mcp", "add", "dieter", *ANTIGRAVITY_HOST_TOOLS], capture_output=True, text=True, timeout=60)
+    if r.returncode:
+        log("env: registering the Antigravity host tools MCP server failed:", (r.stderr or r.stdout).strip())
+    else:
+        log("env: Antigravity host tools MCP server registered")
 
 
 QUOTA_CACHE = {}   # provider -> {"at", "gen", "item"} of the local probes

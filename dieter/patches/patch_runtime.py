@@ -1,23 +1,43 @@
 #!/usr/bin/env python3
-"""Patches applied to the fork's harness runtime sources at image build time (after the sha check).
+"""Changes to the fork's harness runtime sources at image build time (after the sha check of the sources).
 
-Each patch is an exact string replacement and fails the build when the pinned source no longer matches,
-so a new fork release has to be re-checked instead of silently skipping a patch.
-Drop a patch once the fork release contains it.
+Two kinds, both pinned to the fork release so a new release has to be re-checked instead of silently
+keeping or skipping a change:
+- OVERRIDES: files in this directory that replace a fork file; the build fails when the fork's file no
+  longer has the recorded sha256 (its changes would have to be merged into the add-on's copy).
+- PATCHES: exact string replacements; the build fails when the pinned source no longer matches.
+Files in ADDITIONS exist only in the add-on and are copied alongside.
+Drop an entry once the fork release contains it.
+
+Usage: patch_runtime.py <runtime sources dir>
 """
+import hashlib
+import os
+import shutil
 import sys
 
-PATCHES = {
-    # agy model ids carry their reasoning level (gemini-3.8-flash-high, claude-opus-5-5-low, ...) and agy rejects
-    # every --effort that differs from that suffix ("--model X conflicts with --effort=xhigh"), but Dieter
-    # offers low..max for all Antigravity models. A model with a level suffix is run without --effort.
-    "antigravity-runtime.mjs": (
-        '          if (effort) args.push("--effort", effort);\n',
-        '          if (effort && !/-(low|medium|high)$/.test(turn.model || "")) args.push("--effort", effort);\n',
-    ),
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# The add-on's Antigravity adapter (host tools over MCP, per-step usage, /compact, lost-conversation
+# recovery, the --effort fix) replaces the fork's; sha256 of the fork's file at DIETER_COMMIT.
+OVERRIDES = {
+    "antigravity-runtime.mjs": "e5284a82635a9ffd8db13ec4827ff290d6809cf8654e77fbe70a875b287068eb",
 }
+# The stdio MCP proxy agy launches to reach the host tools of a turn (see antigravity-runtime.mjs).
+ADDITIONS = ["antigravity-host-tools.mjs"]
+PATCHES = {}
 
 root = sys.argv[1]
+for name, expected in OVERRIDES.items():
+    path = f"{root}/{name}"
+    actual = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    if actual != expected:
+        sys.exit(f"patch_runtime: {name}: the fork's file changed (sha256 {actual}); merge it into the add-on's copy")
+    shutil.copyfile(f"{HERE}/{name}", path)
+    print(f"replaced {name}")
+for name in ADDITIONS:
+    shutil.copyfile(f"{HERE}/{name}", f"{root}/{name}")
+    print(f"added {name}")
 for name, (old, new) in PATCHES.items():
     path = f"{root}/{name}"
     text = open(path, encoding="utf-8").read()

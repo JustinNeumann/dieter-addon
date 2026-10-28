@@ -2,6 +2,26 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.25 (2026-10-28)
+
+- Antigravity harness, now the add-on's own copy of the fork's adapter (`patches/antigravity-runtime.mjs`,
+  laid over the pinned fork sources at image build; the build fails when the fork's file changes so the
+  two get merged), with unit tests (`tests/unit.sh`):
+  - **Host tools**: present_content and the background process tools work with Antigravity. The adapter
+    serves a turn's tools on a private local endpoint, and `agy` reaches them as the MCP server `dieter`
+    (stdio proxy `antigravity-host-tools.mjs`, registered by the bridge with `agy mcp add` at start; it
+    offers no tools outside a Dieter turn). agy's own `call_mcp_tool` step and its read of the tool
+    schema are not shown twice.
+  - **Context usage**: each model request reports its own usage (`finish-step`), so the context shown for a
+    running turn is the request's input (e.g. 7 k tokens) instead of the sum of all requests of the turn
+    (which grew to 20–30 k within a few steps). The turn total stays the sum.
+  - **Compaction**: Dieter's compaction runs agy's own `/compact` on the stored conversation.
+  - **Lost conversation**: when agy no longer has the stored conversation (it warns `conversation … not
+    found` and would silently start a fresh one without Dieter's instructions), the turn restarts in a
+    fresh conversation with the instructions and says so in the chat.
+  - agy's `system_message` and `checkpoint` steps are no longer passed through as raw events.
+  - The `--effort` fix of 0.6.429.12 is part of the copy (the string patch is gone).
+
 ## 0.6.429.24 (2026-10-28)
 
 - Bundled Dieter is now the fork release `0.6.429-antigravity.4`: after **Re-enroll** (a new enrollment under

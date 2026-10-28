@@ -31,7 +31,7 @@ not be root anyway.
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the bridge on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR`; staged runtimes of earlier versions are removed, and the Bun it carries is installed as the daemon's managed Bun (`/data/dieter/runtime/tools/bun/<bun version>`), which Oh My Pi's model discovery would otherwise download the whole archive for |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |
 | `hass-cli` 1.0.0 (HA core REST API) | `/usr/local/bin`; authenticated with the add-on's token, see below |
-| runtime sources of the same build (`/opt/dieter-runtime`, from the fork tag, checksum-verified) | `runner.mjs` + adapters incl. **Antigravity**, laid over the archive's `node_modules` |
+| runtime sources of the same build (`/opt/dieter-runtime`, from the fork tag, checksum-verified) | `runner.mjs` + adapters, laid over the archive's `node_modules`; the **Antigravity** adapter is the add-on's own copy (`patches/antigravity-runtime.mjs`, laid over the fork's at image build by `patches/patch_runtime.py`) |
 | project checkouts | `/data/projects/<name>` |
 
 Reads and writes to the bridge are accepted only from the Supervisor network (Ingress forwards
@@ -98,8 +98,12 @@ The harnesses run inside the container, so they need their own credentials:
   The bridge installs it in the add-on's own home so `agy` finds it there. The Antigravity harness runs one headless
   `agy` per turn with `--dangerously-skip-permissions` (Dieter's allow-all mode), continued with
   `--conversation`. Default model Gemini 3.8 Flash (High); Gemini 4 Argon, Claude Opus/Sonnet 5.5 and
-  GPT-OSS are selectable. Not available through the CLI: host tools (present_content, processes),
-  suspend/continue and compaction. Its quota (`agy --print=/quota`) comes in groups whose models share a
+  GPT-OSS are selectable. Dieter's host tools (present_content, the background process tools) reach `agy`
+  as the MCP server `dieter` that the bridge registers in agy's config (`agy mcp add dieter …`, kept in
+  `/data/.gemini/config/mcp_config.json`): the stdio proxy `/opt/dieter-runtime/antigravity-host-tools.mjs`
+  forwards calls to the harness worker of the running turn and offers no tools outside one. Compaction
+  runs agy's own `/compact`. Not available through the CLI: suspend/continue, messages into a running
+  turn and image input (attachments are handed over as files). Its quota (`agy --print=/quota`) comes in groups whose models share a
   weekly and a 5-hour window (Gemini Flash/Pro; Claude and GPT-OSS; Gemini 4 Argon): **Tools → Usage** shows
   each window with the models it covers, the model pickers show the share left for each model.
 
