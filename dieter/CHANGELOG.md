@@ -2,6 +2,24 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.41 (2026-10-28)
+
+- Faster page. The bridge polled the daemon every 8 s with nine `dieter` calls one after the other (~7 s on a
+  Pi 5 with three projects), and every action (move, start, rename, archive, send, stop, create) waited for such a
+  full poll before it answered: a change reached the page after 8–20 s, a click took 7–19 s. Now the bridge follows
+  the daemon's change stream (`dieter watch changes`) and polls right after a change, with the calls in parallel and
+  one `chat list` for all projects instead of one per project (~1–1.5 s); the timed poll is a 30 s safety net (8 s
+  while the stream is down). A change reaches the page in about a second. Move, start, rename and archive show at
+  once and answer in under 0.1 s, send and stop no longer wait for a poll, creating waits for one fresh poll. A card
+  summary whose only news is its activity time does not count as a change (a running agent bumps it every few
+  seconds). Machines, quota and harnesses are polled on their own thread, so a slow quota probe (up to a minute) no
+  longer holds up the board.
+- Conversation of a running agent: after the first complete conversation the stream sends only what changed
+  (`GET /api/{card|chat}/ID/stream?delta=1`, event `delta`): changed fields, new messages, and of a message the page
+  already has the parts from the first changed one. A busy agent's conversation sent ~36 MB in 40 s (the whole
+  ~200 KB conversation about three times a second, each parsed and drawn by the phone), now ~1 MB. Pages from
+  before the update keep getting complete conversations.
+
 ## 0.6.429.40 (2026-10-28)
 
 - Board: the lanes stand side by side only when all of them fit the screen (at least 240 px each). Otherwise
