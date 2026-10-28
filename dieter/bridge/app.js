@@ -521,6 +521,7 @@
     }
     if (page === "schedules") return schedulesScreen(route, opts);
     if (page === "devices") return devicesScreen(route, opts);
+    if (page === "settings") return settingsScreen(route, opts);
     if (page === "files") {
       const projects = S.data.projects || [];
       const pid = route.projectId || (projects.length === 1 ? projects[0].id : null);
@@ -532,7 +533,7 @@
     }
     const copy = { terminals: ["terminal", "No terminals", "Open a shell on a machine from the Dieter app."], screens: ["desktop_windows", "No screens", "Screen sharing is unavailable on this machine."],
       files: ["folder", "Files", "Browse a project's checkout in the Dieter app."], schedules: ["calendar_month", "No schedules", "Scheduled tasks run on a cron and appear here."],
-      devices: ["smartphone", "Devices", "Pair and approve devices in the Dieter app."], settings: ["settings", "Settings", "Prompt and daemon settings live in the Dieter app."] }[page] || [glyph, title, ""];
+      devices: ["smartphone", "Devices", "Pair and approve devices in the Dieter app."] }[page] || [glyph, title, ""];
     return `<div class="screen">${appbar({ title, back: opts.back })}<div class="content">${emptyState(...copy)}</div></div>`;
   }
   const resetsAt = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }); };
@@ -589,6 +590,35 @@
       body = banner + code + approve + waiting + list;
     }
     return `<div class="screen">${appbar({ title: "Devices", subtitle: d?.synced_at ? "Synced " + fmtWhen(d.synced_at) : "", back: opts.back, actions })}<div class="content" data-scroll="devices">${body}</div></div>`;
+  }
+  // ---- Settings: the bridge's own settings (/api/settings); prompt and daemon settings live in the Dieter app
+  function settingsScreen(route, opts) {
+    S.set ||= { data: undefined };
+    const d = S.set.data; if (d === undefined) loadSettings();
+    let body;
+    if (!d) body = spinnerCenter();
+    else if (d.error) body = `<div class="banner warning" style="margin-top:12px">${ico("error", 22)}<div><div class="t">Settings unavailable</div><div class="m">${esc(d.error)}</div></div></div>`;
+    else {
+      const cur = d.title_models.find((m) => m.id === d.title_model);
+      const fallback = cur && !cur.available ? sectionFooter(cur.detail) : "";
+      body = `${sectionHeader("Task titles")}<div class="group">${listRow({ title: "Title model", value: cur?.name || d.title_model, glyph: "title", tile: "#5E5CE6", act: "settings-pick", extra: `data-key="title_model"`, trailing: ico("expand_more", 20, "c-secondary") })}</div>
+        ${fallback || sectionFooter("Names tasks and chats created without a title. OpenAI: Dieter's auto-title. Ollama (HA): a local model through Home Assistant's AI Task; the task is saved under its first line and renamed a moment later.")}
+        ${sectionFooter("Prompt and daemon settings live in the Dieter app.")}`;
+    }
+    return `<div class="screen">${appbar({ title: "Settings", back: opts.back })}<div class="content" data-scroll="settings">${body}</div></div>`;
+  }
+  async function loadSettings() {
+    S.set.data = null;
+    try { S.set.data = await api("api/settings"); } catch (e) { S.set.data = { error: e.message }; }
+    render();
+  }
+  function settingsPick(key) {
+    const d = S.set?.data; if (!d || key !== "title_model") return;
+    showDialog("Title model", d.title_models.map((m) => [m.id, m.name, `<span class="${m.available ? "c-secondary" : "c-warning"}">${esc(m.detail)}</span>`]), d.title_model, async (v) => {
+      if (v === d.title_model) return;
+      try { S.set.data = await api("api/settings", { title_model: v }); } catch (e) { snackbar(e.message); }
+      render();
+    });
   }
   async function loadDevices() {
     S.dev.data = null;
@@ -1462,6 +1492,7 @@
         push({ kind: "tool", page: "files", projectId: r.projectId, cardId: r.cardId, path: dir ? el.dataset.path : r.path, file: dir ? undefined : el.dataset.path }); break; }
       case "files-hidden": S.showHidden = !S.showHidden; render(); break;
       case "schedule": { const r = top(); push({ kind: "tool", page: "schedules", scheduleId: id, projectId: r?.projectId }); break; }
+      case "settings-pick": settingsPick(el.dataset.key); break;
       case "dev-refresh": S.dev.data = undefined; render(); break;
       case "dev-approve": approveDevice(); break;
       case "dev-revoke": e.stopPropagation(); revokeDevice(id, el.dataset.name); break;

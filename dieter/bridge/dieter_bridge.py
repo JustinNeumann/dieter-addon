@@ -28,6 +28,7 @@ Endpoints:
   GET  /api/machines          enrolled machines (also part of /api/state)
   GET  /app.css, /app.js      the page's assets
   POST /api/card              create {project, board, title, prompt, provider, model, effort, workspace, lane, attachments?}
+                              without a title: --auto-title, or with Settings → Ollama (HA) renamed in the background (title_entity)
   POST /api/chat              create {project, title, prompt, provider, model, effort}
   POST /api/{card|chat}/ID/send   {message, model?, effort?, attachments?: [upload id]}
   POST /api/upload            raw file body (Content-Type, X-Filename) -> {id, name, size}; up to 20 MB, kept until sent
@@ -40,6 +41,8 @@ Endpoints:
                               {folder}  new empty Git repository /data/projects/<folder> (existing folder adopted)
   POST /api/focus             {id}   remember which card the next page load should open (push deep link)
   GET  /api/focus?consume=1   {id|null} and forget it (valid 15 min)
+  GET  /api/settings          {title_model, title_models: [{id, name, available, detail}]}
+  POST /api/settings          {title_model: openai|ollama}  who titles cards created without a title
   GET  /api/claude/login      add-on only: state of a running `claude auth login` {running, url, done, auth}
   POST /api/claude/login      start the sign-in; returns the link the user opens on claude.com
   POST /api/claude/login/code {code}  hand the code from claude.com to the CLI; writes /data/.claude/.credentials.json
@@ -323,6 +326,134 @@ def ha_event(name, data):
         urllib.request.urlopen(rq, timeout=10).read()
     except Exception as e:
         log("ha event", name, e)
+
+
+def ha_api(path, body, timeout=10):
+    """POST to HA core's REST API through the Supervisor; returns the response text."""
+    rq = urllib.request.Request(f"{SUPERVISOR}/core/api/{path}", data=json.dumps(body).encode(),
+                                headers={"Authorization": f"Bearer {SUPERVISOR_TOKEN}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(rq, timeout=timeout) as r:
+        return r.read().decode()
+
+
+# Task titles. Settings → Task titles picks who titles a card or chat created without a title:
+#   "openai" (default): the daemon's --auto-title (saved at once, GPT Spark improves the title);
+#   "ollama": saved at once under the first line of its task and renamed in the background with a title from
+#   HA's AI Task (ai_task.generate_data) of the Ollama integration, whose first available ai_task entity is
+#   looked up again every TITLE_DETECT_TTL_S, so an integration added later is picked up. Without such an
+#   entity the daemon's --auto-title applies.
+SETTINGS_FILE = os.environ.get("BRIDGE_SETTINGS_FILE", "/data/bridge_settings.json" if ADDON else os.path.expanduser("~/.config/dieter-bridge/settings.json"))
+TITLE_MODELS = {"openai": "OpenAI", "ollama": "Ollama (HA)"}
+TITLE_DETECT_TTL_S = 600
+TITLE_TIMEOUT_S = 120                             # a cold Ollama loads the model first
+TITLE_MAX = 80
+TITLER = {"entity": None, "at": 0}
+TITLE_SLOTS = threading.Semaphore(2)              # a burst of new cards must not queue up the model server
+TITLE_PENDING = {}                                # card/chat id -> provisional title, until renamed or edited
+
+
+def settings():
+    try:
+        d = json.load(open(SETTINGS_FILE))
+    except (OSError, ValueError):
+        d = {}
+    return {"title_model": d.get("title_model") if d.get("title_model") in TITLE_MODELS else "openai"}
+
+
+def settings_update(body):
+    cur = settings()
+    if "title_model" in body:
+        if body["title_model"] not in TITLE_MODELS:
+            raise ValueError("title_model: " + " or ".join(TITLE_MODELS))
+        cur["title_model"] = body["title_model"]
+        TITLER["at"] = 0                          # look the entity up again
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cur, f)
+    os.replace(tmp, SETTINGS_FILE)
+    return settings_view()
+
+
+def settings_view():
+    entity = ollama_entity()
+    return {**settings(), "title_models": [
+        {"id": "openai", "name": TITLE_MODELS["openai"], "available": True, "detail": "Dieter's auto-title (GPT Spark)"},
+        {"id": "ollama", "name": TITLE_MODELS["ollama"], "available": bool(entity),
+         "detail": entity or ("No AI Task entity of the Ollama integration found; OpenAI titles instead" if ADDON and SUPERVISOR_TOKEN
+                              else "Works in the Home Assistant add-on only")}]}
+
+
+def ollama_entity():
+    """First available ai_task entity of HA's Ollama integration (cached for TITLE_DETECT_TTL_S)."""
+    if not (ADDON and SUPERVISOR_TOKEN):
+        return None
+    if time.time() - TITLER["at"] > TITLE_DETECT_TTL_S:
+        TITLER["at"] = time.time()
+        try:
+            found = json.loads(ha_api("template", {"template": "{{ integration_entities('ollama') | select('match', 'ai_task\\\\.')"
+                                                                 " | reject('is_state', 'unavailable') | list | tojson }}"}))
+        except Exception as e:
+            found = []
+            log("title: ollama lookup", e)
+        entity = found[0] if found else None
+        if entity != TITLER["entity"]:
+            log("title: ollama ai task", entity or "none")
+        TITLER["entity"] = entity
+    return TITLER["entity"]
+
+
+def title_entity():
+    """The AI Task entity that titles new cards, or None when the daemon's --auto-title does."""
+    return ollama_entity() if settings()["title_model"] == "ollama" else None
+
+
+def first_line_title(prompt):
+    """Provisional title: the task's first non-empty line, cut at a word boundary."""
+    line = next((l for l in prompt.splitlines() if l.strip()), "")
+    line = re.sub(r"\s+", " ", line.strip().lstrip("#>*- ").strip())
+    if len(line) <= TITLE_MAX:
+        return line or "New task"
+    cut = line[:TITLE_MAX + 1].rsplit(" ", 1)[0]
+    return (cut if len(cut) >= TITLE_MAX // 2 else line[:TITLE_MAX]).rstrip(" ,;:-")
+
+
+def clean_title(text):
+    line = next((l for l in str(text or "").splitlines() if l.strip()), "")
+    line = re.sub(r"^\s*(title|titel)\s*:\s*", "", line.strip(), flags=re.I)
+    line = re.sub(r"\s+", " ", line.strip(" \"'`*#„“”‚‘’«»")).rstrip(" .")
+    return line[:TITLE_MAX].strip() or None
+
+
+def ai_title(entity, prompt):
+    instructions = ("Write a short title for the task below, as a task list would show it: at most 8 words, no quotes, "
+                    "no trailing period. Write the title in the same language as the task: a German task gets a German "
+                    "title, an English task an English one. Reply with the title only.\n\nTask:\n"
+                    + prompt.strip()[:4000])
+    res = json.loads(ha_api("services/ai_task/generate_data?return_response",
+                            {"entity_id": entity, "task_name": "Dieter task title", "instructions": instructions},
+                            timeout=TITLE_TIMEOUT_S))
+    return clean_title(((res or {}).get("service_response") or {}).get("data"))
+
+
+def retitle(kind, cid, prompt, entity):
+    """Background: rename a card/chat created under its provisional title, unless someone renamed it meanwhile."""
+    try:
+        with TITLE_SLOTS:
+            title = ai_title(entity, prompt)
+        provisional = TITLE_PENDING.get(cid)
+        if not title or provisional is None or title == provisional:
+            return
+        cur = run([kind, "show", cid], timeout=15) or {}
+        if ((cur.get(kind) if isinstance(cur, dict) else None) or {}).get("title") != provisional:
+            return
+        run([kind, "rename", "--title", title, cid], timeout=30, parse=False)
+        log("title:", cid, repr(title))
+        STATE.poll_fast()
+    except Exception as e:
+        log("title:", cid, entity, e)
+    finally:
+        TITLE_PENDING.pop(cid, None)
 
 
 # --------------------------------------------------------------------------- daemon (add-on only)
@@ -1862,6 +1993,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"rev": rev, **data})
             if parts[1:] == ["ha"]:
                 return self.send_json(self.ha_summary())
+            if parts[1:] == ["settings"]:
+                return self.send_json(settings_view())
             if parts[1:] == ["focus"]:
                 fid = FOCUS["id"] if FOCUS["id"] and time.time() - FOCUS["at"] < FOCUS_TTL_S else None
                 if q.get("consume", ["0"])[0] == "1":
@@ -1947,6 +2080,8 @@ class Handler(BaseHTTPRequestHandler):
                     res = add_project(body.get("git_url") or "", body.get("name") or "", body.get("branch") or "")
                 STATE.poll_fast()
                 return self.send_json(res)
+            if parts[1:] == ["settings"]:
+                return self.send_json(settings_update(body))
             if parts[1:] == ["focus"]:
                 fid = str(body.get("id") or "").strip()
                 if not fid.startswith("c_"):
@@ -2006,6 +2141,8 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "update":
                     title = (body.get("title") or "").strip()
                     prompt = body.get("prompt")
+                    if title:
+                        TITLE_PENDING.pop(cid, None)          # the user's title wins over a pending model title
                     if not title and prompt is None:
                         return self.send_json({"error": "title or prompt required"}, 400)
                     if kind == "chat":
@@ -2061,8 +2198,10 @@ class Handler(BaseHTTPRequestHandler):
             if not b.get("board"):
                 raise ValueError("board required")
             args += ["--board", b["board"], "--lane", "running" if b.get("start", True) else "todo"]
-        if b.get("title"):
-            args += ["--title", b["title"]]
+        title = str(b.get("title") or "").strip()
+        entity = None if title else title_entity()
+        if title or entity:
+            args += ["--title", title or first_line_title(b["prompt"])]
         else:
             args += ["--auto-title"]
         for k in ("provider", "model", "effort", "branch", "checkout"):
@@ -2075,9 +2214,13 @@ class Handler(BaseHTTPRequestHandler):
             out = run(args, timeout=120)
         finally:
             upload_forget(files)
-        STATE.poll_fast()
         c = out.get("card") if isinstance(out, dict) and "card" in out else out
-        return {"ok": True, "id": (c or {}).get("id"), "card": norm_card(c or {}, kind)}
+        cid = (c or {}).get("id")
+        if entity and cid:
+            TITLE_PENDING[cid] = first_line_title(b["prompt"])
+            threading.Thread(target=retitle, args=(kind, cid, b["prompt"], entity), daemon=True).start()
+        STATE.poll_fast()
+        return {"ok": True, "id": cid, "card": norm_card(c or {}, kind)}
 
     def card_project(self, cid):
         rev, data = STATE.snapshot()

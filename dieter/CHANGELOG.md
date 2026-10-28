@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.20 (2026-10-28)
+
+- Tools → Settings now has a **Title model** choice for tasks and chats created without a title:
+  *OpenAI* (default, Dieter's auto-title as before) or *Ollama (HA)*, a short summary of the task from a
+  local model through Home Assistant's AI Task. The bridge finds the Ollama integration's AI Task entity
+  by itself (`integration_entities('ollama')`); the task is saved at once and renamed in the background,
+  and a title changed in the meantime is kept. Stored in `/data/bridge_settings.json`.
+
 ## 0.6.429.19 (2026-10-28)
 
 - Devices no longer lists removed devices. The roster keeps every revoked device (flag `revoked`), so an

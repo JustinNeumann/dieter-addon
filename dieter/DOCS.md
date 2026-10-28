@@ -174,6 +174,24 @@ should reach, for example a Git remote over SSH or another machine with the Diet
 host key, later ones verify it). The test runs `ssh -o BatchMode=yes <target> uname -n` and prints
 the host name on success.
 
+## Task titles
+
+Tools → Settings → **Title model** picks who names a task or chat created without a title (the page's
+New task with an empty title field, the `dieter_create_task` rest_command without `title`):
+
+- **OpenAI** (default): Dieter's own `--auto-title`; the task is saved under its first line and GPT
+  Spark improves the title (with OpenAI configured, otherwise the first line stays).
+- **Ollama (HA)**: a local model through Home Assistant's AI Task. The bridge saves the task under its
+  first line and renames it a moment later with the model's short summary (`ai_task.generate_data`,
+  same language as the task). It finds the model by itself: the first available `ai_task` entity of the
+  [Ollama integration](https://www.home-assistant.io/integrations/ollama/) (add an *AI Task* entry to
+  the integration if it has only a conversation agent), looked up again every 10 minutes; the dialog
+  shows the entity it found. Without one, OpenAI titles instead. If the model fails or takes longer
+  than 2 minutes the first line stays; a title you change in the meantime is kept.
+
+The choice is stored in `/data/bridge_settings.json`. Tasks that agents create with the `dieter` CLI do
+not pass the bridge and keep Dieter's own title.
+
 ## Home Assistant from the agent
 
 The agents can drive Home Assistant core with `hass-cli` (REST API through the Supervisor's proxy,
