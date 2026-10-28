@@ -2,6 +2,10 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.30 (2026-10-28)
+
+- The check badge on a conversation's project avatar (done and unread rows) is green instead of grey.
+
 ## 0.6.429.29 (2026-10-28)
 
 - The chat shows images from the agent. Tool calls whose output carries an image (Claude Code's Read of an

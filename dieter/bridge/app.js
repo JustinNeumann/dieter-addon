@@ -357,7 +357,7 @@
       : active ? `<span class="spill">${ico(i.kind === "FAILED" ? "warning" : i.needsYou ? "chat_bubble" : i.kind === "REVIEW" ? "visibility" : "check", 14)}<span class="ellipsis">${esc(i.detail)}</span></span>`
       : `<div class="txt clamp2">${esc(i.detail)}</div>`;
     return `<div class="inbox-row ${first ? "first" : ""} ${active ? "active" : ""} ${sel ? "selected" : ""}" style="--tint:${tint};--status:${tint};--ring:${sel ? "var(--accent-container)" : "var(--cell)"}" data-act="open" data-id="${c.id}">
-      <div class="in"><div class="av">${av}<span class="ring">${i.kind === "RUNNING" ? `<span class="livedot s14" style="color:${tint}"></span>` : `<span class="bd">${badgeIcon ? ico(badgeIcon, 9) : ""}</span>`}</span></div>
+      <div class="in"><div class="av">${av}<span class="ring">${i.kind === "RUNNING" ? `<span class="livedot s14" style="color:${tint}"></span>` : `<span class="bd"${badgeIcon === "check" ? ` style="background:var(--success)"` : ""}>${badgeIcon ? ico(badgeIcon, 9) : ""}</span>`}</span></div>
       <div class="main"><div class="hd"><div class="ttl clamp2 ${i.kind === "RECENT" ? "recent" : ""}">${esc(cardTitle(c))}</div><div class="age ${i.needsYou ? "need" : ""}">${activityAge(i.at)}</div>
         <button class="pin ${i.pinned ? "on" : ""}" data-act="pin" data-id="${c.id}" title="${i.pinned ? "Unpin from inbox" : "Pin in inbox"}">${ico("push_pin", 16)}</button></div>
       <div class="ctx">${i.chat ? ico("chat_bubble", 13) : ""}<span class="ellipsis">${esc(ctx)}</span></div>
