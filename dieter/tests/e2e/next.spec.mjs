@@ -160,6 +160,19 @@ test("a deep link <HA>/app/<slug>/next/signin opens the new page's callback", as
   await expect.poll(() => page.evaluate(() => location.pathname)).toBe("/app/0123abcd_dieter/next/");
 });
 
+test("other deep links <HA>/app/<slug>/next/<route> become the page's ?route=", async ({ page }) => {
+  await page.goto("next/BUILD.json");
+  await page.evaluate(() => history.replaceState(null, "", "/app/0123abcd_dieter/next/card/c_123?x=1"));
+  await page.setContent('<iframe src="/api/hassio_ingress/t0ken/"></iframe>');
+  const frame = () => page.frames().find((f) => f !== page.mainFrame());
+  await expect.poll(() => frame()?.url(), { timeout: 20_000 }).toMatch(/\/t0ken\/next\/\?route=card%2Fc_123&x=1$/);
+  // the new page's own link back to the classic page does not bounce (referrer inside Ingress)
+  await frame().evaluate(() => { location.href = "../"; });
+  await expect.poll(() => frame()?.url(), { timeout: 20_000 }).toMatch(/\/t0ken\/$/);
+  await page.waitForTimeout(1500);
+  expect(frame().url()).toMatch(/\/t0ken\/$/);
+});
+
 test("agents cannot use the web host: private state, no answer without the secret", async () => {
   const sh = (cmd) => execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
   expect(sh("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8097/next/signin?code=a")).toBe("403");
