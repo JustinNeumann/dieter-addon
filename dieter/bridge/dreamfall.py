@@ -657,18 +657,25 @@ MAIL_HOWTO = ("You may mail the person (this card has mail access): write a Mark
               "```mermaid``` fence in the body is shown as a chart in Dieter Mail.")
 
 
+# Dieter's board instructions move a card to Review only once its pull request exists, so in a project without a
+# git remote a finished card stayed in Running (idle, "Running" on the page) for good.
+FINISH_HOWTO = ("When the work is committed and its checks pass, move this card to Review (`dieter card move <this card> "
+                "--lane review`). If the project has no git remote (`dieter workspace scm <this card>` says so), there is "
+                "no pull request to open: say so in your reply and move the card to Review anyway, do not leave it in Running.")
+
+
 def implementation_extras(p):
     """What a card picked for the person's stage carries besides the idea: the Dreamfall board's implementation
-    instructions (appended to its brief) and, with the mail switch on, mail access (`--mail`, fixed at creation)."""
+    instructions and how to finish (appended to its brief) and, with the mail switch on, mail access (`--mail`,
+    fixed at creation)."""
     text = str(p.get("implementation_instructions") or "").strip()
     mail = bool(p.get("implementation_mail"))
-    parts = []
-    if text or mail:
-        parts.append("## For every implementation on this Dreamfall board")
+    parts = ["## For every implementation on this Dreamfall board"]
     if text:
         parts.append(text)
     if mail:
         parts.append(MAIL_HOWTO)
+    parts.append(FINISH_HOWTO)
     return "\n\n".join(parts), (["--mail"] if mail else [])
 
 
@@ -857,26 +864,26 @@ def act(pid, b, actor_name="you", known=None):
 # --------------------------------------------------------------------------- the bridge's live cache
 class Cache:
     """Live view for the page: every Dreamfall record (one `dieter kv watch` subprocess) and the cards of the stage
-    boards. The project card lists stop at 200 cards and a busy pipeline outgrows that in a week, so the bridge reads
-    the stage boards itself: queue and Running on every round, the tails of Review and Done (the newest ideas there,
-    moves append at the end of a lane) once a minute or right after a change."""
+    boards. The project card lists stop at 200 cards and a busy pipeline outgrows that in a week, so the bridge lists
+    the project of a pipeline whole and hands it over (feed): every lane of the stage boards, of Review and Done the
+    newest ideas (moves append at the end of a lane). Changed cards come one by one (put_cards). The cache made no
+    `card list` calls of its own: in 0.6.429.42-.45 it listed every lane of every stage board every 10 s, and since the
+    daemon reads all card files for each list whatever its filters, that alone kept a Pi's daemon busy."""
     LANE_TAIL = 40          # newest released/transferred ideas per stage shown on the page
-    ROUND_S = 10
 
-    def __init__(self, norm_card, on_change, log=print):
+    def __init__(self, norm_card, on_change, on_boards=None, log=print):
         self.norm_card, self.on_change, self.log = norm_card, on_change, log
+        self.on_boards = on_boards or (lambda: None)   # the stage boards changed: list their project again
         self.lock = threading.Lock()
         self.records = {}           # key -> value (live)
         self.staging = None         # records of a watch snapshot that has not caught up yet
         self.caught_up = False
-        self.cards = {}             # board id -> {lane: (fetched at, [raw cards])}
-        self.dirty = threading.Event()
+        self.cards = {}             # board id -> {lane: (fetched at, [cards])}
         self.version = 0
         self.changed = threading.Condition(self.lock)
 
     def start(self):
         threading.Thread(target=self._watch, daemon=True, name="dreamfall-kv").start()
-        threading.Thread(target=self._boards, daemon=True, name="dreamfall-boards").start()
 
     # -- records
     def _watch(self):
@@ -906,6 +913,7 @@ class Cache:
     def _frame(self, frame):
         changed = False
         with self.lock:
+            boards = self._stage_boards()
             if frame.get("reset"):
                 self.staging = {}
             target = self.staging if self.staging is not None else self.records
@@ -925,9 +933,11 @@ class Cache:
             if changed and self.staging is None:
                 self.version += 1
                 self.changed.notify_all()
+            boards_changed = self.staging is None and self._stage_boards() != boards
         if changed and self.staging is None:
-            self.dirty.set()        # an agent moved ideas: read the stage boards again
             self.on_change()
+        if boards_changed:          # a pipeline appeared (also: the snapshot arrived after the first poll) or went
+            self.on_boards()
 
     def wait_for(self, key, test, timeout=4.0):
         """After a write through the bridge: wait until the watch delivered it (test(value) is true), so the next
@@ -957,73 +967,69 @@ class Cache:
             else:
                 self.records[key] = value
             self.version += 1
-        self.dirty.set()
         self.on_change()
 
     # -- stage boards
-    def _boards(self):
-        last_full = 0
-        while True:
-            self.dirty.wait(self.ROUND_S)
-            full = self.dirty.is_set() or time.time() - last_full > 60
-            self.dirty.clear()
-            try:
-                if self.refresh(full):
-                    self.on_change()
-                if full:
-                    last_full = time.time()
-            except Exception as e:
-                self.log(f"dreamfall: boards: {e!r}")
+    def _pipelines(self):
+        return [v for k, v in self.records.items() if k.startswith("p.") and isinstance(v, dict) and v.get("id")]
 
-    def refresh(self, full=True, only=None, boards=None):
-        """Read the stage boards' lanes (in parallel). full=False reads queue and Running only; only=a pipeline id
-        reads that pipeline's boards, boards= just these (after an action). Returns whether anything changed."""
-        pipes = [p for p in self.pipelines() if not only or p.get("id") == only]
-        known = {s["board_id"] for p in pipes for s in p.get("stages") or [] if s.get("board_id")}
-        targets = known & set(boards) if boards else known
-        jobs = [(bid, lane) for bid in targets for lane in ("todo", "running", "review", "done")
-                if full or lane in ("todo", "running") or not (self.cards.get(bid) or {}).get(lane)]
+    def _stage_boards(self):
+        return {s["board_id"] for p in self._pipelines() for s in p.get("stages") or [] if s.get("board_id")}
 
-        def read(job):
-            bid, lane = job
-            try:
-                out = cli(["card", "list", "--board", bid, "--lane", lane, "--format", "json", "--limit", "2000"], timeout=60)
-            except DfError as e:
-                self.log(f"dreamfall: card list {bid} {lane}: {e}")
-                return job, None
-            if isinstance(out, dict):
-                out = out.get("cards") or []
-            cards = [self.norm_card(c) for c in out or []]
-            if lane in ("review", "done"):
-                cards.sort(key=lambda c: parse_ts(c.get("phase_changed_at") or c.get("updated_at")))
-                cards = cards[-(self.LANE_TAIL + 20):]   # the page shows LANE_TAIL ideas; run cards sit there too
-            return job, cards
+    def stage_projects(self):
+        """The projects with stage boards: the bridge lists them whole and feeds their cards here."""
+        with self.lock:
+            return {p.get("project_id") for p in self._pipelines() if p.get("project_id")}
 
+    def feed(self, project_id, cards):
+        """Every card of a project as `card list` returned it (whole, see stage_projects): the lanes of its stage
+        boards are taken from it. Returns whether anything changed."""
         changed = False
-        if jobs:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(jobs))) as ex:
-                results = list(ex.map(read, jobs))
-            with self.lock:
-                for (bid, lane), cards in results:
-                    if cards is None:
-                        continue
+        with self.lock:
+            stages = {s["board_id"] for p in self._pipelines() if p.get("project_id") == project_id
+                      for s in p.get("stages") or [] if s.get("board_id")}
+            lanes = {bid: {lane: [] for lane in ("todo", "running", "review", "done")} for bid in stages}
+            for c in cards:
+                if c.get("lane") in lanes.get(c.get("board_id"), {}):
+                    lanes[c["board_id"]][c["lane"]].append(c)
+            now = time.time()
+            for bid, by_lane in lanes.items():
+                for lane, lst in by_lane.items():
+                    if lane in ("review", "done"):
+                        lst.sort(key=lambda c: parse_ts(c.get("phase_changed_at") or c.get("updated_at")))
+                        lst = lst[-(self.LANE_TAIL + 20):]   # the page shows LANE_TAIL ideas; run cards sit there too
                     prev = (self.cards.get(bid) or {}).get(lane)
-                    if prev is None or prev[1] != cards:
+                    if prev is None or prev[1] != lst:
                         changed = True
-                    self.cards.setdefault(bid, {})[lane] = (time.time(), cards)
-        if not only and not boards:     # a full round: forget boards that are no longer stages
-            with self.lock:
-                for bid in list(self.cards):
-                    if bid not in known:
-                        del self.cards[bid]
-                        changed = True
-        if changed:
-            with self.lock:
+                    self.cards.setdefault(bid, {})[lane] = (now, lst)
+            known = self._stage_boards()
+            for bid in list(self.cards):     # boards that are no longer stages
+                if bid not in known:
+                    del self.cards[bid]
+                    changed = True
+            if changed:
                 self.version += 1
+        if changed:
+            self.on_change()
         return changed
 
-    def touch_boards(self):
-        self.dirty.set()
+    def put_cards(self, cards=(), gone=()):
+        """Cards the bridge re-read (`card show`) after a change: on a stage board they replace their old copy (in
+        whichever lane it was), gone ones (archived, deleted) leave the cache."""
+        with self.lock:
+            boards = self._stage_boards()
+            cards = [c for c in cards if c.get("board_id") in boards]
+            gone = [cid for cid in gone if any(x["id"] == cid for lanes in self.cards.values() for _, lst in lanes.values() for x in lst)]
+        changed = self.apply_local(cards=cards) if cards else False
+        if gone:
+            with self.lock:
+                for by_lane in self.cards.values():
+                    for lane, (at, lst) in list(by_lane.items()):
+                        by_lane[lane] = (at, [x for x in lst if x["id"] not in gone])
+                self.version += 1
+            self.on_change()
+            changed = True
+        return changed
 
     def cards_of(self, board_id):
         """The cached cards of a stage board (every lane), or None when the board has not been read yet."""
@@ -1036,13 +1042,16 @@ class Cache:
     def apply_local(self, lanes=None, cards=None):
         """A change made through the bridge, shown before the boards are read again: lanes = card id -> its lane
         now (the card moves between the cached lane lists of its board), cards = new or re-read cards (replace or
-        add). The next board read (touch_boards) confirms it; this way the person's action is in the next state
-        in milliseconds, not after a second round of `card list` calls."""
+        add). The re-read of the moved cards (`card show`, put_cards) confirms it; this way the person's action is
+        in the next state in milliseconds, not after a second round of `card list` calls."""
         changed = False
         with self.lock:
             for c in cards or []:
                 bid, lane = c.get("board_id"), c.get("lane")
                 if not bid or not lane:
+                    continue
+                prev = next((x for lst in (self.cards.get(bid) or {}).values() for x in lst[1] if x["id"] == c["id"]), None)
+                if prev == c and prev.get("lane") == lane:
                     continue
                 self.cards.setdefault(bid, {})
                 for l, (at, lst) in list(self.cards[bid].items()):
