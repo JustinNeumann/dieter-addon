@@ -504,6 +504,12 @@ def clean_settings(b, cur=None):
     if len(logic) > MAX_LOGIC:
         raise DfError(f"navigation logic too long (max {MAX_LOGIC} characters)")
     out["navigation_logic"] = logic
+    impl = b.get("implementation_instructions", cur.get("implementation_instructions") or "")
+    impl = re.sub(r"\n{3,}", "\n\n", str(impl or "").replace("\r\n", "\n")).strip()
+    if len(impl) > MAX_LOGIC:
+        raise DfError(f"implementation instructions too long (max {MAX_LOGIC} characters)")
+    out["implementation_instructions"] = impl
+    out["implementation_mail"] = bool(b.get("implementation_mail", cur.get("implementation_mail", False)))
     out["timezone"] = str(b.get("timezone", cur.get("timezone") or "UTC")).strip() or "UTC"
     if not re.match(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$|^UTC$", out["timezone"]):
         raise DfError("timezone must be an IANA name such as Europe/Berlin")
@@ -640,9 +646,30 @@ def run_now(pid, role):
 
 
 # --------------------------------------------------------------------------- moving ideas (agents and the person)
-def copy_brief(src_prompt, verb, from_name, who, rationale, src_id):
+def copy_brief(src_prompt, verb, from_name, who, rationale, src_id, extra=""):
     note = f"**{verb} from {from_name}** by {who}, {datetime.date.today().isoformat()}" + (f": {clip(rationale)}" if rationale else ".")
-    return f"{(src_prompt or '').rstrip()}\n\n---\n{note}\n\n<!-- {MARKER} {src_id} -->\n"
+    extra = f"\n\n{extra.strip()}" if extra and extra.strip() else ""
+    return f"{(src_prompt or '').rstrip()}\n\n---\n{note}{extra}\n\n<!-- {MARKER} {src_id} -->\n"
+
+
+MAIL_HOWTO = ("You may mail the person (this card has mail access): write a Markdown report to a file and run "
+              "`dieter mail send --subject \"<one line>\" --body-file <file>`. A ```vega-lite``` (inline JSON data) or "
+              "```mermaid``` fence in the body is shown as a chart in Dieter Mail.")
+
+
+def implementation_extras(p):
+    """What a card picked for the person's stage carries besides the idea: the Dreamfall board's implementation
+    instructions (appended to its brief) and, with the mail switch on, mail access (`--mail`, fixed at creation)."""
+    text = str(p.get("implementation_instructions") or "").strip()
+    mail = bool(p.get("implementation_mail"))
+    parts = []
+    if text or mail:
+        parts.append("## For every implementation on this Dreamfall board")
+    if text:
+        parts.append(text)
+    if mail:
+        parts.append(MAIL_HOWTO)
+    return "\n\n".join(parts), (["--mail"] if mail else [])
 
 
 def transfer(p, src, dest_role, actor, name, verb, rationale="", score=None, run="", note="", settings=None, start=False, known=None):
@@ -674,9 +701,11 @@ def transfer(p, src, dest_role, actor, name, verb, rationale="", score=None, run
         settings = settings or {}
         args = ["card", "create", "--project", p["project_id"], "--board", s_to["board_id"], "--lane", "todo",
                 "--title", src["title"], "--workspace", settings.get("workspace") or "project", "--format", "json"]
+        extra, extra_args = implementation_extras(p) if s_to.get("actor") == "human" else ("", [])
+        args += extra_args
         fd, path = tempfile.mkstemp(prefix="dreamfall-brief-", suffix=".md")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(copy_brief(src["prompt"], verb, s_from["name"], name, rationale, src["id"]))
+            f.write(copy_brief(src["prompt"], verb, s_from["name"], name, rationale, src["id"], extra))
         try:
             for k in ("provider", "model", "effort"):
                 v = settings.get(k) or src.get(k)

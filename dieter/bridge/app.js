@@ -574,7 +574,7 @@
   }
   function dfStageBody(st) {
     const out = [];
-    if (st.human) out.push(`<div class="df-gate">${ico("lock_person", 22)}<div class="t"><b>You decide what gets built</b>Pick an idea in ${esc((st.p.stages || [])[(st.p.stages || []).indexOf(st.s) - 1]?.name || "the stage before")} to copy it here as a Todo draft. Start it when you are ready.</div></div>`);
+    if (st.human) out.push(`<div class="df-gate">${ico("lock_person", 22)}<div class="t"><b>You decide what gets built</b>Pick an idea in ${esc((st.p.stages || [])[(st.p.stages || []).indexOf(st.s) - 1]?.name || "the stage before")} to copy it here as a Todo draft. Start it when you are ready.${st.p.implementation_instructions || st.p.implementation_mail ? `<span class="df-gate-extra">${ico(st.p.implementation_mail ? "forward_to_inbox" : "assignment", 14)}Picked cards get ${[st.p.implementation_instructions ? "your instructions" : "", st.p.implementation_mail ? "mail access" : ""].filter(Boolean).join(" and ")}</span>` : ""}</div></div>`);
     else out.push(dfRunLine(st));
     if (st.human) {
       [["todo", "Todo"], ["running", "Running"], ["review", "Review"]].forEach(([l, t]) => { const cs = st.lane(l).sort(byTime("updated_at")); if (cs.length) out.push(`<div class="df-sec">${esc(t)}<span>${cs.length}</span></div>${cs.map((c) => dfCard(st, c)).join("")}`); });
@@ -776,9 +776,9 @@
     const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch (e) { return "UTC"; } })();
     const st = (role) => (p?.stages || []).find((s) => s.role === role);
     S.repo = p ? { kind: "dreamfall", edit: p.id, project_id: p.project_id, name: p.name, goal: p.goal || "", categories: (p.categories || []).join("\n"), categories_file: p.categories_file || "",
-      per_category: String(p.per_category || 3), navigation_logic: p.navigation_logic || dfData().defaults?.navigation_logic || "", enumeration_time: dfHHMM(st("enumeration")?.cron) || "02:00", navigation_time: dfHHMM(st("navigation")?.cron) || "05:00", timezone: p.timezone || tz,
+      per_category: String(p.per_category || 3), navigation_logic: p.navigation_logic || dfData().defaults?.navigation_logic || "", implementation_instructions: p.implementation_instructions || "", implementation_mail: !!p.implementation_mail, enumeration_time: dfHHMM(st("enumeration")?.cron) || "02:00", navigation_time: dfHHMM(st("navigation")?.cron) || "05:00", timezone: p.timezone || tz,
       provider: p.agent?.provider || "", model: p.agent?.model || "", effort: p.agent?.effort || "", enabled: p.enabled !== false, mail: !!p.mail, boards: {} }
-      : { kind: "dreamfall", project_id: projectId, name: S.repo?.name?.trim() || "Dreamfall", goal: "", categories: "", categories_file: "", per_category: "3", navigation_logic: dfData().defaults?.navigation_logic || "", enumeration_time: "02:00", navigation_time: "05:00", timezone: tz,
+      : { kind: "dreamfall", project_id: projectId, name: S.repo?.name?.trim() || "Dreamfall", goal: "", categories: "", categories_file: "", per_category: "3", navigation_logic: dfData().defaults?.navigation_logic || "", implementation_instructions: "", implementation_mail: false, enumeration_time: "02:00", navigation_time: "05:00", timezone: tz,
       provider: h?.id || "", model: h ? load("model-" + h.id, h.default_model || h.models?.[0]?.id || "") : "", effort: "", enabled: true, mail: false, boards: {} };
     S.modal = "repo"; render();
   }
@@ -804,6 +804,9 @@
       ${sectionFooter("The Enumeration agent writes at least this many new ideas per category every night, none repeating an idea the board already had.")}
       ${sectionHeader("3 · Navigation logic")}<div class="m16"><div class="outlined-field"><label>How the Navigation agent decides which ideas go on</label><textarea data-field="navigation_logic" rows="9" class="df-logic"></textarea></div></div>
       ${sectionFooter("Plain language: what makes an idea worth your time, what to drop, how selective to be. Every idea gets promoted or released by this text, with a one-sentence reason and a score.")}
+      ${sectionHeader("4 · Implementation")}<div class="m16"><div class="outlined-field"><label>Instructions for every picked card (optional)</label><textarea data-field="implementation_instructions" rows="4" placeholder="When done, add a chart that shows the result and mail me a short report with it."></textarea></div></div>
+      <div class="group" style="margin-top:12px">${sw("Picked cards may mail me", "Their agents can send you reports in Dieter Mail; charts in a report are drawn there", "implementation_mail", "single")}</div>
+      ${sectionFooter("Added to each card you pick for Implementation from now on; cards picked earlier keep their brief. Mail access is fixed when a card is created.")}
       ${sectionHeader("Schedule")}<div class="m16" style="display:flex;flex-direction:column;gap:12px">
         <div style="display:flex;gap:12px"><div class="outlined-field" style="flex:1"><label>Enumeration runs at</label><input data-field="enumeration_time" type="time"></div>
           <div class="outlined-field" style="flex:1"><label>Navigation runs at</label><input data-field="navigation_time" type="time"></div></div>
@@ -828,7 +831,7 @@
   async function dfSubmit() {
     const r = S.repo; if (!r || S.busy || !dfReady(r)) return;
     S.busy = true; render();
-    const body = { name: r.name.trim(), goal: r.goal.trim(), categories: r.categories, categories_file: r.categories_file.trim(), per_category: Number(r.per_category) || 3, navigation_logic: r.navigation_logic,
+    const body = { name: r.name.trim(), goal: r.goal.trim(), categories: r.categories, categories_file: r.categories_file.trim(), per_category: Number(r.per_category) || 3, navigation_logic: r.navigation_logic, implementation_instructions: r.implementation_instructions, implementation_mail: r.implementation_mail,
       enumeration_time: r.enumeration_time, navigation_time: r.navigation_time, timezone: r.timezone.trim(), enabled: r.enabled, mail: r.mail, agent: { provider: r.provider, model: r.model, effort: r.effort } };
     try {
       if (r.edit) { await api(`api/dreamfall/${r.edit}/update`, body); S.modal = null; S.repo = null; S.busy = false; await refreshState(); render(); snackbar("Dreamfall settings saved."); return; }

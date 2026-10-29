@@ -148,6 +148,38 @@ class NavigationLogic(unittest.TestCase):
         self.assertIn("improvements of this project", df.enumeration_prompt({**PIPE, "goal": ""}))
 
 
+class ImplementationExtras(unittest.TestCase):
+    def test_nothing_by_default(self):
+        st = df.clean_settings({"name": "x", "categories": "a"})
+        self.assertEqual((st["implementation_instructions"], st["implementation_mail"]), ("", False))
+        self.assertEqual(df.implementation_extras({**PIPE, **st}), ("", []))
+        self.assertNotIn("For every implementation", df.copy_brief("idea", "Picked", "Navigation", "you", "", "c_1"))
+
+    def test_instructions_and_mail_go_on_picked_cards(self):
+        st = df.clean_settings({"name": "x", "categories": "a", "implementation_instructions": "Add a chart.\r\n\r\n\r\nMail it.", "implementation_mail": True})
+        self.assertEqual(st["implementation_instructions"], "Add a chart.\n\nMail it.")
+        text, args = df.implementation_extras({**PIPE, **st})
+        self.assertEqual(args, ["--mail"])
+        brief = df.copy_brief("**Idea:** X", "Picked", "Navigation", "you", "now", "c_1", text)
+        self.assertIn("## For every implementation on this Dreamfall board\n\nAdd a chart.\n\nMail it.", brief)
+        self.assertIn("dieter mail send", brief)
+        self.assertTrue(brief.rstrip().endswith("<!-- dreamfall-source: c_1 -->"))   # the marker stays last
+
+    def test_mail_without_instructions_still_explains_how(self):
+        text, args = df.implementation_extras({**PIPE, "implementation_mail": True})
+        self.assertEqual(args, ["--mail"])
+        self.assertIn("vega-lite", text)
+
+    def test_settings_keep_them_unless_given(self):
+        cur = {**PIPE, "implementation_instructions": "Keep.", "implementation_mail": True}
+        st = df.clean_settings({"name": "Renamed"}, cur)
+        self.assertEqual((st["implementation_instructions"], st["implementation_mail"]), ("Keep.", True))
+        st = df.clean_settings({"implementation_instructions": "", "implementation_mail": False}, cur)
+        self.assertEqual((st["implementation_instructions"], st["implementation_mail"]), ("", False))
+        with self.assertRaises(df.DfError):
+            df.clean_settings({"name": "x", "categories": "a", "implementation_instructions": "x" * (df.MAX_LOGIC + 1)})
+
+
 class CacheView(unittest.TestCase):
     def setUp(self):
         self.calls = 0

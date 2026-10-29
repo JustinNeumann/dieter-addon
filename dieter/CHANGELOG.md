@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.45 (2026-10-29)
+
+- Dreamfall: a fourth section in New Dreamfall board and Settings, **Implementation**: instructions for every card you
+  pick (added to the picked card's brief, e.g. "add a chart of the result and mail me a short report with it") and
+  **Picked cards may mail me**, which creates picked cards with mail access (`--mail`, fixed at creation; before, a picked
+  card's agent could not send mail at all). The brief then also says how to mail and that vega-lite and mermaid fences
+  show as charts in Dieter Mail. The Implementation column notes when picked cards get them.
+
 ## 0.6.429.44 (2026-10-29)
 
 - Dreamfall: the board counted every card on its three stage boards as an idea, so an idea promoted to Navigation and

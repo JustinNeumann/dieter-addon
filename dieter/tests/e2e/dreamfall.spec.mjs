@@ -186,6 +186,14 @@ test("agents cannot write to Implementation; a card that arrived there without a
 test("the person picks an idea: a Todo draft on Implementation with provenance and trail", async ({ page, request }) => {
   test.skip(!pid, "no Dreamfall board");
   await openDreamfall(page);
+  // 4 · Implementation in Settings: instructions for every picked card, and mail access for them
+  await page.locator('[data-menu="dreamfall"]').click();
+  await page.locator('.menu [data-mi="settings"]').click();
+  await page.locator('#modal [data-field="implementation_instructions"]').fill("When done, add a chart of the result and mail me a short report with it.");
+  await page.locator('#modal [data-act="df-form-toggle"][data-key="implementation_mail"]').click();
+  await page.locator('#modal .btn.large[data-act="submit-repo"]').click();
+  await expect(page.locator("#snackbar")).toContainText("settings saved", { timeout: 30_000 });
+  await expect(page.locator('.df-stage[data-stage="implementation"] .df-gate')).toContainText("Picked cards get your instructions and mail access");
   const navCol = page.locator('.df-stage[data-stage="navigation"]');
   const card = navCol.locator(".lane-list > .df-card").filter({ hasText: "Shutters" });
   await card.locator('[data-act="df-pick"]').click();
@@ -201,6 +209,12 @@ test("the person picks an idea: a Todo draft on Implementation with provenance a
   const copy = st.cards.find((c) => c.board_id === stageOf("implementation").board_id && c.title.includes("Shutters"));
   expect(copy.lane).toBe("todo");
   expect(copy.initial_prompt_sent).toBe(false);
+  expect(copy.initial_prompt).toContain("## For every implementation on this Dreamfall board");
+  expect(copy.initial_prompt).toContain("When done, add a chart of the result and mail me a short report with it.");
+  expect(copy.initial_prompt).toContain("dieter mail send");
+  expect(inBox("dieter", ["card", "show", copy.id]).out).toMatch(/"mailAccess":\s*true/);
+  const navCopy = st.cards.find((c) => c.board_id === stageOf("navigation").board_id && c.lane === "todo");
+  expect(inBox("dieter", ["card", "show", navCopy.id]).out).not.toMatch(/"mailAccess":\s*true/);   // only picked cards
   expect(st.dreamfall.records[copy.id].source).toBeTruthy();
   // a second pick of the same idea is refused (it left the queue)
   const again = await request.post(`api/dreamfall/${pid}/act`, { data: { action: "pick", card: st.dreamfall.records[copy.id].source } });
