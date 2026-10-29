@@ -1,6 +1,7 @@
 package com.getdieter.addon.core
 
 import com.getdieter.addon.v1.Answer
+import com.getdieter.addon.v1.DreamfallSettings
 import com.getdieter.addon.v1.Question
 import com.getdieter.addon.v1.QuestionItem
 
@@ -16,6 +17,10 @@ object AddonRules {
         Regex("""^(https://[\w.\-]+(:\d+)?/[\w.\-/~]+|git@[\w.\-]+:[\w.\-/~]+|ssh://[\w.\-@]+(:\d+)?/[\w.\-/~]+)$""")
     private val NAME = Regex("""^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$""")
     private val BRANCH = Regex("""^[\w./-]{1,100}$""")
+    private val TIME = Regex("""^([01]?\d|2[0-3]):([0-5]\d)$""")
+    private val TIMEZONE = Regex("""^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$|^UTC$""")
+    /** The longest navigation logic and implementation instructions the bridge keeps. */
+    const val MAX_LOGIC = 4000
 
     /** Why [url] is no gateway address to enroll with, or null. */
     fun gatewayUrlProblem(url: String): String? =
@@ -71,5 +76,26 @@ object AddonRules {
                 else -> current.option_ids + optionId
             }
         return current.copy(option_ids = ids)
+    }
+
+    /** Why Dreamfall [settings] cannot be saved; the bridge checks the same. */
+    fun dreamfallProblem(settings: DreamfallSettings): String? {
+        val file = settings.categories_file.trim()
+        return when {
+            settings.name.isBlank() -> "Name the Dreamfall board."
+            settings.name.trim().length > 80 -> "Names have up to 80 characters."
+            settings.categories.isBlank() && file.isEmpty() -> "Add categories, one per line, or a categories file of the project."
+            file.startsWith("/") || ".." in file.split("/") -> "The categories file is a path inside the project."
+            settings.per_category !in 1..10 -> "Ideas per category: 1 to 10."
+            settings.navigation_logic.isBlank() -> "Describe how the Navigation agent decides which ideas go on."
+            settings.navigation_logic.trim().length > MAX_LOGIC -> "The navigation logic has up to $MAX_LOGIC characters."
+            settings.implementation_instructions.trim().length > MAX_LOGIC ->
+                "The implementation instructions have up to $MAX_LOGIC characters."
+            !TIME.matches(settings.enumeration_time.trim()) || !TIME.matches(settings.navigation_time.trim()) -> "Times are HH:MM, e.g. 02:00."
+            settings.days.isEmpty() -> "Pick at least one weekday."
+            settings.days.any { it !in 0..6 } -> "Weekdays are 0 (Sunday) to 6 (Saturday)."
+            settings.timezone.isNotBlank() && !TIMEZONE.matches(settings.timezone.trim()) -> "Use a time zone name such as Europe/Berlin."
+            else -> null
+        }
     }
 }

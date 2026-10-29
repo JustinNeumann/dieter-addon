@@ -24,9 +24,10 @@ features over one group at a time.
 | Phase 3: theme from HA | live; the real HA frontend hands light and dark with its colours to the page | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
 | 4.0 web host + `RemoteCore` | built; verified against Dieter's isolated fixture gateway (real boards, conversations, sending runs a turn) and in the add-on e2e | `host/`, `proto/dieter/web/v1/host.proto`, `web/…/RemoteCore.kt`, add-on `run.sh` + bridge relay |
 | 4.0 sign-in | live: signed in with GitHub and paired as "Home Assistant (web)" on 2026-10-29. Since ADR 0005 the core chooses the return address per attempt (`BeginSignIn.redirect_uri`, `RuntimeConfig.oauthRedirectPerAttempt`); the "paste the callback URL" fallback is gone | `SignInRelay.kt`, fork `identity/SignIn.kt`, add-on DOCS "Signing in the new page" |
-| 4.A deep links | `<HA>/app/<slug>/next/card/<id>` and `…/next/tab/<name>` open the card or tab; a card link asks the core (`OpenConversationRequest` → `NotificationTarget`), unknown or archived cards open the Inbox | `Main.kt` (`openRoute`), fork `client/MailCommands.kt`, add-on `app.js` |
+| 4.A deep links | `<HA>/app/<slug>/next/card/<id>` and `…/next/tab/<name>` open the card or tab, `…/next/dreamfall/<id>[/settings]` and `…/next/idea/<id>` a Dreamfall board or idea; a card link asks the core (`OpenConversationRequest` → `NotificationTarget`), unknown or archived cards open the Inbox | `Main.kt` (`openRoute`), fork `client/MailCommands.kt`, add-on `app.js` |
 | Extension points + add-on core ([ADR 0005](https://github.com/JustinNeumann/dieter/blob/web-addon/docs/adr/0005-web-client.md)) | built: `MobileExtensions` in the fork; the add-on core runs in the web host (`dieter.addon.v1`, rules in `AddonRules`); screens for gateway enrollment, SSH key, Claude sign-in, title model and work-folder retention, agent questions (Inbox + conversation), Clone repository / New empty repository; add-on e2e `next-addon.spec.mjs` | `addon/`, `proto/dieter/addon/v1/addon.proto`, `web/…/addon/`, fork `apps/kotlin/ui/…/extensions/` |
-| 4.A–J parity rest, Dreamfall, switch to `/` | not started; Mail, Tools, Inbox, boards and conversations already show real data from the fixture gateway | |
+| I. Dreamfall | built: Tools → Dreamfall lists the boards, a stage board opened from Projects shows its Dreamfall board (`BoardRenderer`), funnel + stages side by side (tabs on phones), idea page with brief, provenance and trail, Pick/Park/Promote/Release/Back to the queue/Start/Review, the ⋮ menu, the settings form (new board from Tools or Projects → Add). The rules are the add-on core's (`Dreamfall.kt`: lanes, verdicts, run lines, times in the board's time zone); add-on e2e `next-dreamfall.spec.mjs` | `addon/…/core/Dreamfall.kt`, `web/…/addon/Dreamfall*.kt`, add-on bridge `?fields=dreamfall_cards` |
+| 4.A–J parity rest, switch to `/` | open; Mail, Tools, Inbox, boards and conversations already show real data from the fixture gateway | |
 | Upstream proposal | drafted; per-attempt redirect, extension points and deep links through the core are implemented in the fork | `docs/proposals/web-client.md` |
 
 **Deviations from the plan, and why:**
@@ -442,12 +443,13 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 
 | Feature today | Compose | Work | Test |
 |---|---|---|---|
-| New Dreamfall board (categories, goal, navigation logic, implementation instructions, mail switch, times, weekdays, agent, stage boards) | ❌ | form as an extension of New board | `a Dreamfall board is created from New board…` |
-| Funnel strip, stages side by side / tabs on phone, collapsible groups (newest 40) | ❌ | `boardRenderers` extension: a Compose Dreamfall board | `the stages are tabs; Navigation first`, `screenshots of the Dreamfall board (light and dark)` |
-| Idea detail: brief, verdict + score, Provenance, Trail | ❌ | extension screen; data from the bridge (`dreamfall` endpoints) | |
-| Pick (worktree/project dir, start now), Park, Back to the queue, promote | ❌ | actions through the bridge | `the person picks an idea…`, `park and back to the queue…` |
-| ⋮ run a stage now, pause/resume, settings, open stage as Kanban, Remove Dreamfall | ❌ | same | `settings change the schedules…` |
-| "Added outside Dreamfall" flag, "Finished · still in Running" + Review button | ❌ | rendering rules in the extension | `agents cannot write to Implementation…` |
+| New Dreamfall board (categories, goal, navigation logic, implementation instructions, mail switch, times, weekdays, agent, stage boards) | ✅ | an extension page (Tools → Dreamfall → +, Projects → Add → New Dreamfall board), not a mode of the shared New board form; `AddonRules.dreamfallProblem` checks what the bridge checks | `next-dreamfall: the settings save…` |
+| Funnel strip, stages side by side / tabs on phone, collapsible groups (newest 40) | ✅ | `BoardRenderer` claims the stage boards; Navigation first | `next-dreamfall: a board shows the night…` |
+| Idea detail: brief, verdict + score, Provenance, Trail | ✅ | extension page `dreamfall-idea`; the core reads `GET dreamfall/card/<id>` when the record or lane changes | `next-dreamfall: an idea's page…` |
+| Pick (worktree/project dir, start now), Park, Back to the queue, promote | ✅ | `DecideIdea`; the card stays busy until the bridge's state shows the change (its `rev`) | `next-dreamfall: Pick copies an idea…`, `…Park takes it out of the queue` |
+| ⋮ run a stage now, pause/resume, settings, open stage as Kanban, Remove Dreamfall | ✅ | Kanban: the shared board screen for that stage while the route is open | menu entries in `next-dreamfall: the settings save…` |
+| "Added outside Dreamfall" flag, "Finished · still in Running" + Review button | ✅ | rules in the add-on core | `DreamfallTest` (JVM) |
+| Adding an idea by hand on Enumeration or Implementation | 🟡 | through the stage's Kanban view (its New task); no button on the Dreamfall board yet | |
 | `dreamfall` command, schedules, KV records | n/a | unchanged (server side) | `the Enumeration agent adds ideas…`, `Navigation waits for Enumeration…` |
 
 Upstream path: the Dreamfall proposal (`docs/proposals/dreamfall.md`) can point at this Compose

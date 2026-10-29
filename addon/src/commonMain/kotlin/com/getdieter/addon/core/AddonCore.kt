@@ -22,10 +22,13 @@ import com.getdieter.addon.v1.SshSlice
 import com.getdieter.addon.v1.SshTest
 import com.getdieter.addon.v1.Tone
 import com.getdieter.addon.v1.Update
+import com.getdieter.core.runtime.localUtcOffsetSeconds
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlin.time.TimeSource
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -65,8 +68,14 @@ class AddonCore(
     parent: CoroutineScope,
     private val pollInterval: Duration = 2.seconds,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
+    clock: () -> Instant = { Clock.System.now() },
+    /** The UTC offset of a time zone at an instant; the default knows only the machine's zone. */
+    offsetSeconds: (Instant, String) -> Int = { at, _ -> localUtcOffsetSeconds(at) },
+    /** The time zone new Dreamfall boards start with: the machine's. */
+    timezone: () -> String = { "UTC" },
 ) {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + dispatcher)
+    private val dreamfall = Dreamfall(bridge, scope, clock, offsetSeconds, timezone)
 
     private val gateway = MutableStateFlow(GatewaySlice(loading = true))
     private val ssh = MutableStateFlow(SshSlice(loading = true))
@@ -96,10 +105,11 @@ class AddonCore(
     private val loadedAt = mutableMapOf<Slice, TimeSource.Monotonic.ValueTimeMark>()
     private val loading = mutableMapOf<Slice, Job>()
 
-    /** Follows the bridge's live state (agent questions, the Claude login). */
+    /** Follows the bridge's live state (agent questions, the Claude login, Dreamfall). */
     fun start() {
         scope.launch {
-            bridge.events(listOf("questions", "claude_auth")).collect { state ->
+            bridge.events(STREAMED).collect { state ->
+                dreamfall.ingest(state)
                 (state["claude_auth"] as? JsonObject)?.let {
                     auth = it
                     authError = ""
@@ -131,7 +141,7 @@ class AddonCore(
                     questions.map { all ->
                         Update(questions = if (scope.isEmpty()) all else all.copy(questions = all.questions.filter { it.card_id == scope }))
                     }
-                else -> invalid("The add-on has no such page.")
+                else -> dreamfall.updates(slice, scope) ?: invalid("The add-on has no such page.")
             }
         val job =
             this.scope.launch {
@@ -168,6 +178,7 @@ class AddonCore(
         command.change_setting?.let { return changeSetting(it) }
         command.answer_question?.let { return answer(it, user) }
         command.add_repository?.let { return addRepository(it) }
+        dreamfall.execute(command, user)?.let { return it }
         command.refresh?.let {
             for (slice in listOf(Slice.SLICE_GATEWAY, Slice.SLICE_SSH, Slice.SLICE_SETTINGS, Slice.SLICE_CLAUDE)) load(slice)
             return Result()
@@ -585,6 +596,8 @@ class AddonCore(
     }
 
     companion object {
+        /** What the core follows of the bridge's state. */
+        private val STREAMED = listOf("questions", "claude_auth", "dreamfall", "dreamfall_cards", "projects", "boards", "harnesses")
         /** Slices the bridge does not push are read again when a page opens them after this long. */
         val STALE: Duration = 15.seconds
         /** `dieter daemon enroll` waits for the authorization about as long as a device code lives. */
@@ -611,7 +624,7 @@ private val Enrollment.Phase.running
 private val ClaudeSignIn.Phase.running
     get() = this == ClaudeSignIn.Phase.PHASE_STARTING || this == ClaudeSignIn.Phase.PHASE_CODE || this == ClaudeSignIn.Phase.PHASE_SUBMITTING
 
-private fun invalid(message: String): Nothing = throw AddonFailure(Failure(Failure.Kind.KIND_INVALID, message))
+internal fun invalid(message: String): Nothing = throw AddonFailure(Failure(Failure.Kind.KIND_INVALID, message))
 
 private fun failureOf(error: Exception): Failure =
     when (error) {

@@ -66,14 +66,20 @@ internal class AddonActions(private val client: AddonClient?, private val store:
         scope.launch { done(run(command)) }
     }
 
-    suspend fun run(command: Command): Boolean {
-        val addon = client ?: return false.also { store.error.value = "Not connected to the Dieter add-on." }
+    /** Like [send]; [done] gets the core's result, null when the command failed. */
+    fun sendFor(command: Command, done: (Result?) -> Unit) {
+        scope.launch { done(result(command)) }
+    }
+
+    suspend fun run(command: Command): Boolean = result(command) != null
+
+    private suspend fun result(command: Command): Result? {
+        val addon = client ?: return null.also { store.error.value = "Not connected to the Dieter add-on." }
         return try {
-            addon.dispatch(command).message.takeIf { it.isNotEmpty() }?.let { store.error.value = it }
-            true
+            addon.dispatch(command).also { result -> result.message.takeIf { it.isNotEmpty() }?.let { store.error.value = it } }
         } catch (failure: AddonFailure) {
             store.error.value = failure.failure.message.ifEmpty { "The add-on could not do that." }
-            false
+            null
         }
     }
 

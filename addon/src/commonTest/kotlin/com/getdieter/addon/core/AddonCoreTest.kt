@@ -35,10 +35,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 
-private fun json(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
+internal fun json(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
 
 /** The bridge's answers by "METHOD path"; every request is recorded. */
-private class FakeBridge : Bridge {
+internal class FakeBridge : Bridge {
     val requests = mutableListOf<Pair<String, JsonObject?>>()
     val routes = mutableMapOf<String, (JsonObject?) -> BridgeResponse>()
     val state = MutableSharedFlow<JsonObject>(replay = 1)

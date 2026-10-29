@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 // The add-on's own features: its enrollment with a Dieter gateway, its SSH key, the Claude Code
-// login of its harness, its settings, agent questions and adding repositories. These are the commands
+// login of its harness, its settings, agent questions, adding repositories and Dreamfall boards. These are the commands
 // and slices of the add-on core (addon/ in this repository), which runs in the web host next to
 // Dieter's core and talks to the add-on's bridge. The browser sends commands and draws slices; every
 // rule, label and state change is decided here, as Dieter's clients do with Dieter's core.
@@ -27,6 +27,14 @@ message Command {
     AddRepository add_repository = 11;
     // Reads what the bridge does not push (gateway, SSH key, settings) again.
     Step refresh = 12;
+    CreateDreamfall create_dreamfall = 13;
+    UpdateDreamfall update_dreamfall = 14;
+    // Pauses or resumes both agent schedules of a Dreamfall board.
+    PauseDreamfall pause_dreamfall = 15;
+    // Deletes the schedules and the Dreamfall view; the stage boards and their cards stay.
+    RemoveDreamfall remove_dreamfall = 16;
+    RunDreamfallStage run_dreamfall_stage = 17;
+    DecideIdea decide_idea = 18;
   }
 }
 
@@ -65,6 +73,98 @@ message AddRepository {
   string branch = 3;
 }
 
+// A Dreamfall board's settings: what the ideas are about, how they are found and judged, when.
+message DreamfallSettings {
+  string name = 1;
+  string goal = 2;
+  // One category per line.
+  string categories = 3;
+  // Or a file of the project that lists them.
+  string categories_file = 4;
+  // New ideas per category and night (1-10).
+  int32 per_category = 5;
+  // How the Navigation agent decides which ideas go on, in plain language.
+  string navigation_logic = 6;
+  // Added to the brief of every card picked for Implementation.
+  string implementation_instructions = 7;
+  // Picked cards may send the person mail.
+  bool implementation_mail = 8;
+  // HH:MM in timezone.
+  string enumeration_time = 9;
+  string navigation_time = 10;
+  // 0 = Sunday … 6 = Saturday.
+  repeated int32 days = 11;
+  string timezone = 12;
+  // The two agents run on their schedules.
+  bool enabled = 13;
+  // The Navigation agent mails what it promoted.
+  bool mail = 14;
+  string provider = 15;
+  string model = 16;
+  string effort = 17;
+}
+
+enum StageKind {
+  STAGE_UNSPECIFIED = 0;
+  // An agent writes new ideas.
+  STAGE_ENUMERATION = 1;
+  // An agent judges them: strong ones go on, the rest are released.
+  STAGE_NAVIGATION = 2;
+  // The person's gate: only a pick puts cards here.
+  STAGE_IMPLEMENTATION = 3;
+}
+
+message CreateDreamfall {
+  string project_id = 1;
+  DreamfallSettings settings = 2;
+  // Boards of the project to use as stages instead of new ones, by stage.
+  map<string, string> boards = 3;
+}
+
+message UpdateDreamfall {
+  string dreamfall_id = 1;
+  DreamfallSettings settings = 2;
+}
+
+message PauseDreamfall {
+  string dreamfall_id = 1;
+  bool paused = 2;
+}
+
+message RemoveDreamfall { string dreamfall_id = 1; }
+
+message RunDreamfallStage {
+  string dreamfall_id = 1;
+  StageKind stage = 2;
+}
+
+// The person's decision on an idea; the core knows its Dreamfall board.
+message DecideIdea {
+  string card_id = 1;
+  enum Decision {
+    DECISION_UNSPECIFIED = 0;
+    // Copy a Navigation idea to Implementation as a Todo draft.
+    DECISION_PICK = 1;
+    // Keep a Navigation idea for later.
+    DECISION_PARK = 2;
+    // Copy an idea to the next agent stage.
+    DECISION_PROMOTE = 3;
+    DECISION_RELEASE = 4;
+    // A released or parked idea waits in its queue again.
+    DECISION_RESTORE = 5;
+    // Start the agent of an Implementation draft.
+    DECISION_START = 6;
+    // An Implementation card whose agent finished but left it in Running.
+    DECISION_REVIEW = 7;
+  }
+  Decision decision = 2;
+  // Kept on the trail.
+  string note = 3;
+  // Pick: in a new worktree instead of the project directory, and start the agent at once.
+  bool worktree = 4;
+  bool start = 5;
+}
+
 message Reply {
   oneof reply {
     Result result = 1;
@@ -75,6 +175,8 @@ message Reply {
 message Result {
   // A confirmation to show briefly, e.g. "Finished work folders are removed after 30 days."
   string message = 1;
+  // What the command created, e.g. the new Dreamfall board, for the page to open.
+  string created_id = 2;
 }
 
 message Failure {
@@ -98,6 +200,15 @@ enum Slice {
   SLICE_SETTINGS = 4;
   // Scope: a conversation's ID for its questions, empty for all.
   SLICE_QUESTIONS = 5;
+  // The Dreamfall boards.
+  SLICE_DREAMFALLS = 6;
+  // One Dreamfall board; scope: its ID, or the ID of one of its stage boards.
+  SLICE_DREAMFALL = 7;
+  // An idea's brief, verdict, provenance and trail; scope: its card ID.
+  SLICE_IDEA = 8;
+  // The form: scope "new:<project ID>" (or "new:" to choose the project) for a new Dreamfall board,
+  // or a board's ID for its settings.
+  SLICE_DREAMFALL_FORM = 9;
 }
 
 message Update {
@@ -111,6 +222,10 @@ message Update {
     ClaudeSlice claude = 6;
     SettingsSlice settings = 7;
     QuestionsSlice questions = 8;
+    DreamfallsSlice dreamfalls = 9;
+    DreamfallSlice dreamfall = 10;
+    IdeaSlice idea = 11;
+    DreamfallFormSlice dreamfall_form = 12;
   }
 }
 
@@ -273,4 +388,265 @@ message QuestionOption {
   string id = 1;
   string label = 2;
   string description = 3;
+}
+
+message DreamfallsSlice {
+  bool loading = 1;
+  string error = 2;
+  repeated DreamfallSummary dreamfalls = 3;
+}
+
+message DreamfallSummary {
+  string id = 1;
+  string name = 2;
+  // e.g. "Home-Assistant-Sem2 · 42 ideas · paused"
+  string detail = 3;
+  // Ideas waiting for the person's pick.
+  int32 waiting = 4;
+  string project_id = 5;
+  // Its stage boards, which open as the Dreamfall board.
+  repeated string board_ids = 6;
+}
+
+message DreamfallSlice {
+  bool loading = 1;
+  string error = 2;
+  // Not (or no longer) a Dreamfall board.
+  bool missing = 3;
+  string id = 4;
+  string name = 5;
+  // e.g. "Home-Assistant-Sem2 · Dreamfall · 42 ideas"
+  string subtitle = 6;
+  string project_id = 7;
+  // Both schedules are paused.
+  bool paused = 8;
+  repeated DreamfallStage stages = 9;
+  // The stage a narrow screen shows first.
+  StageKind first = 10;
+}
+
+message DreamfallStage {
+  StageKind kind = 1;
+  string name = 2;
+  string board_id = 3;
+  bool human = 4;
+  // The queue: ideas waiting here.
+  int32 waiting = 5;
+  // e.g. "Agent · daily 02:00 · writes new ideas", "You decide · agents never create or move cards here"
+  string actor = 6;
+  // The funnel's line: "Agent · daily 02:00", "You · human gate · 1 running"
+  string funnel = 7;
+  // The funnel's arrow into this stage: "3 of 12", "you"; empty for the first stage.
+  string passes = 8;
+  // Agent stages: the latest run.
+  DreamfallRun run = 9;
+  // The person's stage: what the gate means, and what every pick adds.
+  string gate = 10;
+  string gate_extra = 11;
+  repeated IdeaGroup groups = 12;
+  // Nothing waits: "No ideas waiting."
+  string empty = 13;
+  // An agent schedule exists: run it now.
+  bool can_run = 14;
+  // The person may add a card: a new idea (Enumeration) or a new task (Implementation).
+  bool can_add = 15;
+}
+
+message DreamfallRun {
+  enum Status {
+    STATUS_NONE = 0;
+    STATUS_WORKING = 1;
+    STATUS_DONE = 2;
+    STATUS_FAILED = 3;
+    // Begun and not finished, or not begun yet.
+    STATUS_WAITING = 4;
+  }
+  Status status = 1;
+  // e.g. "Run · today 02:00 – 02:14 · 6 new ideas", "No run yet · next at 02:00"
+  string text = 2;
+  // The run's card: its conversation.
+  string card_id = 3;
+  // The agent's note on the run.
+  string note = 4;
+}
+
+message IdeaGroup {
+  enum Kind {
+    KIND_QUEUE = 0;
+    KIND_TRANSFERRED = 1;
+    KIND_RELEASED = 2;
+    KIND_PICKED = 3;
+    KIND_PARKED = 4;
+    // The person's stage: Todo, Running, Review.
+    KIND_LANE = 5;
+    KIND_DONE = 6;
+  }
+  Kind kind = 1;
+  // Empty for a stage's queue.
+  string title = 2;
+  // Finished groups fold; the person opens them.
+  bool collapsible = 3;
+  // "12", or "newest 40 of 52"
+  string count = 4;
+  repeated IdeaCard cards = 5;
+}
+
+message IdeaCard {
+  string id = 1;
+  string category = 2;
+  string title = 3;
+  // "3h", "2d"
+  string age = 4;
+  string excerpt = 5;
+  Verdict verdict = 6;
+  repeated IdeaMeta metas = 7;
+  // e.g. "Waiting for you", "Running", "Finished · still in Running", "Released · 2d"
+  string status = 8;
+  Tone status_tone = 9;
+  // The card's agent is working.
+  bool live = 10;
+  // "claude-code · opus · 12.4k tokens"
+  string detail = 11;
+  IdeaAction action = 12;
+  // A decision on the card is under way, e.g. "Picking…"
+  string busy = 13;
+  // Implementation cards open their conversation, ideas open their page.
+  bool opens_conversation = 14;
+}
+
+message Verdict {
+  enum Kind {
+    KIND_PROMOTE = 0;
+    KIND_PICK = 1;
+    KIND_RELEASE = 2;
+    KIND_PARK = 3;
+  }
+  Kind kind = 1;
+  // Promote and pick.
+  bool good = 2;
+  // "Promoted"
+  string label = 3;
+  // "8/10 · Saves two kWh a day with parts that exist."
+  string text = 4;
+}
+
+message IdeaMeta {
+  enum Kind {
+    KIND_FROM = 0;
+    KIND_TO = 1;
+    KIND_AGENT = 2;
+    KIND_PERSON = 3;
+    KIND_PICKED_BY = 4;
+    // An Implementation card that did not come through a pick.
+    KIND_OUTSIDE = 5;
+    KIND_WORKSPACE = 6;
+  }
+  Kind kind = 1;
+  string text = 2;
+}
+
+message IdeaAction {
+  DecideIdea.Decision decision = 1;
+  string label = 2;
+  bool primary = 3;
+  // Asks for a note first (and for a pick, the workspace and whether to start).
+  bool asks = 4;
+  // The question's title and what happens, e.g. "Park", "It leaves your queue for later; you can pick it any time."
+  string ask_title = 5;
+  string ask_text = 6;
+  // Shown while it runs, e.g. "Picking…"
+  string busy = 7;
+}
+
+message IdeaSlice {
+  bool loading = 1;
+  string error = 2;
+  // Not (or no longer) on a Dreamfall board.
+  bool missing = 3;
+  string card_id = 4;
+  string dreamfall_id = 5;
+  string title = 6;
+  // "Home-Assistant-Sem2 · Dreamfall · Navigation"
+  string subtitle = 7;
+  StageKind stage = 8;
+  // "Navigation · Waiting for you"
+  string stage_label = 9;
+  string category = 10;
+  repeated IdeaAction actions = 11;
+  string busy = 12;
+  Verdict verdict = 13;
+  // Markdown.
+  string brief = 14;
+  repeated ProvenanceStep provenance = 15;
+  repeated TrailEvent trail = 16;
+  // The trail is still being read.
+  bool trail_loading = 17;
+}
+
+// One copy of the idea across the stages, oldest first.
+message ProvenanceStep {
+  string card_id = 1;
+  StageKind stage = 2;
+  // "Navigation · this card", "Enumeration · c_8f2k1x"
+  string title = 3;
+  // "Found by agent · today 02:04 · promoted"
+  string detail = 4;
+  bool current = 5;
+}
+
+message TrailEvent {
+  enum Kind {
+    KIND_OTHER = 0;
+    KIND_CREATED = 1;
+    KIND_JUDGED = 2;
+    KIND_RELEASED = 3;
+    KIND_PARKED = 4;
+    KIND_TRANSFERRED = 5;
+    KIND_PICKED = 6;
+    KIND_RESTORED = 7;
+    KIND_STARTED = 8;
+    // Where the card is now.
+    KIND_NOW = 9;
+  }
+  Kind kind = 1;
+  // By the person (not an agent).
+  bool human = 2;
+  // "Transferred to Navigation, source released"
+  string title = 3;
+  // "Agent · run c_93kd0a · today 05:02"
+  string detail = 4;
+  // The reason or note, with its score.
+  string quote = 5;
+}
+
+message DreamfallFormSlice {
+  bool loading = 1;
+  string error = 2;
+  // Settings of an existing board (no project or stage boards to choose).
+  bool edit = 3;
+  string dreamfall_id = 4;
+  // "New Dreamfall board", "Dreamfall settings"
+  string title = 5;
+  string project_id = 6;
+  string project_name = 7;
+  // The add-on's projects, while none is chosen.
+  repeated Option projects = 8;
+  // Where the form starts.
+  DreamfallSettings settings = 9;
+  repeated AgentOption agents = 10;
+  // The project's boards that can be a stage (a Review lane, not a stage yet).
+  repeated Option boards = 11;
+}
+
+message AgentOption {
+  string id = 1;
+  string label = 2;
+  repeated ModelOption models = 3;
+  string default_model = 4;
+}
+
+message ModelOption {
+  string id = 1;
+  string label = 2;
+  repeated Option efforts = 3;
 }

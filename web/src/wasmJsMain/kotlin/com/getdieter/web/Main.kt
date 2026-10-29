@@ -30,6 +30,7 @@ import com.getdieter.mobile.store.MobileCore
 import com.getdieter.mobile.store.MobilePreferences
 import com.getdieter.mobile.store.MobileStore
 import com.getdieter.mobile.store.runDebugScript
+import com.getdieter.mobile.navigation.MobileRoute
 import com.getdieter.mobile.navigation.MobileTab
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -105,8 +106,9 @@ private fun ChromeColor(store: MobileStore) {
 
 /**
  * Deep links: `?route=card/<id>` opens that conversation where the core says it belongs (or the Inbox
- * once it is gone), `?route=tab/<name>` a tab. The classic page turns `<HA>/app/<slug>/next/<route>`
- * into this (Home Assistant always opens the add-on at its root).
+ * once it is gone), `?route=tab/<name>` a tab, `?route=dreamfall/<id>[/settings]` a Dreamfall board (or a
+ * stage board) and `?route=idea/<id>` an idea. The classic page turns `<HA>/app/<slug>/next/<route>` into this (Home
+ * Assistant always opens the add-on at its root).
  */
 private suspend fun openRoute(store: MobileStore, route: String) {
     val parts = route.trim('/').split('/')
@@ -124,5 +126,15 @@ private suspend fun openRoute(store: MobileStore, route: String) {
         "tab" -> parts.getOrNull(1)?.let { name ->
             MobileTab.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let(store::selectTab)
         }
+        // Tools → Dreamfall, a Dreamfall board (its ID or a stage board's) with its settings, or one idea
+        "dreamfall" -> {
+            store.selectTab(MobileTab.TOOLS)
+            store.push(MobileRoute.Extension("dreamfall"))
+            parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { id ->
+                store.push(MobileRoute.Extension("dreamfall", id))
+                if (parts.getOrNull(2) == "settings") store.present(MobileRoute.Extension("dreamfall-form", id))
+            }
+        }
+        "idea" -> parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { store.push(MobileRoute.Extension("dreamfall-idea", it)) }
     }
 }

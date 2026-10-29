@@ -99,7 +99,15 @@ class WebHostServer(
             )
         api = ClientApi(runtime)
         signIn = SignInRelay(api, callback ?: SignInRelay.INTERNAL_CALLBACK)
-        addon = AddonCore(OkHttpBridge(env["DIETER_WEB_BRIDGE_URL"] ?: "http://127.0.0.1:8099/api/"), commands)
+        addon = AddonCore(
+            OkHttpBridge(env["DIETER_WEB_BRIDGE_URL"] ?: "http://127.0.0.1:8099/api/"),
+            commands,
+            offsetSeconds = { at, zone ->
+                val id = runCatching { java.time.ZoneId.of(zone) }.getOrDefault(java.time.ZoneId.systemDefault())
+                id.rules.getOffset(java.time.Instant.ofEpochMilli(at.toEpochMilliseconds())).totalSeconds
+            },
+            timezone = { java.util.TimeZone.getDefault().id },
+        )
         foreground = Foreground(api, commands, env["DIETER_WEB_HOST_IDLE_MS"]?.toLongOrNull() ?: 120_000)
         server =
             WebSocketServer(bind, port, secret, onHttp = ::http) { ws ->
