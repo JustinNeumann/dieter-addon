@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.3 (2026-10-29)
+
+- **New page (`next/`), dieter-addon-kotlin 0.3.0:** text in mail, files, tool output and subagent details can be
+  selected and copied. Ctrl/⌘+F searches inside a conversation, a mail message or a file. Mail bodies and Markdown
+  files render as real HTML, so the browser's own selection and find work there. Mermaid, vega and vega-lite
+  diagrams render offline in a sandboxed frame. Screen readers get card and inbox titles instead of initials, and
+  Escape goes back. `next/?islands=off` keeps the previous rendering.
+
 ## 0.6.431.2 (2026-10-29)
 
 - **Preview of the new page at `next/`**: Dieter's own Compose screens (the Android/iOS app's UI) compiled for the
