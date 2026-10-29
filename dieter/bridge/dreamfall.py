@@ -657,18 +657,25 @@ MAIL_HOWTO = ("You may mail the person (this card has mail access): write a Mark
               "```mermaid``` fence in the body is shown as a chart in Dieter Mail.")
 
 
+# Dieter's board instructions move a card to Review only once its pull request exists, so in a project without a
+# git remote a finished card stayed in Running (idle, "Running" on the page) for good.
+FINISH_HOWTO = ("When the work is committed and its checks pass, move this card to Review (`dieter card move <this card> "
+                "--lane review`). If the project has no git remote (`dieter workspace scm <this card>` says so), there is "
+                "no pull request to open: say so in your reply and move the card to Review anyway, do not leave it in Running.")
+
+
 def implementation_extras(p):
     """What a card picked for the person's stage carries besides the idea: the Dreamfall board's implementation
-    instructions (appended to its brief) and, with the mail switch on, mail access (`--mail`, fixed at creation)."""
+    instructions and how to finish (appended to its brief) and, with the mail switch on, mail access (`--mail`,
+    fixed at creation)."""
     text = str(p.get("implementation_instructions") or "").strip()
     mail = bool(p.get("implementation_mail"))
-    parts = []
-    if text or mail:
-        parts.append("## For every implementation on this Dreamfall board")
+    parts = ["## For every implementation on this Dreamfall board"]
     if text:
         parts.append(text)
     if mail:
         parts.append(MAIL_HOWTO)
+    parts.append(FINISH_HOWTO)
     return "\n\n".join(parts), (["--mail"] if mail else [])
 
 

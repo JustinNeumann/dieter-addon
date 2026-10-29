@@ -149,11 +149,16 @@ class NavigationLogic(unittest.TestCase):
 
 
 class ImplementationExtras(unittest.TestCase):
-    def test_nothing_by_default(self):
+    def test_only_how_to_finish_by_default(self):
         st = df.clean_settings({"name": "x", "categories": "a"})
         self.assertEqual((st["implementation_instructions"], st["implementation_mail"]), ("", False))
-        self.assertEqual(df.implementation_extras({**PIPE, **st}), ("", []))
+        self.assertEqual(df.implementation_extras({**PIPE, **st}), ("## For every implementation on this Dreamfall board\n\n" + df.FINISH_HOWTO, []))
         self.assertNotIn("For every implementation", df.copy_brief("idea", "Picked", "Navigation", "you", "", "c_1"))
+
+    def test_finished_cards_move_to_review_without_a_remote(self):
+        text, _ = df.implementation_extras(PIPE)
+        self.assertIn("--lane review", text)
+        self.assertIn("no git remote", text)
 
     def test_instructions_and_mail_go_on_picked_cards(self):
         st = df.clean_settings({"name": "x", "categories": "a", "implementation_instructions": "Add a chart.\r\n\r\n\r\nMail it.", "implementation_mail": True})
@@ -163,6 +168,7 @@ class ImplementationExtras(unittest.TestCase):
         brief = df.copy_brief("**Idea:** X", "Picked", "Navigation", "you", "now", "c_1", text)
         self.assertIn("## For every implementation on this Dreamfall board\n\nAdd a chart.\n\nMail it.", brief)
         self.assertIn("dieter mail send", brief)
+        self.assertLess(brief.index("dieter mail send"), brief.index(df.FINISH_HOWTO))   # finishing comes last
         self.assertTrue(brief.rstrip().endswith("<!-- dreamfall-source: c_1 -->"))   # the marker stays last
 
     def test_mail_without_instructions_still_explains_how(self):

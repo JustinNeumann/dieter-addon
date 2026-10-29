@@ -538,6 +538,9 @@
     const label = { promote: "Promoted", pick: "Picked", release: "Released", park: "Parked" }[v.kind] || v.kind;
     return `<div class="df-verdict" style="--vc:${good ? "var(--success)" : "var(--secondary-label)"}">${ico(good ? "thumb_up" : v.kind === "park" ? "pause_circle" : "thumb_down", 14)}<span><b>${label}</b>${v.score != null ? ` · ${esc(v.score)}/10` : ""}${v.rationale ? " · " + esc(v.rationale) : ""}</span></div>`;
   }
+  // An Implementation card whose agent ended its turn but left it in Running (e.g. no pull request to open in a
+  // project without a git remote): the lane alone would say "Running" for good.
+  const dfFinished = (c) => c.lane === "running" && rtState(c.runtime) === "idle" && !!c.initial_prompt_sent && !!c.last_activity_at;
   function dfCard(st, c) {
     const rec = dfRec(c.id); const [cat, title] = dfSplit(c); const p = st.p;
     const src = rec?.source ? (p.stages || []).find((s) => s.role === (dfRec(rec.source)?.stage)) || (p.stages || [])[(p.stages || []).indexOf(st.s) - 1] : null;
@@ -551,9 +554,11 @@
     if (st.human) metas.push(mpill("account_tree", workspaceBadge(c)));
     let foot = "", button = "";
     if (st.human) {
-      const tone = rtTone(c.runtime), badge = rtBadge(c.runtime); const status = tone !== "idle" || badge ? rtLabel(c.runtime) : DF_LANES.implementation[c.lane] || "";
-      foot = `<div class="status" style="color:${toneColor(tone)}">${tone === "active" ? `<span class="livedot"></span>` : `<span class="sdot"></span>`}<span>${esc(status)}</span></div><div class="agent">${esc([agentLine(c), tokensLabel(c)].filter(Boolean).join(" · "))}</div>`;
+      const tone = rtTone(c.runtime), badge = rtBadge(c.runtime), finished = dfFinished(c);
+      const status = tone !== "idle" || badge ? rtLabel(c.runtime) : finished ? "Finished · still in Running" : DF_LANES.implementation[c.lane] || "";
+      foot = `<div class="status" style="color:${toneColor(finished ? "attention" : tone)}">${tone === "active" ? `<span class="livedot"></span>` : `<span class="sdot"></span>`}<span>${esc(status)}</span></div><div class="agent">${esc([agentLine(c), tokensLabel(c)].filter(Boolean).join(" · "))}</div>`;
       if (c.lane === "todo" && !c.initial_prompt_sent) button = `<button class="btn filled with-icon df-btn" data-act="df-start" data-id="${c.id}" data-pid="${p.id}">${ico("play_arrow", 18)}Start</button>`;
+      else if (finished) button = `<button class="btn tonal with-icon df-btn" data-act="move" data-id="${c.id}" data-lane="review">${ico("checklist", 16)}Review</button>`;
     } else if (["todo", "running"].includes(c.lane)) {
       const next = dfNext(p, st.role);
       if (next?.actor === "human") { foot = `<div class="agent">Waiting for you</div>`; button = `<button class="btn tonal with-icon df-btn" data-act="df-pick" data-id="${c.id}" data-pid="${p.id}">${ico("arrow_forward", 16)}Pick</button>`; }
@@ -603,7 +608,8 @@
         else { const vs = prev.ideas.map((c) => dfRec(c.id)?.verdict?.kind).filter((k) => k === "promote" || k === "release"); const up = vs.filter((k) => k === "promote").length; label = vs.length ? `${up} of ${vs.length}` : ""; }
         arrow = `<div class="df-arrow"><div class="in">${ico("arrow_forward", 18)}<span class="pct">${esc(label)}</span></div></div>`;
       }
-      const sub = st.human ? `${ico("person", 13)}You · human gate${st.lane("running").length ? ` · ${st.lane("running").length} running` : ""}` : `${ico("smart_toy", 13)}Agent · ${dfHHMM(st.s.cron) ? "daily " + dfHHMM(st.s.cron) : "on demand"}${st.p.enabled === false ? " · paused" : ""}`;
+      const run = st.human ? st.lane("running") : [], done = run.filter(dfFinished).length;
+      const sub = st.human ? `${ico("person", 13)}You · human gate${run.length > done ? ` · ${run.length - done} running` : ""}${done ? ` · ${done} finished` : ""}` : `${ico("smart_toy", 13)}Agent · ${dfHHMM(st.s.cron) ? "daily " + dfHHMM(st.s.cron) : "on demand"}${st.p.enabled === false ? " · paused" : ""}`;
       return `${arrow}<div class="df-stage-chip" style="--stage:${st.color}" data-act="df-stage" data-id="${st.p.id}" data-stage="${st.role}"><span class="num">${ico(st.icon, 20)}</span><div class="t"><div class="n">${esc(st.name)}</div><div class="s">${sub}</div></div><div class="big">${st.queue.length}</div></div>`;
     }).join("")}</div>`;
   }
