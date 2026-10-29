@@ -2,6 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.52 (2026-10-29)
+
+- **Housekeeping of work folders**: the daemon keeps the folder of every worktree card forever (28 folders, 940 MB after
+  two days). The bridge now removes, once an hour, the folder and branch of a card that has been in Done or archived and
+  untouched for 14 days (option `worktree_retention_days`, 0 = off). It uses the daemon's own operations (`workspace run
+  --kind cleanup`; for a squash-merged pull request, whose branch Git does not see as merged, `discard` once GitHub
+  reports a merged pull request ending at the folder's last commit). Unmerged work and running cards stay.
+  `python3 -m unittest discover -s dieter/tests -p 'housekeeping_test.py'`.
+
 ## 0.6.429.51 (2026-10-29)
 
 - New task and New chat now start with **New worktree** and **Publishing → Pull request** selected (before: Project

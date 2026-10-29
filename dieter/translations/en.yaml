@@ -20,6 +20,9 @@ configuration:
   projects:
     name: Projects
     description: "Repositories to clone into /data/projects and register with Dieter: name, git_url, branch (optional)."
+  worktree_retention_days:
+    name: Work folder retention (days)
+    description: "Days after which the work folder of a finished worktree card (Done or archived, merged) is removed. 0 keeps them all."
   log_level:
     name: Log level
     description: Bridge log level.
