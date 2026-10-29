@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.46 (2026-10-29)
+
+- New task and New chat now start with **New worktree** and **Publishing → Pull request** selected (before: Project
+  directory and the board's default). Switch back to Project directory, or pick Board default / Manual / Push to base
+  under Publishing, for a single card.
+
 ## 0.6.429.45 (2026-10-29)
 
 - Dreamfall: a fourth section in New Dreamfall board and Settings, **Implementation**: instructions for every card you
