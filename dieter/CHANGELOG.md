@@ -2,6 +2,21 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.2 (2026-10-29)
+
+- **Preview of the new page at `next/`**: Dieter's own Compose screens (the Android/iOS app's UI) compiled for the
+  browser with Kotlin/Wasm, from the new repository
+  [dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) (release 0.1.0, pinned by sha256). It still
+  shows demo data; your boards follow once the web host lands (see that repository's plan). Open it from **Tools →
+  Preview → New page**. It is served behind Ingress like this page, so it works over Nabu Casa and in the Companion app,
+  and it follows Home Assistant's theme: light/dark switch with your HA profile without a reload, and with
+  Settings → Dynamic color on, its colours come from HA's primary colour. Browsers without WebAssembly GC (Safari/iOS
+  before 18.2) get a note with a link back to this page.
+- The bridge serves the bundle with immutable caching for content-hashed files and revalidation for the rest. Home
+  Assistant's Ingress drops `Accept-Encoding` and does not compress WebAssembly, so the page loads `.wasm.gz` and
+  inflates it in the browser: about 5 MB on the first load instead of 15 MB.
+- `/api/ws/echo`: a WebSocket echo that checks WebSockets pass Ingress (the new page will use one).
+
 ## 0.6.431.1 (2026-10-29)
 
 - **Dieter 0.6.431 from fork release v0.6.431-antigravity.6.** The bundled daemon now contains upstream Dieter through

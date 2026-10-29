@@ -137,6 +137,18 @@ RUN set -eu; \
     rm -rf /tmp/src /tmp/src.tar.gz /tmp/sources.sha; \
     ls /opt/dieter-runtime | wc -l
 
+# The new page (Compose UI in the browser, Kotlin/Wasm) from github.com/JustinNeumann/dieter-addon-kotlin: the
+# same files for every architecture. The bridge serves them at /next/. The sha256 is the release's SHA256SUMS line.
+ARG DIETER_WEB_VERSION=0.1.0
+ARG DIETER_WEB_SHA=8836594c19706de447d6e85a41bfbd5d41a91bd58247cec728803d82f1227f6b
+RUN set -eu; \
+    curl -fsSL -o /tmp/web.tar.gz "https://github.com/JustinNeumann/dieter-addon-kotlin/releases/download/v${DIETER_WEB_VERSION}/dieter-web-${DIETER_WEB_VERSION}.tar.gz"; \
+    echo "${DIETER_WEB_SHA}  /tmp/web.tar.gz" | sha256sum -c -; \
+    mkdir -p /opt/web; \
+    tar -xzf /tmp/web.tar.gz -C /opt/web --strip-components=1 --no-same-owner; \
+    rm /tmp/web.tar.gz; \
+    test -f /opt/web/index.html && cat /opt/web/BUILD.json
+
 COPY bridge/ /opt/bridge/
 # dreamfall: the command of the Dreamfall stage agents (bridge/dreamfall.py; they run it from their run cards)
 RUN printf '#!/bin/sh\nexec python3 /opt/bridge/dreamfall.py "$@"\n' > /usr/local/bin/dreamfall && chmod 755 /usr/local/bin/dreamfall \

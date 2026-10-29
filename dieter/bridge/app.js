@@ -1292,7 +1292,9 @@
     return `<div class="screen">${appbar({ title: "Tools", large: true, back: opts.back })}<div class="content" data-scroll="tools">
       ${sectionHeader("Machines")}${grp(["machines", "terminals", "screens"], { machines: machines.length ? `${online} of ${machines.length} online` : "" })}
       ${sectionHeader("Workspace", { trailing: proj ? `<span class="t-footnote c-secondary">${esc(proj.name)}</span>` : "" })}${grp(["files", "changes", "schedules"])}
-      ${sectionHeader("Account")}${grp(["usage", "devices", "settings"], { usage: lowest != null ? `${lowest}% left` : null })}</div></div>`;
+      ${sectionHeader("Account")}${grp(["usage", "devices", "settings"], { usage: lowest != null ? `${lowest}% left` : null })}
+      ${sectionHeader("Preview")}<div class="group">${listRow({ title: "New page", subtitle: "Dieter's Compose UI in the browser, still on demo data", glyph: "science", tile: "#AF52DE", act: "open-next", trailing: ico("chevron_right", 20, "c-secondary") })}</div>
+      ${sectionFooter("The app's own screens compiled for the browser. It will replace this page once it does everything this one does.")}</div></div>`;
   }
   function toolScreen(route, opts) {
     const page = route.page; const [title, glyph] = TOOL_PAGES[page] || [page, "grid_view"];
@@ -2537,6 +2539,7 @@
       case "schedule": { const r = top(); push({ kind: "tool", page: "schedules", scheduleId: id, projectId: r?.projectId }); break; }
       case "settings-pick": settingsPick(el.dataset.key); break;
       case "prompts-reload": loadPrompts(); break;
+      case "open-next": location.href = "next/"; break;
       case "prompt-edit": S.set.draft = null; push({ kind: "tool", page: "settings", prompt: el.dataset.key }); break;
       case "prompt-save": savePrompt(false); break;
       case "prompt-reset": savePrompt(true); break;

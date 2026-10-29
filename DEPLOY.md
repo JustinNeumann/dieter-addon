@@ -84,3 +84,11 @@ and release artifacts that affect the add-on (scheduled card).
   (tarball checksums from its `SHA256SUMS`; the sigstore bundle's digest and workflow identity checked, not
   cryptographically verified (no cosign here); runtime sources checksum and harness archives unchanged; the
   bridge reuses the staged runtime of an equal archive), Re-enroll texts in the page and DOCS.md.
+
+## The new page's bundle (dieter-addon-kotlin)
+
+`dieter/Dockerfile` downloads `dieter-web-<version>.tar.gz` from the releases of
+[JustinNeumann/dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) and checks its sha256.
+A new bundle: tag `vX.Y.Z` there (its CI builds and publishes the tarball and `SHA256SUMS`), then set
+`DIETER_WEB_VERSION` and `DIETER_WEB_SHA` (the line of `SHA256SUMS`) and bump the add-on version. For a local test
+of an unreleased bundle: `tools/package.sh` there, then `WEB_BUNDLE=<unpacked dir> dieter/tests/run.sh e2e/next.spec.mjs`.

@@ -377,6 +377,25 @@ Home Assistant's time zone. The system log holds WARNING and above since the las
 `/api/error_log` for the whole log file, which Home Assistant OS does not provide (it logs to the journal, and the
 Supervisor's `/core/logs` needs `hassio_api`, which stays off). The Claude Code note in `CLAUDE.md` mentions it.
 
+## New page (preview)
+
+**Tools → Preview → New page** opens Dieter's own app screens (the Compose UI of the Android and iOS apps)
+compiled for the browser, at `next/` of this page. It is built in
+[dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) and pinned in the image by version
+and sha256; its plan lists what comes next. For now it shows **demo data**: nothing you do there reaches your
+boards. It will replace this page once it does everything this one does.
+
+- Served behind Ingress like this page: HA login, Nabu Casa and the Companion app work.
+- **Theme:** Appearance *System* follows Home Assistant's light/dark mode (your HA profile, also when it differs
+  from the device's), live without a reload. **Dynamic color** (Settings) takes Dieter's colours from Home
+  Assistant's primary colour, including custom themes.
+- **Browsers:** it needs WebAssembly GC: current Chrome, Edge and Firefox, Android's WebView (Companion app),
+  Safari and iPhone/iPad from iOS 18.2. Older browsers see a note with a link back to this page.
+- First load about 5 MB (the WebAssembly is fetched gzip-compressed and inflated in the browser, because Ingress
+  neither forwards `Accept-Encoding` nor compresses WebAssembly), afterwards from the browser cache.
+- `next/?theme=dark|light` overrides the theme, `next/?script=tab projects; board Main` replays the app's debug
+  navigation.
+
 ## Backups
 
 `/data` is backed up with the add-on, except the harness runtime and the project checkouts
