@@ -611,7 +611,7 @@
     const p = dfPipeline(route.id);
     if (!p) return `<div class="screen">${appbar({ title: "Dreamfall", back: opts.back })}${dfData().ready === false ? spinnerCenter() : `<div class="center-fill t-body-em c-secondary">This Dreamfall board is no longer available.</div>`}</div>`;
     const stages = (p.stages || []).map((s) => dfStage(p, s));
-    const total = stages.reduce((n, st) => n + st.ideas.length, 0);
+    const total = dfIdeas(p);
     const wide = !opts.inList && innerWidth - (hasRail() ? 80 : 0) >= stages.length * 312 + 20;
     const page = stages.some((st) => st.role === S.lanePage[p.id]) ? S.lanePage[p.id] : (stages.find((st) => st.role === "navigation") || stages[0]).role;
     let body;
@@ -849,7 +849,13 @@
     return out;
   }
   function dfWaiting(p) { const s = (p.stages || []).find((x) => x.role === "navigation") || (p.stages || [])[1]; return s ? (S.data.cards || []).filter((c) => c.board_id === s.board_id && !c.archived && ["todo", "running"].includes(c.lane) && !dfIsRun(s, c)).length : 0; }
-  function dfIdeas(p) { const ids = new Set((p.stages || []).map((s) => s.board_id)); return (S.data.cards || []).filter((c) => ids.has(c.board_id) && !c.archived && !dfIsRun((p.stages || []).find((s) => s.board_id === c.board_id), c)).length; }
+  // distinct ideas: the bridge counts each idea once (the card it started as, from the records, released ones beyond the
+  // page's tail included), plus cards here without any record (added in another app); copies on later stages don't count
+  function dfIdeas(p) {
+    const ids = new Set((p.stages || []).map((s) => s.board_id));
+    const unrecorded = (S.data.cards || []).filter((c) => ids.has(c.board_id) && !c.archived && !dfRec(c.id) && !dfIsRun((p.stages || []).find((s) => s.board_id === c.board_id), c)).length;
+    return (dfData().ideas?.[p.id] || 0) + unrecorded;
+  }
 
   // ---- Chats (ChatsScreen.kt)
   function chatsScreen(opts) {
