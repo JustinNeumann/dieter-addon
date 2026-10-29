@@ -2,6 +2,17 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.57 (2026-10-29)
+
+- **Dieter from fork release v0.6.429-antigravity.5: the board state rebuilds ~4× faster** (0.96 s → 0.22 s on a Pi 5
+  with 340 cards). The daemon rebuilds the state of all projects after every metadata change, several times a second
+  while agents run, and holds its writer lock while it does; the page's board poll, `dieter status` and `dieter project
+  list` asked for it each time, and card creates, moves and transcript appends waited behind it. A peer-store query
+  walked the whole table from the start once per card, and every card opened its own snapshot; both are fixed in the
+  fork, and the state is byte-identical. Measured with a profiling harness on a copy of this store (see the fork's
+  changelog). The harness runtime archive is unchanged, so the bridge reuses the staged runtime instead of downloading
+  ~775 MB again. `SHA256SUMS` was verified with cosign against the fork's release workflow at the tag.
+
 ## 0.6.429.56 (2026-10-29)
 
 - Fixed: scrolling down the Tools tab (and other pages with a large title) in a tall window, e.g. the full-page kiosk view,
