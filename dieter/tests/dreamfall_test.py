@@ -149,11 +149,16 @@ class NavigationLogic(unittest.TestCase):
 
 
 class ImplementationExtras(unittest.TestCase):
-    def test_nothing_by_default(self):
+    def test_only_how_to_finish_by_default(self):
         st = df.clean_settings({"name": "x", "categories": "a"})
         self.assertEqual((st["implementation_instructions"], st["implementation_mail"]), ("", False))
-        self.assertEqual(df.implementation_extras({**PIPE, **st}), ("", []))
+        self.assertEqual(df.implementation_extras({**PIPE, **st}), ("## For every implementation on this Dreamfall board\n\n" + df.FINISH_HOWTO, []))
         self.assertNotIn("For every implementation", df.copy_brief("idea", "Picked", "Navigation", "you", "", "c_1"))
+
+    def test_finished_cards_move_to_review_without_a_remote(self):
+        text, _ = df.implementation_extras(PIPE)
+        self.assertIn("--lane review", text)
+        self.assertIn("no git remote", text)
 
     def test_instructions_and_mail_go_on_picked_cards(self):
         st = df.clean_settings({"name": "x", "categories": "a", "implementation_instructions": "Add a chart.\r\n\r\n\r\nMail it.", "implementation_mail": True})
@@ -163,6 +168,7 @@ class ImplementationExtras(unittest.TestCase):
         brief = df.copy_brief("**Idea:** X", "Picked", "Navigation", "you", "now", "c_1", text)
         self.assertIn("## For every implementation on this Dreamfall board\n\nAdd a chart.\n\nMail it.", brief)
         self.assertIn("dieter mail send", brief)
+        self.assertLess(brief.index("dieter mail send"), brief.index(df.FINISH_HOWTO))   # finishing comes last
         self.assertTrue(brief.rstrip().endswith("<!-- dreamfall-source: c_1 -->"))   # the marker stays last
 
     def test_mail_without_instructions_still_explains_how(self):
@@ -233,6 +239,46 @@ class CacheView(unittest.TestCase):
         self.assertEqual(cards["c_2"]["lane"], "done")             # the local move wins over the older state copy
         self.assertIn("c_3", cards)
         self.assertFalse(self.c.apply_local({"c_2": "done"}, []))  # already there: nothing to do
+
+    def test_feed_takes_stage_lanes_from_the_project_list(self):
+        self.c.records = {"p." + PIPE["id"]: PIPE}
+        self.c.cards = {"b_gone": {"todo": (1, [])}}
+        old = [{"id": f"c_d{i}", "board_id": "b_n", "lane": "done", "phase_changed_at": f"2026-10-{1 + i // 24:02}T{i % 24:02}:00:00Z"} for i in range(80)]
+        cards = [{"id": "c_1", "board_id": "b_e", "lane": "todo"}, {"id": "c_2", "board_id": "b_n", "lane": "running"},
+                 {"id": "c_3", "board_id": "b_x", "lane": "todo"}, *old]
+        self.assertTrue(self.c.feed("p_1", cards))
+        self.assertEqual([c["id"] for c in self.c.cards_of("b_e")], ["c_1"])
+        self.assertEqual(self.c.cards_of("b_i"), [])                       # read, empty
+        self.assertNotIn("b_x", self.c.cards)                               # not a stage board
+        self.assertNotIn("b_gone", self.c.cards)                            # no longer a stage board
+        done = self.c.cards["b_n"]["done"][1]
+        self.assertEqual(len(done), df.Cache.LANE_TAIL + 20)
+        self.assertEqual(done[-1]["id"], "c_d79")                           # the newest stay
+        self.assertFalse(self.c.feed("p_1", cards))                         # nothing new
+        self.assertFalse(self.c.feed("p_other", cards))                     # another project's list
+        self.assertEqual(self.c.stage_projects(), {"p_1"})
+
+    def test_put_cards_replaces_moves_and_drops(self):
+        self.c.records = {"p." + PIPE["id"]: PIPE}
+        self.c.feed("p_1", [{"id": "c_1", "board_id": "b_e", "lane": "todo"}, {"id": "c_2", "board_id": "b_n", "lane": "todo"}])
+        calls = self.calls
+        self.assertTrue(self.c.put_cards([{"id": "c_1", "board_id": "b_e", "lane": "review"}, {"id": "c_9", "board_id": "b_x", "lane": "todo"}], ["c_2", "c_unknown"]))
+        self.assertEqual([(c["id"], c["lane"]) for c in self.c.cards_of("b_e")], [("c_1", "review")])
+        self.assertEqual(self.c.cards_of("b_n"), [])
+        self.assertNotIn("b_x", self.c.cards)
+        self.assertGreater(self.calls, calls)
+        self.assertFalse(self.c.put_cards([{"id": "c_1", "board_id": "b_e", "lane": "review"}], ["c_unknown"]))   # same copy: no change
+
+    def test_new_pipeline_asks_for_its_boards(self):
+        asked = []
+        c = df.Cache(lambda x: x, on_change=lambda: None, on_boards=lambda: asked.append(1), log=lambda *a: None)
+        c._frame({"reset": True})
+        c._frame({"entries": [entry("c.c_1", {"stage": "enumeration"})], "caughtUp": True})
+        self.assertEqual(asked, [])
+        c._frame({"entries": [entry("p." + PIPE["id"], PIPE)]})
+        self.assertEqual(asked, [1])
+        c._frame({"entries": [entry("c.c_2", {"stage": "navigation"})]})   # an idea's record: the boards stay
+        self.assertEqual(asked, [1])
 
     def test_transfer_scans_known_cards_instead_of_listing(self):
         calls = []

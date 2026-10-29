@@ -31,6 +31,7 @@ not be root anyway.
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the bridge on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR`; staged runtimes of earlier versions are removed, and the Bun it carries is installed as the daemon's managed Bun (`/data/dieter/runtime/tools/bun/<bun version>`), which Oh My Pi's model discovery would otherwise download the whole archive for |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |
 | `hass-cli` 1.0.0 (HA core REST API), `ha-logs` (HA logs) | `/usr/local/bin`; authenticated with the add-on's token, see below |
+| `vl-convert` 1.9.0 (Vega-Lite/Vega charts to SVG, PNG, PDF; bundled fonts) | `/usr/local/bin`, pinned by checksum; agents render a chart and look at it before they mail it or show it in the chat (Claude Code's note in `/data/.claude/CLAUDE.md` says so; for Codex and Antigravity add it to Tools → Settings → Agent instructions) |
 | runtime sources of the same build (`/opt/dieter-runtime`, from the fork tag, checksum-verified) | `runner.mjs` + adapters, laid over the archive's `node_modules`; the **Antigravity** adapter is the add-on's own copy (`patches/antigravity-runtime.mjs`, laid over the fork's at image build by `patches/patch_runtime.py`) |
 | project checkouts | `/data/projects/<name>` |
 
@@ -74,7 +75,8 @@ when the sign-in fails for lack of network, git keeps its plain credential store
   card's changes: *Manual* (the default) leaves pushing and pull requests to explicit actions or the task,
   *Pull request* publishes them as a pull request, *Push to base* pushes validated changes to the base
   branch. **New board** and a board's ⋮ menu → **Publishing…** set a board's mode (cards created afterwards
-  inherit it), New task → *New worktree* → **Publishing** overrides it for one card. The Access switches
+  inherit it), New task → *New worktree* → **Publishing** overrides it for one card. New task and New chat start
+  with *New worktree* and *Pull request* selected; choose *Board default* there to follow the board instead. The Access switches
   of New task (vault, mail) are now passed on as well.
 
 What the token can do, an agent can do, also one led astray by text it reads; agents and the bridge run as
@@ -162,6 +164,32 @@ resumes it, lists the occurrence history (each entry opens its card) and deletes
 and history stay). The scheduler runs inside the add-on's daemon, so schedules fire while Home
 Assistant is up. Agents themselves can also create schedules and cards with the CLI inside a turn.
 
+## Mail
+
+The **Mail** tab is the add-on's Dieter Mail: the read-only Markdown reports agents send with
+`dieter mail send` from cards, chats and schedules created with mail access (the **Allow mail to you** switch
+of New task and Schedules), and what scripts send as operator. It follows the Android app: the Inbox newest
+first in date groups (Today, Yesterday, This week, Last week, then by month), with sender, subject and preview;
+unread messages have a blue dot, important ones a red **!**, flagged ones a flag. The chips switch between
+**Inbox**, **Flagged**, **Unread**, **Archive** and **Trash**; search matches subject, sender, project and
+preview; the filter button narrows to a project, a sender or important mail; ⋮ marks everything read or
+empties the Trash. With a mouse, a row shows buttons for read/unread and archive when you point at it.
+
+Opening a message marks it read. Its page shows the sender (schedule, card, chat or operator, project,
+machine, agent and model), **Open conversation** for the card or chat that sent it, Archive, Delete (to the
+Trash; in the Trash, for good) and in ⋮ read/unread, flag, Move to Inbox and Copy Markdown. Changes offer
+**Undo**. The tab's badge counts unread Inbox mail.
+
+The body renders the apps' Markdown subset: headings, emphasis, strikethrough, code, links, nested and task
+lists, quotes, rules, tables with alignment (wide ones scroll sideways). Raw HTML stays text, images show as
+links and are never loaded, and relative links open the file in the sending card's checkout (Files). Charts in
+`vega-lite` (or `vegalite`), `vega` and `mermaid` fences are drawn as static SVG that follows the light or dark
+theme unless the chart sets its own background. The page loads the renderers (Vega 5, Vega-Lite 5, Mermaid 11)
+from jsDelivr with pinned versions and integrity hashes the first time a message has a chart, so drawing needs
+internet access in the browser; external datasets, images and links in charts are blocked, and a chart that
+can't be drawn keeps its source. Messages stay on the add-on's machine (`/data/dieter`); the bridge reads them as
+operator and lists them every 10 s (`BRIDGE_MAIL_POLL_S`), at once after a change made on the page.
+
 ## Dreamfall boards
 
 A **Dreamfall board** is a funnel for ideas next to the project's Kanban boards: a project's ⋮ → **New
@@ -185,6 +213,9 @@ line, the times, the agent and the stage boards are optional.
 - **Implementation**: yours. Only your **Pick** on a Navigation idea copies it here as a Todo draft (in a
   new worktree or the project directory, optionally started at once). **Park** keeps an idea for later,
   **Back to the queue** undoes a release or a park, and you can promote a released idea yourself.
+  A picked card's brief tells its agent to move it to Review when the work is committed and checked, also
+  without a pull request when the project has no git remote. A card whose agent finished but left it in
+  Running shows **Finished · still in Running** and a **Review** button.
 
 The board shows the stages side by side with a funnel on top (stage, actor, schedule, waiting ideas,
 how many ideas pass) and, on a phone, as tabs. Released, transferred, parked and picked ideas sit in
