@@ -2,6 +2,17 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.46 (2026-10-29)
+
+- **Mail tab**: the page lists Dieter Mail. Until now the tab was a placeholder that showed "No mail" while the
+  add-on's mailbox held messages. Modelled on the Android app: Inbox, Flagged, Unread, Archive and Trash with
+  counts, date groups, search, a project/sender/important filter, an unread badge on the tab, read/unread, flag,
+  archive, Trash and delete with Undo, Mark all read and Empty Trash. A message shows its sender, **Open
+  conversation** and the body as GitHub-flavored Markdown, with vega-lite, vega and mermaid charts drawn as SVG
+  (renderers from jsDelivr, pinned with integrity hashes; external data blocked; a broken chart keeps its source).
+  Bridge: `/api/state` carries the mail headers (listed every 10 s), `GET /api/mail/ID`, `POST /api/mail/mark`,
+  `POST /api/mail/delete`.
+
 ## 0.6.429.45 (2026-10-29)
 
 - Dreamfall: a fourth section in New Dreamfall board and Settings, **Implementation**: instructions for every card you

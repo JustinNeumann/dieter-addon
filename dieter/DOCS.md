@@ -161,6 +161,32 @@ resumes it, lists the occurrence history (each entry opens its card) and deletes
 and history stay). The scheduler runs inside the add-on's daemon, so schedules fire while Home
 Assistant is up. Agents themselves can also create schedules and cards with the CLI inside a turn.
 
+## Mail
+
+The **Mail** tab is the add-on's Dieter Mail: the read-only Markdown reports agents send with
+`dieter mail send` from cards, chats and schedules created with mail access (the **Allow mail to you** switch
+of New task and Schedules), and what scripts send as operator. It follows the Android app: the Inbox newest
+first in date groups (Today, Yesterday, This week, Last week, then by month), with sender, subject and preview;
+unread messages have a blue dot, important ones a red **!**, flagged ones a flag. The chips switch between
+**Inbox**, **Flagged**, **Unread**, **Archive** and **Trash**; search matches subject, sender, project and
+preview; the filter button narrows to a project, a sender or important mail; ⋮ marks everything read or
+empties the Trash. With a mouse, a row shows buttons for read/unread and archive when you point at it.
+
+Opening a message marks it read. Its page shows the sender (schedule, card, chat or operator, project,
+machine, agent and model), **Open conversation** for the card or chat that sent it, Archive, Delete (to the
+Trash; in the Trash, for good) and in ⋮ read/unread, flag, Move to Inbox and Copy Markdown. Changes offer
+**Undo**. The tab's badge counts unread Inbox mail.
+
+The body renders the apps' Markdown subset: headings, emphasis, strikethrough, code, links, nested and task
+lists, quotes, rules, tables with alignment (wide ones scroll sideways). Raw HTML stays text, images show as
+links and are never loaded, and relative links open the file in the sending card's checkout (Files). Charts in
+`vega-lite` (or `vegalite`), `vega` and `mermaid` fences are drawn as static SVG that follows the light or dark
+theme unless the chart sets its own background. The page loads the renderers (Vega 5, Vega-Lite 5, Mermaid 11)
+from jsDelivr with pinned versions and integrity hashes the first time a message has a chart, so drawing needs
+internet access in the browser; external datasets, images and links in charts are blocked, and a chart that
+can't be drawn keeps its source. Messages stay on the add-on's machine (`/data/dieter`); the bridge reads them as
+operator and lists them every 10 s (`BRIDGE_MAIL_POLL_S`), at once after a change made on the page.
+
 ## Dreamfall boards
 
 A **Dreamfall board** is a funnel for ideas next to the project's Kanban boards: a project's ⋮ → **New
