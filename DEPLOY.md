@@ -89,6 +89,7 @@ and release artifacts that affect the add-on (scheduled card).
 
 `dieter/Dockerfile` downloads `dieter-web-<version>.tar.gz` from the releases of
 [JustinNeumann/dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) and checks its sha256.
-A new bundle: tag `vX.Y.Z` there (its CI builds and publishes the tarball and `SHA256SUMS`), then set
-`DIETER_WEB_VERSION` and `DIETER_WEB_SHA` (the line of `SHA256SUMS`) and bump the add-on version. For a local test
-of an unreleased bundle: `tools/package.sh` there, then `WEB_BUNDLE=<unpacked dir> dieter/tests/run.sh e2e/next.spec.mjs`.
+A new bundle: tag `vX.Y.Z` there (its CI builds and publishes the tarball, the web host jar and `SHA256SUMS`), then
+set `DIETER_WEB_VERSION`, `DIETER_WEB_SHA` and `DIETER_WEB_HOST_SHA` (the lines of `SHA256SUMS`) and bump the add-on
+version. For a local test of unreleased builds: `tools/package.sh` and `./gradlew :host:fatJar` there, then
+`WEB_BUNDLE=<unpacked dir> WEB_HOST_JAR=<jar> dieter/tests/run.sh e2e/next.spec.mjs`.

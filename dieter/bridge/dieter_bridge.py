@@ -39,6 +39,8 @@ Endpoints:
   GET  /next/...              the new Compose page (Kotlin/Wasm bundle in /opt/web, DIETER_WEB_DIR): hashed files
                               immutable, index.html and resources no-cache + ETag; *.wasm.gz raw for the loader,
                               .br/.gz by Accept-Encoding only outside Ingress (Ingress strips that header)
+  GET  /next/core             WebSocket to the web host (the page's core; relayed with the per-boot secret)
+  GET  /next/signin?code=…    the gateway's redirect after GitHub sign-in, relayed to the web host
   GET  /api/ws/echo           WebSocket echo (checks that WebSockets pass Ingress; Phase 1 of the Compose page)
   POST /api/card              create {project, board, title, prompt, provider, model, effort, workspace, branch?, base?, publish?, vault?, mail?, lane, attachments?}
                               without a title: --auto-title, or with Settings → Ollama (HA) renamed in the background (title_entity)
@@ -90,6 +92,7 @@ import queue
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -2856,6 +2859,47 @@ def accepted_encodings(header):
     return out
 
 
+# The web host (dieter-addon-kotlin host/): the Compose page's core on the JVM, run by run.sh as its own user
+# with a private state directory (/data/web-host: device key, gateway session). It listens on loopback and
+# only answers requests that carry the per-boot secret, which run.sh hands to this bridge on an inherited
+# file descriptor (never in a file or the environment the agents could read). The bridge relays
+# next/core (the page's WebSocket) and next/signin (the gateway's redirect after GitHub sign-in).
+WEB_HOST_ADDR = os.environ.get("DIETER_WEB_HOST_ADDR", "127.0.0.1:8097")
+WEB_HOST_SECRET = None
+
+
+def read_web_host_secret():
+    """Takes the secret from the descriptor named by DIETER_WEB_SECRET_FD and closes it (before any child starts)."""
+    global WEB_HOST_SECRET
+    fd = os.environ.pop("DIETER_WEB_SECRET_FD", "")
+    if not fd.isdigit():
+        return
+    # Agents run as this bridge's user (they descend from it through the daemon): as a non-dumpable process its
+    # memory, environment and descriptors under /proc are closed to them, so the secret stays in this process.
+    try:
+        import ctypes
+        if ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0) != 0:   # PR_SET_DUMPABLE, 0
+            log("web host: could not make the bridge non-dumpable, errno", ctypes.get_errno())
+    except Exception as e:
+        log("web host: prctl unavailable:", e)
+    data = b""
+    try:
+        while True:
+            chunk = os.read(int(fd), 4096)
+            if not chunk:
+                break
+            data += chunk
+    except OSError as e:
+        log("web host: secret unreadable:", e)
+    finally:
+        try:
+            os.close(int(fd))
+        except OSError:
+            pass
+    WEB_HOST_SECRET = data.decode(errors="replace").strip() or None
+    log("web host: relay to", WEB_HOST_ADDR, "enabled" if WEB_HOST_SECRET else "disabled (no secret)")
+
+
 # --------------------------------------------------------------------------- http
 INDEX = os.path.join(HERE, "index.html")
 
@@ -3055,6 +3099,93 @@ class Handler(BaseHTTPRequestHandler):
         with open(path, "rb") as f:
             shutil.copyfileobj(f, self.wfile, 256 * 1024)
 
+    def web_host_relay(self, u, parts):
+        """next/core (WebSocket) and next/signin to the web host on loopback, with the per-boot secret."""
+        if not WEB_HOST_SECRET:
+            return self.send_text("The web host is not running in this build.", 503)
+        host, _, port = WEB_HOST_ADDR.rpartition(":")
+        try:
+            up = socket.create_connection((host, int(port)), timeout=5)
+        except OSError:
+            return self.send_text("The web host is starting or not running. Try again in a moment.", 503)
+        upgrade = (self.headers.get("Upgrade") or "").lower() == "websocket"
+        path = "/" + "/".join(parts) + (f"?{u.query}" if u.query else "")
+        lines = [f"GET {path} HTTP/1.1", f"Host: {WEB_HOST_ADDR}", f"X-Dieter-Web-Secret: {WEB_HOST_SECRET}"]
+        names = ["X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name"]
+        names += ["Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"] if upgrade else []
+        for name in names:
+            value = self.headers.get(name)
+            if value and "\r" not in value and "\n" not in value:
+                lines.append(f"{name}: {value}")
+        if not upgrade:
+            lines.append("Connection: close")
+        self.close_connection = True
+        try:
+            up.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1", "replace"))
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = up.recv(4096)
+                if not chunk:
+                    raise ConnectionError("the web host closed the connection")
+                head += chunk
+                if len(head) > 65536:
+                    raise ConnectionError("oversized response head")
+            up.settimeout(None)
+            if not upgrade:
+                body = head
+                while True:
+                    chunk = up.recv(65536)
+                    if not chunk:
+                        break
+                    body += chunk
+                self.connection.sendall(body)
+                return
+            self.connection.sendall(head)
+            if not head.startswith(b"HTTP/1.1 101"):
+                return
+
+            def downstream():   # host -> browser
+                try:
+                    while True:
+                        chunk = up.recv(65536)
+                        if not chunk:
+                            break
+                        self.connection.sendall(chunk)
+                except OSError:
+                    pass
+                finally:
+                    for sock in (self.connection, up):
+                        try:
+                            sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+
+            t = threading.Thread(target=downstream, daemon=True)
+            t.start()
+            try:   # browser -> host (rfile may already hold the first frames)
+                while True:
+                    chunk = self.rfile.read1(65536)
+                    if not chunk:
+                        break
+                    up.sendall(chunk)
+            except (OSError, ValueError):
+                pass
+            finally:
+                try:
+                    up.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                t.join(5)
+        except (ConnectionError, OSError) as e:
+            log("web host relay:", e)
+            try:
+                if not upgrade:
+                    self.send_text("The web host did not answer.", 502)
+            except OSError:
+                pass
+        finally:
+            up.close()
+
     def websocket_echo(self):
         """RFC 6455 echo for checking WebSockets through Ingress: text and binary frames come back."""
         key = self.headers.get("Sec-WebSocket-Key")
@@ -3114,6 +3245,8 @@ class Handler(BaseHTTPRequestHandler):
             parts = [p for p in u.path.split("/") if p]
             if not self.may_read():
                 return self.send_json({"error": "forbidden"}, 403)
+            if parts[:2] in (["next", "core"], ["next", "signin"]) and len(parts) == 2:
+                return self.web_host_relay(u, parts)
             if parts and parts[0] == "next":
                 return self.serve_web(u, parts)
             if parts == ["api", "ws", "echo"]:
@@ -3572,6 +3705,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    read_web_host_secret()   # first: no child may inherit the descriptor
     if ADDON:
         log(f"dieter bridge (add-on) on {BIND}:{PORT}, store {DIETER_HOME}")
         os.makedirs(DIETER_HOME, mode=0o700, exist_ok=True)

@@ -33,6 +33,7 @@ options:
   gateway_url: ""
   gateway_host_ip: ""
   machine_name: "home-assistant"
+  web_sign_in_callback: ""
   projects: []
   log_level: info
 schema:
@@ -45,6 +46,7 @@ schema:
   gateway_url: str?
   gateway_host_ip: str?
   machine_name: str?
+  web_sign_in_callback: str?
   projects:
     - name: str
       git_url: str

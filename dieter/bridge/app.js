@@ -6,6 +6,21 @@
 (() => {
   "use strict";
   if (!location.pathname.endsWith("/") && !/\.html?$/.test(location.pathname)) { location.replace(location.pathname + "/" + location.search + location.hash); return; }
+  // A deep link into the new page (<HA>/app/<slug>/next/…, e.g. the gateway's return after sign-in): Home Assistant
+  // opens the add-on at its root, so hand over to next/ with the parent's sub path and query. Not when the
+  // new page itself linked back here (referrer inside Ingress), or "classic page" links would loop.
+  try {
+    const p = window.parent !== window && window.parent.location;
+    const m = p && p.pathname.match(/^\/(?:app\/|hassio\/ingress\/)?(?:[0-9a-f]{8}|local)_[a-z0-9_]+\/next(\/.*)?$/);
+    if (m && !/\/api\/hassio_ingress\//.test(document.referrer)) {
+      const sub = (m[1] || "/").replace(/^\/+|\/+$/g, "");
+      const query = p.search.replace(/^\?/, "");
+      // next/signin is a page of its own (the web host's sign-in return); other sub paths are routes of the page
+      location.replace(sub === "signin" ? `next/signin${p.search}`
+        : sub ? `next/?route=${encodeURIComponent(sub)}${query ? "&" + query : ""}` : `next/${p.search}`);
+      return;
+    }
+  } catch (e) { /* not inside Home Assistant's frontend */ }
   const $ = (s, r = document) => r.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const ico = (name, size = 24, cls = "") => `<span class="ms s${size} ${cls}">${name}</span>`;
