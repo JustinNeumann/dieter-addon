@@ -1995,6 +1995,7 @@ class State:
         self.project_ids = []             # the last poll's projects: their lists start without waiting for `project list`
         self.polled_lanes = {}            # card id -> lane as the last poll saw it (without patches), for dieter_card_review
         self.patches = {}                 # card id -> (fields, at): changes made here that a poll may not have seen yet
+        self.added = {}                   # card id -> (card, at): cards and chats created here, the same for new ones
 
     def refresh(self, wait=False, timeout=30):
         """Something changed: poll again as soon as possible. wait=True returns once a poll that started after
@@ -2017,6 +2018,19 @@ class State:
             if self.data.get("ok"):
                 self.data = {**self.data, **{k: [{**c, **fields} if c["id"] == cid else c for c in self.data.get(k, [])]
                                              for k in ("cards", "chats")}}
+                self.rev += 1
+                self.cond.notify_all()
+        self.refresh()
+
+    def add(self, card):
+        """Show a card or chat created through the bridge at once: waiting for a poll that started after the
+        create took 5-10 s (one poll is ~5 s on a Pi 5 with three projects, and a running one had to finish first).
+        Polls that started before it keep it, the first one that started after it has it from the daemon."""
+        key = "chats" if card["kind"] == "chat" else "cards"
+        with self.lock:
+            self.added[card["id"]] = (card, time.time())
+            if self.data.get("ok"):
+                self.data = {**self.data, key: [card] + [c for c in self.data.get(key, []) if c["id"] != card["id"]]}
                 self.rev += 1
                 self.cond.notify_all()
         self.refresh()
@@ -2146,6 +2160,13 @@ class State:
             data["last_review"] = self.last_review
             data["boards"] = order_boards(data["boards"])   # under the lock: a reorder during this poll is not undone
             self.polled_lanes = {c["id"]: c["lane"] for c in cards}
+            for cid, (card, at) in list(self.added.items()):
+                if at < started:
+                    del self.added[cid]
+                    continue
+                listed = cards if card["kind"] == "card" else chats
+                if not any(c["id"] == cid for c in listed):
+                    listed.insert(0, card)
             for cid, (fields, at) in list(self.patches.items()):
                 if at < started:                               # this poll asked the daemon after the change
                     del self.patches[cid]
@@ -2916,13 +2937,19 @@ class Handler(BaseHTTPRequestHandler):
             upload_forget(files)
         c = out.get("card") if isinstance(out, dict) and "card" in out else out
         cid = (c or {}).get("id")
+        card = norm_card(c or {}, kind)
         if kind == "card" and cid:
             dreamfall_created(cid, b, self.user_name())
         if entity and cid:
             TITLE_PENDING[cid] = first_line_title(b["prompt"])
             threading.Thread(target=retitle, args=(kind, cid, b["prompt"], entity), daemon=True).start()
-        STATE.refresh(wait=True)   # the page opens the new card from /api/state
-        return {"ok": True, "id": cid, "card": norm_card(c or {}, kind)}
+        if cid:
+            if (kind == "chat" or b.get("start", True)) and card["runtime"] == "idle":
+                card["runtime"] = "running"    # the turn is starting; the next poll has the daemon's runtime
+            STATE.add(card)                    # the page opens the new card from /api/state
+        else:
+            STATE.refresh(wait=True)
+        return {"ok": True, "id": cid, "card": card}
 
     def card_project(self, cid):
         rev, data = STATE.snapshot()
