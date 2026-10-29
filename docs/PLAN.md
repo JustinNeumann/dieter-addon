@@ -1,0 +1,402 @@
+# Compose web UI for the Dieter add-on: plan
+
+Status: **plan only.** Nothing here is implemented yet, apart from the throwaway spike in
+`~/dieter/spike/web` (the real `apps/kotlin` UI compiled for the browser with demo data, shown in HA as the
+temporary *Dieter (web)* Webpage dashboard).
+
+The work runs in the order you set:
+
+1. [Remote access](#phase-1--remote-access-through-ingress): works over HTTPS / Nabu Casa / Companion app
+2. [Canvas drawing](#phase-2--canvas-drawing-selection-find-accessibility): selection, find, accessibility
+3. [Theme](#phase-3--theme-from-home-assistant): follows Home Assistant, not just the device
+4. [Feature parity](#phase-4--parity-with-dieter-addon-piece-by-piece) with today's `dieter-addon` page, piece by piece
+
+Phases 1–3 can be done on demo data. Phase 4 starts with the real data path (4.0) and then moves the add-on's
+features over one group at a time.
+
+---
+
+## Where things stand (spike)
+
+| | |
+|---|---|
+| What renders | The real Compose screens from `apps/kotlin/ui` (Inbox, Projects, boards, conversations, Chats, Mail, Tools) at phone, tablet and desktop widths, dark and light |
+| How | Standalone Gradle build (`~/dieter/spike/web`) that compiles `core/runtime` + `ui` common sources and the Wire models for `wasmJs`. Additions: 3 runtime actuals (`CoreLock`, `secureRandomBytes`, `localUtcOffsetSeconds`), copies of the JVM stubs for the UI's platform hooks, `DemoCore` (a `MobileCore` answering slices from demo data) |
+| One patch | `MobileTheme.kt` is filtered at build time so the Material type scale uses `platformMonospace()` (the browser has no system monospace font; the web actual bundles JetBrains Mono). Upstream this is a two-line change |
+| Size | ≈ 15 MB optimized (Skia wasm 8.4 MB, app wasm 6.2 MB, JS 0.5 MB), ≈ 5 MB gzip |
+| Build times on your PC | First build 3 min, incremental dev build ~12 s, production build ~100 s |
+| Not real yet | Data (demo only); terminal, screen sharing, attachment picker, share sheet, back button are no-ops |
+
+### Target architecture (decided in the last discussion)
+
+```
+Browser (HA Ingress iframe, same origin as HA)       Dieter add-on container
+┌───────────────────────────────┐                   ┌───────────────────────────────────────────┐
+│ Compose UI (wasm)             │                   │ bridge (Python, as today)                 │
+│ RemoteMobileCore              │──── Ingress ─────►│  /           old JS page (until switch)   │
+│   dispatch(Command) ─ bytes ─►│                   │  /next/      → web host                   │
+│   observe(Slice)   ◄─ bytes ──│                   │  /api/ha, rest_commands, events, push,    │
+└───────────────────────────────┘                   │  questions relay, uploads, housekeeping   │
+                                                    │                                           │
+                                                    │ web host (JVM, new)                       │
+                                                    │  serves the wasm bundle                   │
+                                                    │  WebSocket: Command/Update protobufs      │
+                                                    │  runs the real Kotlin core (ClientApi):   │──► daemon (loopback route)
+                                                    │  OkHttp transport, device key in /data    │──► gateway → other machines
+                                                    │                                           │
+                                                    │ Go daemon + Node harnesses (unchanged)    │
+                                                    └───────────────────────────────────────────┘
+```
+
+The UI only talks through `MobileCore` (`dispatch(Command)`, `observe(Slice, scope)`), and both carry Wire
+protobuf messages, the same contract the iOS app uses through its byte bridge. So the browser stays thin and
+the core runs on the JVM exactly as on Android.
+
+---
+
+## Decisions to take before Phase 4 (Phases 1–3 don't depend on them)
+
+| # | Decision | Recommendation | Why it matters |
+|---|---|---|---|
+| D1 | Data path | Web host (JVM) runs the Kotlin core; the browser gets `RemoteMobileCore` over a WebSocket | One trusted device, every machine visible, no mutual-TLS gRPC from a browser. The alternative (core in the browser) makes every browser a paired device and needs a new web transport in upstream's core |
+| D2 | Account requirement | The Compose UI needs a gateway account: the core's session is a gateway session, and the add-on's daemon must be **enrolled** (Tools → Machines → Gateway → Enroll exists today). The web host is approved as an app device once (pairing code) | Today's page also works *without* enrollment (it drives the local daemon through the CLI). Gateway-less installs keep the old page until there is an answer (see Open questions) |
+| D3 | Where add-on-only features live | Your fork's `apps/kotlin/ui` first, behind small extension points (extra Tools pages, Settings rows, board types, conversation widgets). Propose those points upstream (`docs/proposals`) | Dreamfall, agent questions, Claude sign-in etc. don't exist in upstream's apps. Without extension points every add-on feature becomes a fork patch |
+| D4 | Rollout | Side by side: old page at `/`, Compose at `/next/` (and a toggle in both). Switch the default when the parity table is green; remove the JS page last | Nothing breaks while parity grows; the HA package (sensors, push) keeps working throughout |
+| D5 | Where it is built | Fork CI ("Fork server release") also publishes `dieter-web-<version>.tar.gz` (bundle) and `dieter-web-host-<version>.jar`, checksummed; the add-on's Dockerfile pins and verifies them like the daemon | Building Gradle on a Pi is out; the add-on image stays a pure download of pinned artifacts |
+
+---
+
+## Phase 1 · Remote access through Ingress
+
+**Problem.** The spike is served from your PC over `http://`. A page opened over `https://` (Nabu Casa) may not
+embed `http://` content (mixed content), and it only works on your LAN while `watch.sh` runs.
+
+**Fix.** Serve the bundle from the add-on behind Ingress, like the current page. Ingress pages are served by
+HA itself under `/api/hassio_ingress/<token>/`, so they are **same origin** as HA: HTTPS via Nabu Casa, HA's
+login and the Companion app all work without anything extra. This is also the precondition for Phase 3
+(reading HA's theme needs same origin).
+
+### Steps
+
+1. **Serve the demo bundle from the bridge at `next/`.** Static files only, no new process yet: copy the
+   production dist into the image (`/opt/web`) and have `dieter_bridge.py` serve `GET /next/...` from there.
+   - Keep the trailing-slash guard the current page has (`/api/hassio_ingress/<token>/next` → `.../next/`),
+     because all asset URLs must stay **relative**. Check that the wasm loader and `composeResources/` resolve
+     relative to the page (they do on the LAN spike; verify under the Ingress prefix).
+   - Headers: hashed `*.wasm` / `*.js` → `Cache-Control: public, max-age=31536000, immutable`;
+     `index.html` → `no-cache`; `.wasm` as `application/wasm` (streaming compilation).
+   - Ship pre-compressed `.br` / `.gz` next to the files and serve them by `Accept-Encoding` (cuts the first
+     load over Nabu Casa from ~15 MB to ~5 MB).
+2. **Build it in CI (D5).** Until the fork publishes the bundle, the add-on's `builder.yaml` can check out
+   the fork at the bundled tag and run the spike build. Later replace that with the pinned release asset.
+3. **Loader page.** Background from the theme (no white flash; Phase 3 refines it), "Loading Dieter…",
+   and a clear message when the browser lacks WebAssembly GC.
+4. **Browser coverage.** Kotlin/Wasm needs WebAssembly GC: current Chrome/Edge/Firefox, Android System WebView
+   (Companion app on Android), Safari / iOS WebView **from 18.2** (Companion app on iPhone and iPad follows
+   the iOS version). Decide whether older iOS matters: Compose's *compatibility mode* builds a JS fallback
+   next to the wasm build, but it needs an extra `js()` target (all dependencies support it; doubles build
+   time and output).
+5. **WebSocket over Ingress.** Not needed for demo data, but test it now with a trivial echo endpoint so
+   Phase 4 has no surprise: `ingress_stream: true` is already set in `config.yaml`.
+6. **Remove the temporary setup.** `cat ~/dieter/spike/web/ha/dashboard.py | ssh hassio@192.168.0.10 'python3 - remove'`,
+   stop `watch.sh`.
+
+### Verify
+
+- [ ] LAN `http://homeassistant.local:8123` → sidebar Dieter → `/next/` loads
+- [ ] Nabu Casa `https://…ui.nabu.casa` → same
+- [ ] Companion app Android and iOS (phone + tablet), incl. a cold start on mobile data
+- [ ] First-load and cached-load times recorded (target: < 3 s cached on a phone)
+- [ ] Playwright: port `page loads through Ingress with relative assets` to `/next/` (the e2e suite's
+      Ingress-like proxy already exists: `tests/ingress-proxy.mjs`)
+
+**Done when** `/next/` works everywhere the current page works.
+
+---
+
+## Phase 2 · Canvas drawing: selection, find, accessibility
+
+Compose for Web draws everything into one `<canvas>`. What that changes compared to today's DOM page:
+
+| Browser feature | Today's JS page | Compose on canvas |
+|---|---|---|
+| Select and copy text | everywhere | only inside `SelectionContainer` (already used in the conversation timeline) |
+| Find in page (Ctrl/⌘+F) | yes | no: the browser cannot search a canvas |
+| Screen readers, keyboard navigation | DOM semantics | Compose semantics mapped to the browser (Compose for Web Beta lists "fundamental accessibility support"); depth must be measured |
+| Browser translation, spellcheck, autofill | yes | no (text fields get IME support from Compose) |
+| Links: hover URL, middle click, "copy link" | yes | only what Compose implements |
+| Page zoom | yes | yes (canvas rescales) |
+
+### Steps
+
+1. **Measure first (half a day).** Same demo build, a checklist per screen (Inbox, board, conversation, Mail
+   message, Files, New task):
+   - screen readers: Orca (Linux desktop), VoiceOver (iPad/Mac), TalkBack in the Companion app;
+   - keyboard only: Tab order, Enter/Space, Escape closes sheets;
+   - selection: drag-select in replies, mail and files; copy; long press on touch.
+   Write the results into this file. The UI already sets a lot of semantics (`contentDescription`,
+   `testTag`), so expect a usable baseline.
+2. **Use what Compose already offers.**
+   - `SelectionContainer` around mail bodies, file viewer text, tool output, subagent details (the
+     conversation has it).
+   - **In-app find**: intercept Ctrl/⌘+F at the window level and open a find bar for the current screen
+     (conversation, mail message, file). It searches the slice data, not the canvas, and scrolls to the
+     hits.
+   - Fix whatever semantics gaps step 1 finds, in the shared `:ui`, so Android/iOS benefit too.
+3. **HTML islands for read-heavy content** (`WebElementView`: real DOM elements placed inside the Compose
+   layout). Candidates, in order of value:
+   - **Markdown documents**: the Mail message body and the file viewer as real HTML. That gives native
+     selection, Ctrl+F, translation and screen-reader support where people read the most. Use the same
+     Markdown subset as today.
+   - **Diagrams**: implement `NativeMarkdownDiagram` (Android/iOS run the bundled offline renderer from
+     `apps/apple/mac/MarkdownPreview` in a WebView) by running that same bundle in an HTML island. Mail's
+     vega-lite / vega / mermaid charts then work offline, unlike today's jsDelivr loading.
+   - **Terminal**: `NativeTerminal` as an xterm.js island (later, see Phase 4 H).
+   - Risks: islands sit above the canvas, so scrolling inside lazy lists and overlapping sheets/menus need
+     care. Start with full-screen readers (mail message, file viewer), not the timeline.
+4. **Decision gate.** If step 1 shows accessibility that is not good enough for your use, the fallback is a
+   DOM UI (Compose HTML) that reuses the store and models but not the composables. That is a rewrite of
+   every screen, so only go there for a hard requirement.
+
+**Done when** the measured checklist passes for the screens above and Ctrl/⌘+F works in conversation, mail and
+files.
+
+---
+
+## Phase 3 · Theme from Home Assistant
+
+Today the spike (and the current page) follow `prefers-color-scheme` of the device. HA can be in dark
+mode on a light device, use a custom theme, or switch per user.
+
+### Steps
+
+1. **Read HA's theme.** Behind Ingress the page is same origin with HA (Phase 1), so the page can read the
+   parent frame:
+   - `window.parent.document.querySelector("home-assistant").hass`: `themes.darkMode`, `selectedTheme`
+     (empty for *Auto*), theme name;
+   - CSS custom properties HA applies to the parent's document: `--primary-color`,
+     `--accent-color`, `--primary-background-color`, `--card-background-color`, `--primary-text-color`;
+   - first check what HA's app-panel message `home-assistant/properties` contains: the current page already
+     subscribes to it for deep links. If it carries theme data, prefer it over reading the parent DOM.
+   - Fallbacks: `?theme=dark|light` (like today's page), then `prefers-color-scheme`.
+2. **Follow changes.** A `MutationObserver` on the parent's `<html>` style and class, plus `matchMedia`, plus a
+   re-read on `visibilitychange` (the Companion app). Debounce, then push the new values into the store.
+3. **Map into Dieter's theming. Only web actuals change; nothing in upstream's screens.**
+   - Light/dark → `ThemeModel.setAppearance("dark" | "light")`.
+   - Colors: implement `platformDynamicScheme(dark)` on web with MaterialKolor
+     (`dynamicColorScheme(seedColor = HA --primary-color, isDark = …)`, supports wasm) and set
+     `platformSupportsDynamicColor = true`. The existing Settings switch "Dynamic color" then means
+     *follow Home Assistant's theme*, the way it means Material You on Android. With the switch off, the
+     user's Dieter palette applies.
+   - Optional: take the background and surface colors from HA's variables, so the panel blends with HA's
+     sidebar instead of matching only in hue. Decide by looking at both.
+   - Keep Sora as the display font (Dieter's look); don't follow HA's font.
+4. **Loader and browser chrome.** The loader background and `<meta name="theme-color">` come from the same
+   values, so there's no flash before Compose starts.
+
+### Verify
+
+- [ ] HA profile Light / Dark / Auto on a dark and a light device: the panel follows within a second
+- [ ] A custom HA theme with a different primary color → Dieter's accent follows when Dynamic color is on
+- [ ] Companion app: same, plus after switching the phone's dark mode with the app in the background
+
+**Done when** changing the theme in HA's profile changes the panel without reload.
+
+---
+
+## Phase 4 · Parity with dieter-addon, piece by piece
+
+### 4.0 Foundation: the real data path (blocks everything below)
+
+1. **Web host (JVM)**: a new process in the add-on (decision D1):
+   - Serves the bundle (taking over from the bridge's static route of Phase 1) and one WebSocket, `core`.
+   - Runs `ClientApi` with the JVM `Platform`: OkHttp transport, loopback routes to the add-on's own daemon
+     (the core already supports them on JVM), device key + secure store + settings in `/data/web-host/`.
+   - Protocol: `dispatch` = request/response with an id; `observe` = subscribe/unsubscribe per (slice, scope),
+     Update messages pushed as they come. All payloads are the Wire-encoded `Command` / `Result` / `Update`.
+   - Accept connections only from the Supervisor network, like the bridge; take the HA user name from the
+     Ingress headers for anything that records who did what (Dreamfall trail).
+2. **`RemoteMobileCore` in the browser**: replaces `DemoCore`. Reconnects with backoff and re-subscribes;
+   the UI's existing offline/syncing states show connection loss.
+3. **Sign-in and pairing (decision D2).** The core starts in `PHASE_AUTH_REQUIRED`; the UI's sign-in and
+   pairing screens already exist. Open point: the sign-in callback. The apps receive it through their URL
+   scheme (`CompleteSignIn(callback_url)`); the web host needs either a redirect back into the Ingress page
+   or a "paste the callback URL" step. Check what the gateway allows before building. Then approve the web
+   host's pairing code once (Tools → Devices on the old page, or an app).
+4. **Image and resources**: JRE in the image (+≈ 50–70 MB). Measure RAM on the Pi with Node harnesses
+   running (estimate 150–250 MB for the host). A GraalVM native-image build is the follow-up if that's too much.
+5. **Bridge stays** for everything that is not UI: HA sensors and rest_commands, events and push, harness
+   staging, daemon supervision, Claude credential renewal, the agent-questions relay, uploads, work-folder
+   housekeeping. The web host never duplicates these; where the UI needs them, it calls the bridge (see
+   *Add-on extensions* below).
+6. **Tests**: JVM UI tests in the fork for new screens (`ui/src/jvmTest` exists); Playwright smoke tests per
+   group against `/next/` with the mock harness (`tests/run.sh` already starts it), selecting by
+   accessibility names/test tags; screenshot comparisons for the look.
+
+**Done when** `/next/` shows your real boards, cards and conversations, and sending a message runs a turn.
+
+### Add-on extensions (decision D3)
+
+Features that only the add-on has need two things: a Compose screen in the fork's `:ui` (or a small add-on
+UI module) and a backend. The backend is the bridge's existing endpoint, reached through the web host. A
+narrow extension API keeps this out of upstream's screens:
+
+- `extraToolPages` (Tools tab), `extraSettingsSections`, `boardRenderers` (Dreamfall as a board type),
+  `conversationWidgets` (agent questions), and an `AddonApi` client for the bridge endpoints.
+- Propose the extension points upstream once two features use them (questions + Dreamfall).
+
+### Parity table
+
+Legend: **Compose** = what the shared UI already has. ✅ exists in the apps (needs only real data and,
+where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new screen + bridge endpoint).
+**Test** = today's Playwright test that must pass against `/next/` (adapted).
+
+#### A. Shell and navigation (do first)
+
+| Feature today | Compose | Work | Test |
+|---|---|---|---|
+| Six tabs, rail from 600 px, two panes from 840 px | ✅ | none | |
+| Most recently used project first, preselected in New task, opened by the Projects tab | 🟡 | verify; add if missing | `most recently used project is listed first…` |
+| Push deep link `/<panel>/card/<id>` through HA's app-panel messages (`home-assistant/subscribe-properties`, `home-assistant/navigate`) | ❌ | JS interop in the web entry point → `store.openConversation` | `a push to /<panel>/card/<id> opens the card…` |
+| `?card=`, `?tab=`, legacy `api/focus` | ❌ | same entry point | `a push deep link (api/focus)…` |
+| Browser/Android back | 🟡 | `SystemBackHandler` web actual via the History API | |
+
+#### B. Inbox
+
+| Feature today | Compose | Work | Test |
+|---|---|---|---|
+| Sections (needs you, running, review/recent), filters, search, pins | ✅ | none | `the Inbox lists the finished task and opens it` |
+| "Waiting for your answer" (agent questions) | ❌ | see F: questions | part of `a question from the agent…` |
+
+#### C. Projects and boards
+
+| Feature today | Compose | Work | Test |
+|---|---|---|---|
+| Project and board lists, project page, ⋮ menus | ✅ | none | |
+| **Add repository** (Git URL, name, base branch → clone into `/data/projects`) | 🟡/❌ | Compose has project creation (`AdminCreateProject`); cloning is the bridge's. Extension action calling the bridge | `a repository can be added… (chunked POST through Ingress)` |
+| **New folder** (empty Git repo, registered) | ❌ | same | `a new folder becomes a project…` |
+| **New board** (Review lane switch, Publishing mode) | ✅/🟡 | `AdminCreateBoard` exists; verify the Review/Publishing fields | `a new board is added next to Main…` |
+| Board order by drag (kept for all devices) | 🟡 | Compose orders projects (`SetProjectOrder`); board order is the bridge's → extension or upstream | `boards are reordered by drag and drop…` |
+| Publishing per board (Manual / Pull request / Push to base) | ✅ | verify | |
+
+#### D. Board
+
+| Feature today | Compose | Work | Test |
+|---|---|---|---|
+| Lanes, newest/oldest sort, labels, filters | ✅ | none | |
+| Card actions: start, move, finish, cancel, archive, edit title/task | ✅ | none | `Edit… changes the title and task of a Todo card…` |
+| Drag cards between lanes (mouse, touch) | ✅ | check touch in Companion app | |
+
+#### E. New task / New chat
+
+| Feature today | Compose | Work | Test |
+|---|---|---|---|
+| Project, board, machine, agent, model, effort pickers | ✅ | none | `project, board, agent, model and effort pickers open and apply`, `pickers work with touch` |
+| New worktree vs project directory, branch fields | ✅ | none | `workspace segment…` |
+| Publishing override, Add to Todo vs start | ✅ | verify | `Add to Todo creates an unstarted card…` |
+| Vault / mail access switches | ✅ | verify | |
+| Attachments (≤ 4 × 20 MB) | 🟡 | `rememberAttachmentPicker` web actual (`<input type=file>` → `MessagePart`); size limits | `the Attach button does not break the form` |
+| Draft survives live updates, Escape closes, X cancels | ✅ | verify on web | `typing in the form survives live updates…`, `Escape closes the form`, … |
+| **Title model** (OpenAI vs Ollama via HA AI Task) | ❌ | the bridge renames after creation; for cards created through the core, the bridge must see them (`housekeeping`-style watcher) or the web host calls the bridge after create | |
+
+#### F. Conversation
+
+| Feature today | Compose | Work | Test |
+|---|---|---|---|
+| Streaming timeline, tool rows, reasoning toggle, context use | ✅ | none | `a task runs on the mock harness and its conversation streams` |
+| Send, queue, steer, cancel; model/effort pickers | ✅ | none | `typing in the chat field keeps the focus…`, `model and effort pickers in the conversation work` |
+| Changes / diff, Files pane, subagents, processes | ✅ | none | |
+| Attachments in messages, image previews | 🟡 | attachment actual (E); viewer | `an image attached in the chat reaches the conversation…` |
+| **Images from the agent**: tool-result images; `![](path)` from the checkout | 🟡 | verify what the apps render; the checkout-relative Markdown images are the add-on's → extension resolving through the bridge (`/api/{card,chat}/ID/image`) | |
+| **Agent questions** (Claude's AskUserQuestion relayed by the fork's worker, options + free text, decline, expiry) | ❌ | `conversationWidgets` extension + bridge `questions` endpoints; Inbox section | `a question from the agent is shown on the card…` |
+| Full-screen image viewer | 🟡 | verify | |
+
+#### G. Mail
+
+| Feature today | Compose | Work | Test |
+|---|---|---|---|
+| Boxes (Inbox, Flagged, Unread, Archive, Trash), search, filters, undo, badge | ✅ | none (the page was modelled on the Android Mail tab) | |
+| Markdown body incl. tables | ✅ | HTML island (Phase 2) for selection/find | |
+| vega-lite / vega / mermaid charts | 🟡 | `NativeMarkdownDiagram` web actual with the offline renderer (Phase 2) | |
+| Relative links open the file in the sender's checkout | 🟡 | verify; route to Files | |
+
+#### H. Tools
+
+| Page | Feature today | Compose | Work | Test |
+|---|---|---|---|---|
+| Machines | machine info, CPU/GPU | ✅ | none | `Tools pages: Machines, Usage and Changes render…` |
+| Machines | **Gateway enroll / re-enroll** of the add-on's daemon | ❌ | extension page calling the bridge's `gateway` endpoints. Note: needed *before* the Compose UI can work (D2), so it also stays on the old page | `Gateway: the Machines page offers enrollment…` |
+| Machines | **SSH key** of the add-on, copy, connection test | ❌ | extension section + bridge `ssh` endpoints | `Machines shows the add-on's own SSH key…` |
+| Files | browse, dotfiles, text/images, download | ✅/🟡 | download needs a web actual (Blob + `<a download>`) | `Files browses the project's checkout…` |
+| Schedules | list, create (presets, preview), run, pause, history, delete | ✅ | verify presets and next-run preview | `Schedules: create with the mock agent…` |
+| Usage | quotas (Claude, Codex, Antigravity groups) | ✅/🟡 | verify Antigravity's grouped windows from the fork | |
+| Usage | **Claude sign-in** (`claude auth login`, paste code, cancel, logout) | ❌ | extension section + bridge `claude` endpoints | `Usage offers the Claude sign-in…` |
+| Changes | project changes | ✅ | none | |
+| Devices | trust state, approve code, remove | ✅ | none (refusal message when not enrolled) | `Devices shows the daemon's trust state…` |
+| Settings | **Agent instructions** (prompt templates, reset) | ✅/🟡 | verify editor parity (variables, validation) | `Settings: agent instructions…` |
+| Settings | **Title model**, **Keep finished work folders** | ❌ | extension settings section + bridge `settings` | |
+| Settings | show reasoning, appearance, palette | ✅ | Phase 3 adds "follow HA" | |
+| Terminals / Screens | (not on today's page) | ✅ in apps | web actuals: xterm.js island; screens later or hidden on web | |
+
+#### I. Dreamfall (largest single feature, do last)
+
+| Feature today | Compose | Work | Test |
+|---|---|---|---|
+| New Dreamfall board (categories, goal, navigation logic, implementation instructions, mail switch, times, weekdays, agent, stage boards) | ❌ | form as an extension of New board | `a Dreamfall board is created from New board…` |
+| Funnel strip, stages side by side / tabs on phone, collapsible groups (newest 40) | ❌ | `boardRenderers` extension: a Compose Dreamfall board | `the stages are tabs; Navigation first`, `screenshots of the Dreamfall board (light and dark)` |
+| Idea detail: brief, verdict + score, Provenance, Trail | ❌ | extension screen; data from the bridge (`dreamfall` endpoints) | |
+| Pick (worktree/project dir, start now), Park, Back to the queue, promote | ❌ | actions through the bridge | `the person picks an idea…`, `park and back to the queue…` |
+| ⋮ run a stage now, pause/resume, settings, open stage as Kanban, Remove Dreamfall | ❌ | same | `settings change the schedules…` |
+| "Added outside Dreamfall" flag, "Finished · still in Running" + Review button | ❌ | rendering rules in the extension | `agents cannot write to Implementation…` |
+| `dreamfall` command, schedules, KV records | n/a | unchanged (server side) | `the Enumeration agent adds ideas…`, `Navigation waits for Enumeration…` |
+
+Upstream path: the Dreamfall proposal (`docs/proposals/dreamfall.md`) can point at this Compose
+implementation as the reference once it exists.
+
+#### J. Home Assistant side: unchanged
+
+`sensor.dieter` via `/api/ha`, `rest_command.dieter_*`, events `dieter_turn_finished` / `dieter_card_review`
+/ `dieter_question`, push notifications. They stay in the bridge. Only change: the push link must open the
+card in whichever page is the default (A covers the new page).
+Test: `the HA summary endpoint stays consistent`, `hass-cli is in the image…`.
+
+### Order inside Phase 4
+
+1. **4.0 Foundation**: web host, `RemoteMobileCore`, sign-in/pairing
+2. **Read-only parity**: A, B, D (viewing), F (viewing), G, H Files/Usage/Changes/Devices
+3. **Core actions**: C (built-in parts), D actions, E, F sending, H Schedules and Agent instructions
+4. **Extension API + add-on-only screens**: questions, Claude sign-in, Gateway, SSH key, Title model, work
+   folders, Add repository / New folder, board order
+5. **Dreamfall** (I)
+6. **Switch**: `/next/` becomes `/`, old page at `/classic/` for one release, then removed together with
+   `app.js` / `app.css` and the bridge's page-only endpoints
+7. **Upstream proposals**: web target for `:ui`, the extension points, the `platformMonospace()` fix
+
+Each group is done when its rows are ✅ and its tests pass against `/next/`. Tick the rows in this file as you go.
+
+---
+
+## Open questions
+
+1. **Gateway-less installs (D2).** Keep the old page for them, or build a "local mode" (the web host speaking
+   to the daemon without an account)? The core has no such mode today.
+2. **Sign-in callback.** Can the gateway redirect to an Ingress URL, or does the web host need a paste step?
+3. **Pi resources.** Is ~200 MB for a JVM acceptable next to the harnesses, or go native-image from the start?
+4. **Older iPads/iPhones** (iOS < 18.2): worth the compatibility-mode JS build?
+5. **Multi-user HA.** The web host is one device for the account. Should different HA users see different
+   things, or is the add-on single-user as today (admin panel)?
+
+---
+
+## Sources
+
+- Spike: `~/dieter/spike/web` (README, `build.gradle.kts`, `DemoData.kt`, `watch.sh`, `ha/dashboard.py`)
+- Add-on: [JustinNeumann/dieter-addon](https://github.com/JustinNeumann/dieter-addon): `dieter/DOCS.md`, `dieter/bridge/app.js`,
+  `dieter/bridge/dieter_bridge.py`, `dieter/tests/e2e/*.spec.mjs`, `docs/dreamfall/CONCEPT.md`
+- Dieter: [dbpprt/dieter](https://github.com/dbpprt/dieter): `apps/kotlin/ui/.../store/MobileCore.kt`, `navigation/Navigation.kt`,
+  `core/runtime/.../platform/Platform.kt`, `CoreRuntime.kt` (loopback routes)
+- [Compose Multiplatform 1.9: Compose for Web Beta](https://blog.jetbrains.com/kotlin/2025/09/compose-multiplatform-1-9-0-compose-for-web-beta/)
+  (accessibility, HTML interop, browser navigation, fallback for older browsers)
+- [Kotlin/Wasm and web targets](https://kotlinlang.org/docs/web-overview.html)
+- [MaterialKolor on klibs.io](https://klibs.io/project/jordond/MaterialKolor) (seed-color schemes, wasm/js support)
+- [Introducing Hass.io Ingress](https://www.home-assistant.io/blog/2019/04/15/hassio-ingress/)

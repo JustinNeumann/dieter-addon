@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#121214">
+<title>Dieter</title>
+<style>
+  :root { --dieter-bg: #121214; --dieter-fg: #8e8e96; }
+  :root.light { --dieter-bg: #fbfbfd; --dieter-fg: #6e6e76; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--dieter-bg); }
+  #dieter { position: fixed; inset: 0; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+    font: 500 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--dieter-fg);
+    text-align: center; }
+  #loading .box { max-width: 420px; }
+  #loading .spinner { width: 22px; height: 22px; margin: 0 auto 12px; border-radius: 50%;
+    border: 2px solid currentColor; border-right-color: transparent; opacity: .7;
+    animation: spin .9s linear infinite; }
+  #loading.failed .spinner { display: none; }
+  #loading a { color: inherit; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #loading .spinner { animation: none; } }
+</style>
+<script>
+/* Loader of Dieter's Compose UI (Kotlin/Wasm).
+   Behind Home Assistant Ingress the page lives at /api/hassio_ingress/<token>/next/ and every asset
+   URL is relative, so the trailing slash matters (same guard as the classic page). */
+(function () {
+  "use strict";
+  var path = location.pathname;
+  if (!path.endsWith("/") && !/\.html?$/.test(path)) {
+    location.replace(path + "/" + location.search + location.hash);
+    return;
+  }
+
+  // ---- theme of the loader: Home Assistant's (same origin behind Ingress), ?theme=, the device
+  function haHass() {
+    try {
+      if (window.parent === window) return null;
+      var root = window.parent.document.querySelector("home-assistant");
+      return (root && root.hass) || null;
+    } catch (e) {
+      return null; // another origin (no Ingress)
+    }
+  }
+  function prefersDark() {
+    var forced = new URLSearchParams(location.search).get("theme");
+    if (forced === "dark" || forced === "light") return forced === "dark";
+    var hass = haHass();
+    if (hass && hass.themes && typeof hass.themes.darkMode === "boolean") return hass.themes.darkMode;
+    return !(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches);
+  }
+  function applyLoaderTheme() {
+    var dark = prefersDark();
+    document.documentElement.classList.toggle("light", !dark);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", dark ? "#121214" : "#fbfbfd");
+  }
+  applyLoaderTheme();
+
+  function loading() { return document.getElementById("loading"); }
+  function fail(html) {
+    var run = function () {
+      var el = loading();
+      if (!el) return;
+      el.classList.add("failed");
+      el.querySelector(".text").innerHTML = html;
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run); else run();
+  }
+  var CLASSIC = 'The classic page still works: <a href="../" target="_self">open it</a>.';
+
+  // ---- Kotlin/Wasm needs WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari and iOS 18.2+)
+  function wasmGcSupported() {
+    try {
+      // a module whose type section declares one struct type (GC proposal)
+      return typeof WebAssembly === "object" &&
+        WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 95, 1, 120, 0]));
+    } catch (e) {
+      return false;
+    }
+  }
+  if (!wasmGcSupported()) {
+    fail("This browser cannot run the new Dieter page: it needs WebAssembly GC " +
+      "(current Chrome, Edge or Firefox; Safari, iPhone and iPad from iOS 18.2). " + CLASSIC);
+    return;
+  }
+
+  // ---- compressed WebAssembly: Home Assistant's Ingress drops Accept-Encoding and compresses only
+  // text, JSON and JavaScript at the border, so the ~14 MB of .wasm would travel uncompressed.
+  // The bundle ships X.wasm.gz next to X.wasm; fetch the .gz and inflate it in the browser.
+  var nativeFetch = window.fetch.bind(window);
+  if (typeof DecompressionStream === "function" && typeof Response === "function") {
+    window.fetch = function (input, init) {
+      var url = typeof input === "string" ? input : (input && (input.href || input.url));
+      if (url && /\.wasm(\?|$)/.test(url)) {
+        var gz = url.replace(/\.wasm(\?|$)/, ".wasm.gz$1");
+        return nativeFetch(gz, init).then(function (r) {
+          if (!r.ok || !r.body) return nativeFetch(input, init);
+          return new Response(r.body.pipeThrough(new DecompressionStream("gzip")), {
+            status: 200,
+            headers: { "Content-Type": "application/wasm" },
+          });
+        }, function () {
+          return nativeFetch(input, init);
+        });
+      }
+      return nativeFetch(input, init);
+    };
+  }
+
+  // ---- errors before the first frame end up on the loader instead of a blank page
+  function startupError(message) {
+    if (!loading() || window.dieterStarted) return;
+    fail("Dieter could not start: " + String(message || "unknown error")
+      .replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }) + ". " + CLASSIC);
+  }
+  window.addEventListener("error", function (e) { startupError(e.message || (e.error && e.error.message)); });
+  window.addEventListener("unhandledrejection", function (e) {
+    startupError(e.reason && (e.reason.message || e.reason));
+  });
+
+  // ---- the bundle (tools/package.sh rewrites the name to the content-hashed one)
+  var script = document.createElement("script");
+  script.src = "dieter.js";
+  script.onerror = function () { startupError("the bundle did not load"); };
+  document.head.appendChild(script);
+})();
+</script>
+</head>
+<body>
+<div id="loading" role="status" aria-live="polite"><div class="box"><div class="spinner"></div><div class="text">Loading Dieter…</div></div></div>
+<div id="dieter"></div>
+</body>
+</html>
