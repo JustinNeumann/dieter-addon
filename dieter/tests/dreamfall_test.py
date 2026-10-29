@@ -221,6 +221,18 @@ class CacheView(unittest.TestCase):
         self.assertNotIn(["card", "list"], calls)
         self.assertNotIn(["card", "create"], calls)
         self.assertIn(["card", "move"], calls)
+    def test_ideas_are_counted_once_not_per_copy(self):
+        pid = PIPE["id"]
+        recs = {"p." + pid: PIPE,
+                "c.c_1": {"pipeline": pid, "stage": "enumeration", "transferred_to": "c_2"},          # promoted ...
+                "c.c_2": {"pipeline": pid, "stage": "navigation", "source": "c_1", "transferred_to": "c_3"},
+                "c.c_3": {"pipeline": pid, "stage": "implementation", "source": "c_2"},             # ... and picked: 1 idea
+                "c.c_4": {"pipeline": pid, "stage": "enumeration"},                                  # released: 1 idea
+                "c.c_5": {"pipeline": pid, "stage": "implementation", "created_by": {"actor": "human"}},  # added by hand: 1 idea
+                "c.c_9": {"pipeline": "df_other00000", "stage": "enumeration"}}
+        self.c.records = recs
+        out = self.c.decorate({"ok": True, "cards": []})
+        self.assertEqual(out["dreamfall"]["ideas"], {pid: 3, "df_other00000": 1})
 
     def test_detail_chain_and_trail(self):
         recs = {"c.c_1": {"stage": "enumeration", "transferred_to": "c_2", "events": [{"id": "a", "kind": "created", "at": "2026-10-28T02:00:00Z"},

@@ -1077,9 +1077,14 @@ class Cache:
                 runs.setdefault(r["pipeline"], []).append(r)
         for pid in runs:
             runs[pid] = sorted(runs[pid], key=lambda r: parse_ts(r.get("started_at")))[-12:]
+        # one idea, however many stages it reached: count the cards an idea started as (no source), not its copies
+        ideas = {}
+        for k, r in records.items():
+            if k.startswith("c.") and isinstance(r, dict) and r.get("pipeline") and not r.get("source"):
+                ideas[r["pipeline"]] = ideas.get(r["pipeline"], 0) + 1
         return {**data, "cards": merged, "dreamfall": {"pipelines": sorted(pipelines, key=lambda p: p.get("created_at") or ""),
                                                         "records": compact, "runs": runs, "ready": self.caught_up,
-                                                        "defaults": {"navigation_logic": DEFAULT_NAVIGATION_LOGIC}}}
+                                                        "ideas": ideas, "defaults": {"navigation_logic": DEFAULT_NAVIGATION_LOGIC}}}
 
     def detail(self, cid, cards):
         """Full trail of a card and its provenance chain (source cards back to the first stage, copies forward)."""

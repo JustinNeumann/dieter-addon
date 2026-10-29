@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.44 (2026-10-29)
+
+- Dreamfall: the board counted every card on its three stage boards as an idea, so an idea promoted to Navigation and
+  picked for Implementation counted three times (76 instead of 56). It now counts each idea once, by the card it started
+  as, from the records; released ideas beyond the newest 40 shown on the board are included.
+
 ## 0.6.429.43 (2026-10-29)
 
 - **Dreamfall: Pick, Park, Back to the queue and Start answer in well under a second** (5-10 s before on a Pi). A pick

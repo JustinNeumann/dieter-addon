@@ -259,6 +259,8 @@ test.describe("phone", () => {
 test("screenshots of the Dreamfall board (light and dark)", async ({ page }) => {
   test.skip(!pid, "no Dreamfall board");
   await openDreamfall(page);
+  // 4 ideas were written; their copies on Navigation (3) and Implementation (1) are the same ideas
+  await expect(page.locator(".appbar .subtitle").first()).toContainText("4 ideas");
   await page.locator('.df-stage[data-stage="enumeration"] .df-sub').filter({ hasText: "Released" }).click().catch(() => {});
   await page.waitForTimeout(500);
   await page.screenshot({ path: "test-results/dreamfall-board-light.png" });
