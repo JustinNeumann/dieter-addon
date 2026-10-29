@@ -645,9 +645,11 @@ def copy_brief(src_prompt, verb, from_name, who, rationale, src_id):
     return f"{(src_prompt or '').rstrip()}\n\n---\n{note}\n\n<!-- {MARKER} {src_id} -->\n"
 
 
-def transfer(p, src, dest_role, actor, name, verb, rationale="", score=None, run="", note="", settings=None, start=False):
+def transfer(p, src, dest_role, actor, name, verb, rationale="", score=None, run="", note="", settings=None, start=False, known=None):
     """Copy an idea to the next stage (provenance both ways) and release the original (Done). Idempotent: a copy
-    recorded on the source, or a card on the destination board whose brief names the source, is reused."""
+    recorded on the source, or a card on the destination board whose brief names the source, is reused.
+    known(board_id) -> the board's cards as something already holds them (the bridge's cache), or None: then the
+    board is listed through the CLI (two `card list` calls of ~1 s each on a Pi; the agents' command has no cache)."""
     s_from, s_to = stage_of_board(p, src["board_id"]), stage(p, dest_role)
     if not s_from or not s_to:
         raise DfError("the card is not on a stage of this Dreamfall board")
@@ -661,8 +663,11 @@ def transfer(p, src, dest_role, actor, name, verb, rationale="", score=None, run
             new_id = None
     if not new_id:
         mark = f"{MARKER} {src['id']}"
-        for c in board_cards(s_to["board_id"]) + board_cards(s_to["board_id"], archived=True):
-            if mark in c["prompt"]:
+        cards = known(s_to["board_id"]) if known else None
+        if cards is None:
+            cards = board_cards(s_to["board_id"]) + board_cards(s_to["board_id"], archived=True)
+        for c in cards:
+            if mark in (c.get("prompt") or c.get("initial_prompt") or ""):
                 new_id = c["id"]
                 break
     if not new_id:
@@ -772,9 +777,11 @@ def record_created(p, c, actor, name, run="", category=""):
     return kv_update("c." + c["id"], apply)
 
 
-def act(pid, b, actor_name="you"):
+def act(pid, b, actor_name="you", known=None):
     """A person's decision on the Dreamfall board: promote/release (first stage), pick/park (second stage),
-    restore (a released or parked idea back to its queue), start (an Implementation card)."""
+    restore (a released or parked idea back to its queue), start (an Implementation card). The result names the
+    boards touched and the lanes the cards are in now ("lanes": card id -> lane), so the caller can show the
+    change without listing the boards again; known: see transfer()."""
     p = load_pipeline(pid)
     action, cid = str(b.get("action") or ""), str(b.get("card") or "")
     c = card_show(cid)
@@ -793,26 +800,28 @@ def act(pid, b, actor_name="you"):
         for k in ("provider", "model", "effort"):
             if b.get(k):
                 settings[k] = str(b[k])
+        started = bool(b.get("start")) and action == "pick"
         new_id, created = transfer(p, c, nxt["role"], "human", actor_name, "Picked" if action == "pick" else "Promoted",
-                                   rationale=note, note=note, settings=settings, start=bool(b.get("start")) and action == "pick")
-        return {"ok": True, "id": new_id, "created": created, "boards": [c["board_id"], nxt["board_id"]]}
+                                   rationale=note, note=note, settings=settings, start=started, known=known)
+        return {"ok": True, "id": new_id, "created": created, "boards": [c["board_id"], nxt["board_id"]],
+                "lanes": {cid: "done", new_id: "running" if started else "todo"}}
     if action in ("release", "park"):
         if c["lane"] != "todo" or s["actor"] == "human":
             raise DfError("only waiting ideas can be released or parked")
         release(p, c, "human", actor_name, kind="release" if s["role"] == "enumeration" else "park", rationale=note)
-        return {"ok": True, "boards": [c["board_id"]]}
+        return {"ok": True, "boards": [c["board_id"]], "lanes": {cid: "review"}}
     if action == "restore":
         if c["lane"] != "review" or s["actor"] == "human":
             raise DfError("only released or parked ideas go back to the queue")
         restore(p, c, "human", actor_name, note)
-        return {"ok": True, "boards": [c["board_id"]]}
+        return {"ok": True, "boards": [c["board_id"]], "lanes": {cid: "todo"}}
     if action == "start":
         if s["actor"] != "human" or c["lane"] != "todo" or c["started"]:
             raise DfError("only a Todo card of the person's stage is started here")
         cli(["card", "start", cid], timeout=60, parse=False)
         kv_update("c." + cid, lambda cur: add_events(cur or {"v": 1, "card": cid, "pipeline": pid, "stage": s["role"], "events": []},
                                                     event("started", "human", actor_name)))
-        return {"ok": True, "boards": [c["board_id"]]}
+        return {"ok": True, "boards": [c["board_id"]], "lanes": {cid: "running"}}
     raise DfError("action must be promote, release, pick, park, restore or start")
 
 
@@ -986,6 +995,51 @@ class Cache:
 
     def touch_boards(self):
         self.dirty.set()
+
+    def cards_of(self, board_id):
+        """The cached cards of a stage board (every lane), or None when the board has not been read yet."""
+        with self.lock:
+            lanes = self.cards.get(board_id)
+            if not lanes:
+                return None
+            return [c for (_, cards) in lanes.values() for c in cards]
+
+    def apply_local(self, lanes=None, cards=None):
+        """A change made through the bridge, shown before the boards are read again: lanes = card id -> its lane
+        now (the card moves between the cached lane lists of its board), cards = new or re-read cards (replace or
+        add). The next board read (touch_boards) confirms it; this way the person's action is in the next state
+        in milliseconds, not after a second round of `card list` calls."""
+        changed = False
+        with self.lock:
+            for c in cards or []:
+                bid, lane = c.get("board_id"), c.get("lane")
+                if not bid or not lane:
+                    continue
+                self.cards.setdefault(bid, {})
+                for l, (at, lst) in list(self.cards[bid].items()):
+                    rest = [x for x in lst if x["id"] != c["id"]]
+                    if len(rest) != len(lst):
+                        self.cards[bid][l] = (at, rest)
+                at = (self.cards[bid].get(lane) or (time.time(), []))[0]
+                self.cards[bid][lane] = (at, [*(self.cards[bid].get(lane) or (0, []))[1], c])
+                changed = True
+            for cid, lane in (lanes or {}).items():
+                for bid, by_lane in self.cards.items():
+                    for l, (at, lst) in list(by_lane.items()):
+                        hit = next((x for x in lst if x["id"] == cid), None)
+                        if hit is None or l == lane:
+                            continue
+                        by_lane[l] = (at, [x for x in lst if x["id"] != cid])
+                        moved = {**hit, "lane": lane, "phase_changed_at": now_iso(), "updated_at": now_iso()}
+                        at2, dest = by_lane.get(lane) or (time.time(), [])
+                        by_lane[lane] = (at2, [*[x for x in dest if x["id"] != cid], moved])
+                        changed = True
+                        break
+            if changed:
+                self.version += 1
+        if changed:
+            self.on_change()
+        return changed
 
     # -- what the page gets
     def decorate(self, data):

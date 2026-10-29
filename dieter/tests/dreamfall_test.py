@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bridge"))
 import dreamfall as df  # noqa: E402
@@ -181,6 +182,45 @@ class CacheView(unittest.TestCase):
         self.assertIsNone(out["dreamfall"]["records"]["c_2"]["source_verdict"])   # its source c_1 has no record here
         self.assertEqual(out["dreamfall"]["runs"][PIPE["id"]][0]["status"], "done")
         self.assertTrue(out["dreamfall"]["ready"])
+
+    def test_apply_local_moves_and_adds_without_listing(self):
+        self.c.records = {"p." + PIPE["id"]: PIPE}
+        self.c.cards = {"b_n": {"todo": (1, [{"id": "c_2", "board_id": "b_n", "lane": "todo", "updated_at": "2026-10-28T05:00:00Z"}]), "done": (1, [])},
+                        "b_i": {"todo": (1, [])}}
+        self.assertEqual([c["id"] for c in self.c.cards_of("b_n")], ["c_2"])
+        self.assertIsNone(self.c.cards_of("b_x"))
+        new = {"id": "c_3", "board_id": "b_i", "lane": "todo", "updated_at": "2026-10-28T19:00:00Z"}
+        self.assertTrue(self.c.apply_local({"c_2": "done"}, [new]))
+        self.assertEqual(self.c.cards["b_n"]["todo"][1], [])
+        moved = self.c.cards["b_n"]["done"][1][0]
+        self.assertEqual(moved["lane"], "done")
+        self.assertEqual(self.c.cards["b_i"]["todo"][1], [new])
+        self.assertGreaterEqual(self.calls, 1)
+        out = self.c.decorate({"ok": True, "cards": [{"id": "c_2", "board_id": "b_n", "lane": "todo", "updated_at": "2026-10-28T05:00:00Z"}]})
+        cards = {c["id"]: c for c in out["cards"]}
+        self.assertEqual(cards["c_2"]["lane"], "done")             # the local move wins over the older state copy
+        self.assertIn("c_3", cards)
+        self.assertFalse(self.c.apply_local({"c_2": "done"}, []))  # already there: nothing to do
+
+    def test_transfer_scans_known_cards_instead_of_listing(self):
+        calls = []
+        def fake_cli(args, timeout=60, parse=True):
+            calls.append(args[:2])
+            if args[:2] == ["kv", "get"]:
+                raise df.DfError("not found")
+            if args[:2] == ["kv", "put"]:
+                return {}
+            if args[:2] == ["card", "move"]:
+                return ""
+            raise AssertionError(args)
+        src = {"id": "c_1", "title": "Energy: idea", "board_id": PIPE["stages"][1]["board_id"], "lane": "todo", "prompt": "brief", "provider": None, "model": None, "effort": None, "checkout_id": None}
+        copy = {"id": "c_9", "board_id": PIPE["stages"][2]["board_id"], "lane": "todo", "initial_prompt": f"brief\n<!-- {df.MARKER} c_1 -->"}
+        with mock.patch.object(df, "cli", fake_cli):
+            new_id, done = df.transfer(PIPE, src, "implementation", "human", "you", "Picked", known=lambda bid: [copy])
+        self.assertEqual(new_id, "c_9")                          # the copy the cache knows is reused, nothing created
+        self.assertNotIn(["card", "list"], calls)
+        self.assertNotIn(["card", "create"], calls)
+        self.assertIn(["card", "move"], calls)
 
     def test_detail_chain_and_trail(self):
         recs = {"c.c_1": {"stage": "enumeration", "transferred_to": "c_2", "events": [{"id": "a", "kind": "created", "at": "2026-10-28T02:00:00Z"},
