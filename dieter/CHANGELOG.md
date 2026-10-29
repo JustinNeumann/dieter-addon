@@ -6,7 +6,7 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
 
 - **Preview of the new page at `next/`**: Dieter's own Compose screens (the Android/iOS app's UI) compiled for the
   browser with Kotlin/Wasm, from the new repository
-  [dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) (release 0.2.0, pinned by sha256).
+  [dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) (release 0.2.1, pinned by sha256).
   Open it from **Tools → Preview → New page** or at `<HA>/app/<slug>/next/`. It is served behind Ingress like
   this page, so it works over Nabu Casa and in the Companion app. Browsers without WebAssembly GC (Safari/iOS
   before 18.2) get a note with a link back to this page.
