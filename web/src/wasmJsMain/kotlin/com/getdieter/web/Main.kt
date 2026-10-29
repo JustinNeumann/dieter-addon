@@ -23,7 +23,10 @@ import com.getdieter.mobile.store.MobileCore
 import com.getdieter.mobile.store.MobilePreferences
 import com.getdieter.mobile.store.MobileStore
 import com.getdieter.mobile.store.runDebugScript
+import com.getdieter.mobile.navigation.MobileTab
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 
 /**
@@ -51,18 +54,19 @@ fun main() {
     store.setForeground(!pageHidden())
     onVisibilityChange { store.setForeground(!pageHidden()) }
     val script = queryParameter("script").orEmpty()
+    val route = queryParameter("route").orEmpty()
     MainScope().launch {
         browserMonospace =
             runCatching {
                     FontFamily(Font("JetBrains Mono", Res.readBytes("files/jetbrains_mono_regular.ttf")))
                 }
                 .getOrNull()
-        show(store, script)
+        show(store, script, route)
     }
 }
 
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
-private fun show(store: MobileStore, script: String) {
+private fun show(store: MobileStore, script: String, route: String) {
     ComposeViewport(viewportContainerId = "dieter") {
         val host by WebHost.theme.collectAsState()
         // Appearance "System" means the host's mode: Home Assistant's dark mode behind Ingress (it can
@@ -70,6 +74,7 @@ private fun show(store: MobileStore, script: String) {
         CompositionLocalProvider(LocalSystemTheme provides if (host.dark) SystemTheme.Dark else SystemTheme.Light) {
             LaunchedEffect(Unit) {
                 hideLoading()
+                if (route.isNotBlank()) openRoute(store, route)
                 if (script.isNotBlank()) store.runDebugScript(script)
             }
             ChromeColor(store)
@@ -86,4 +91,21 @@ private fun ChromeColor(store: MobileStore) {
     val dynamic by store.theme.dynamicColor.collectAsState()
     val scheme = (if (dynamic) platformDynamicScheme(dark) else null) ?: materialScheme(palette, dark)
     LaunchedEffect(scheme.surface, dark) { WebHost.setChrome(scheme.surface, dark) }
+}
+
+/**
+ * Deep links: `?route=card/<id>` opens that card's conversation, `?route=tab/<name>` a tab. The classic page
+ * turns `<HA>/app/<slug>/next/<route>` into this (Home Assistant always opens the add-on at its root).
+ */
+private suspend fun openRoute(store: MobileStore, route: String) {
+    val parts = route.trim('/').split('/')
+    when (parts.firstOrNull()) {
+        "card", "chat" -> parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { id ->
+            withTimeoutOrNull(30_000) { store.workspace.slice.first { it.loaded } }
+            store.openConversation(id)
+        }
+        "tab" -> parts.getOrNull(1)?.let { name ->
+            MobileTab.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let(store::selectTab)
+        }
+    }
 }
