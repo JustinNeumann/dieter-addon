@@ -15,6 +15,7 @@ The plan and its progress: [docs/PLAN.md](docs/PLAN.md).
 | `web/` | The browser build (`wasmJs`): the browser actuals of the UI's platform hooks, the loader page, the entry point and `RemoteCore` (the UI's core over a WebSocket) |
 | `host/` | The web host (JVM): Dieter's Kotlin core (`ClientApi`) with the JVM platform, serving it to browsers over one WebSocket; sign-in relay; `host/build/libs/dieter-web-host-<version>.jar` |
 | `proto/` | `dieter/web/v1/host.proto`: the browser ↔ web host protocol (dispatch/observe of `dieter.client.v1`, as the iOS byte bridge) |
+| `tests/` | Browser tests (Playwright) of the packaged bundle: selection, find, HTML islands, keyboard; `npm run measure` writes the accessibility checklist of docs/PLAN.md Phase 2 |
 | `tools/package.sh` | Packs the production build into `dieter-web-<version>.tar.gz` (hashed file names, `.wasm.gz` for the loader, `.br`/`.gz` copies) |
 | `.github/workflows/web.yml` | Builds and tests every push; a tag `vX.Y.Z` publishes the tarball, the host jar and `SHA256SUMS` as a release |
 
@@ -32,14 +33,32 @@ tools/package.sh 0.0.0-local                       # -> build/package/dieter-web
 ./gradlew :web:wasmJsBrowserDevelopmentRun -t      # dev server with rebuilds on change (open with ?demo)
 ```
 
-JDK 21 (with `javac`; the host targets Java 21). Gradle downloads Node and webpack for the wasm build.
+JDK 21 (with `javac`; the host targets Java 21). Gradle downloads Node and webpack for the wasm build. `npm` must be on the `PATH`
+as well: the build bundles Dieter's offline diagram renderer (`dieter/apps/apple/mac/MarkdownPreview`:
+mermaid, vega, vega-lite) with `npm ci` and `node build.mjs`.
 
 **Against real data without your account:** Dieter's isolated fixture gateway
 (`go run ./tools/fixtures/gateway -showcase-fixture` in `dieter/`, prints a session token and a pairing code)
 plus the host jar; the host adopts the fixture session with `AdoptSession` over its WebSocket.
 
+**Browser tests** (Chromium from Playwright, against the newest `build/package/dieter-web-*` or `DIETER_WEB_DIR`):
+
+```bash
+cd tests && npm ci && npx playwright install chromium
+npm test                                           # selection, find, islands, keyboard
+MEASURE_LABEL=after npm run measure                # accessibility checklist -> tests/measure-results/
+```
+
 URL options of the page: `?demo` uses demo data instead of the web host, `?theme=dark|light` overrides
-the theme, `?script=tab projects; board Main` replays the app's debug navigation script.
+the theme, `?script=tab projects; board Main` replays the app's debug navigation script, `?islands=off`
+draws mail bodies and Markdown files with Compose instead of HTML islands.
+
+**Reading on the web.** The mail message body and Markdown files are HTML islands: real DOM inside the
+Compose layout, so the browser's selection, translation and screen readers work there, and mermaid,
+vega and vega-lite diagrams render offline in sandboxed frames. Everywhere else the page is a canvas:
+text is selectable inside the UI's selection areas (replies, tool output, subagent details), and
+Ctrl/⌘+F opens the app's own find bar in a conversation, a mail message or a file (Enter / Shift+Enter
+or the arrow keys step through the hits, Escape closes it). On other screens Ctrl/⌘+F stays the browser's.
 
 ## Release and the add-on
 

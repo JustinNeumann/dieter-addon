@@ -9,7 +9,7 @@ import com.getdieter.mobile.store.MobileCore
  * commands that change what the demo shows (binding a board, sending, moving a card).
  * No gateway, daemon or network is involved.
  */
-class DemoCore(private val data: DemoData = DemoData()) : MobileCore {
+class DemoCore(private val data: DemoData = DemoData(), private val extras: DemoMailFiles = DemoMailFiles()) : MobileCore {
     private var sequence = 0L
     private val observers = mutableMapOf<Pair<Slice, String>, MutableList<(Update) -> Unit>>()
 
@@ -27,18 +27,35 @@ class DemoCore(private val data: DemoData = DemoData()) : MobileCore {
             observers.keys.filter { it.first == Slice.SLICE_BOARD_VIEW || it.first == Slice.SLICE_WORKSPACE }
                 .forEach { publish(it.first, it.second) }
         }
+        command.mail?.let { mail ->
+            extras.mailCommand(mail)
+            publish(Slice.SLICE_MAIL, mail.scope)
+            return Result(mail = extras.mail())
+        }
+        command.files?.let { files ->
+            extras.filesCommand(files)
+            publish(Slice.SLICE_FILES, files.scope)
+            return Result(files = extras.files())
+        }
         return Result(done = Done())
     }
 
     override fun observe(slice: Slice, scope: String, receive: (Update) -> Unit): ClientSubscription {
         val key = slice to scope
         observers.getOrPut(key) { mutableListOf() } += receive
-        data.update(slice, scope)?.let { receive(numbered(it)) }
+        update(slice, scope)?.let { receive(numbered(it)) }
         return ClientSubscription { observers[key]?.remove(receive) }
     }
 
+    private fun update(slice: Slice, scope: String): Update? =
+        when (slice) {
+            Slice.SLICE_MAIL -> Update(slice = slice, scope = scope, mail = extras.mail())
+            Slice.SLICE_FILES -> Update(slice = slice, scope = scope, files = extras.files())
+            else -> data.update(slice, scope)
+        }
+
     private fun publish(slice: Slice, scope: String) {
-        val update = data.update(slice, scope) ?: return
+        val update = update(slice, scope) ?: return
         observers[slice to scope].orEmpty().toList().forEach { it(numbered(update)) }
     }
 

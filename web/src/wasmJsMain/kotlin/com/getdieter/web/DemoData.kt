@@ -6,6 +6,7 @@ import com.getdieter.api.v1.Checkout
 import com.getdieter.api.v1.Conversation
 import com.getdieter.api.v1.Label
 import com.getdieter.api.v1.Project
+import com.getdieter.api.v1.Subagent
 import com.getdieter.api.v1.PullRequestSummary
 import com.getdieter.api.v1.TaskPlan
 import com.getdieter.api.v1.TaskPlanItem
@@ -361,6 +362,26 @@ class DemoData {
             ),
         )
 
+    private val webSubagent =
+        Subagent(
+            id = "sa-size",
+            provider = "claude",
+            name = "bundle-size",
+            agent_type = "general-purpose",
+            description = "Measure the production bundle",
+            task = "Build the optimized bundle and report the size of every asset, compressed and not.",
+            status = "completed",
+            model = "claude-opus-5-5",
+            activity = "Reported the sizes",
+            tool_count = 6,
+            requests = 9,
+            tokens = 48_200,
+            duration_ms = 184_000,
+            recent_output = listOf("dieter.wasm 6.45 MiB (2.1 MiB gzip)", "skiko.wasm 8.25 MiB (3.2 MiB gzip)"),
+            started_at = (now - 20.minutes).toString(),
+            ended_at = (now - 17.minutes).toString(),
+        )
+
     private val webPlan =
         TaskPlan(
             id = "plan-web",
@@ -422,6 +443,7 @@ class DemoData {
                     card_id = card.id,
                     status = if (running) "running" else "idle",
                     task_plans = if (card.id == "c-web") listOf(webPlan) else emptyList(),
+                    subagents = if (card.id == "c-web") listOf(webSubagent) else emptyList(),
                 ),
             timeline = timeline,
             state =

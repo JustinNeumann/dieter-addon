@@ -71,6 +71,8 @@ kotlin {
             // Material colour utilities (HCT, tonal-spot schemes) without Compose dependencies: the
             // seeded scheme for "Dynamic color" from Home Assistant's primary colour.
             implementation("com.materialkolor:material-color-utilities:5.0.1")
+            // Escape reaches Compose's back handlers on the web (SystemBackHandler's actual).
+            implementation("org.jetbrains.compose.ui:ui-backhandler:${libs.versions.compose.multiplatform.get()}")
         }
     }
 }
@@ -87,10 +89,53 @@ wire {
     }
 }
 
+// The offline diagram renderer (apps/apple/mac/MarkdownPreview: vega-lite, vega, mermaid), built
+// the way :ui builds it for Android and iOS, from a copy so the submodule's tree stays clean. It
+// lands next to the UI's resources as files/markdown-preview, where DiagramAssets reads it.
+val previewSource = layout.projectDirectory.dir("../dieter/apps/apple/mac/MarkdownPreview")
+val previewWork = layout.buildDirectory.dir("markdown-preview")
+val previewResources = layout.buildDirectory.dir("generated/markdownResources")
+val prepareMarkdownPreview =
+    tasks.register<Sync>("prepareMarkdownPreview") {
+        from(previewSource) {
+            include("src/**", "build.mjs", "package.json", "package-lock.json")
+            exclude("**/node_modules/**")
+        }
+        into(previewWork)
+        preserve { include("node_modules/**") }
+    }
+val buildMarkdownPreview =
+    tasks.register<Exec>("buildMarkdownPreview") {
+        dependsOn(prepareMarkdownPreview)
+        inputs.dir(previewSource.dir("src"))
+        inputs.files(
+            previewSource.file("build.mjs"),
+            previewSource.file("package.json"),
+            previewSource.file("package-lock.json"),
+        )
+        outputs.dir(previewResources)
+        workingDir(previewWork)
+        commandLine(
+            "sh",
+            "-c",
+            "npm ci --ignore-scripts --no-audit --no-fund && node build.mjs --output \"\$1\"",
+            "markdown-preview",
+            previewResources.get().dir("files/markdown-preview").asFile.absolutePath,
+        )
+    }
+val webResources = layout.buildDirectory.dir("generated/webComposeResources")
+val mergeComposeResources =
+    tasks.register<Sync>("mergeComposeResources") {
+        dependsOn(buildMarkdownPreview)
+        from(layout.projectDirectory.dir("../dieter/apps/kotlin/ui/src/commonMain/composeResources"))
+        from(previewResources)
+        into(webResources)
+    }
+
 compose.resources {
     packageOfResClass = "com.getdieter.mobile.resources"
     customDirectory(
         sourceSetName = "commonMain",
-        directoryProvider = provider { layout.projectDirectory.dir("../dieter/apps/kotlin/ui/src/commonMain/composeResources") },
+        directoryProvider = mergeComposeResources.map { webResources.get() },
     )
 }

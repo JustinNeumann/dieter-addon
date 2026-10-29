@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.window.ComposeViewport
 import com.getdieter.mobile.app.MobileApp
+import com.getdieter.mobile.design.FindRequests
 import com.getdieter.mobile.design.isDark
 import com.getdieter.mobile.design.materialScheme
 import com.getdieter.mobile.platform.WebHost
@@ -54,6 +55,7 @@ fun main() {
     store.setForeground(!pageHidden())
     onVisibilityChange { store.setForeground(!pageHidden()) }
     val script = queryParameter("script").orEmpty()
+    onFindShortcut { FindRequests.request() }
     val route = queryParameter("route").orEmpty()
     MainScope().launch {
         browserMonospace =

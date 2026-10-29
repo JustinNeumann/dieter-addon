@@ -1,6 +1,6 @@
 # Compose web UI for the Dieter add-on: plan
 
-Status (2026-10-29): **Phases 1, 3 and 4.0 built and tested locally; Phase 2 in progress; parity (4.A–J) not
+Status (2026-10-29): **Phases 1, 3 and 4.0 built and tested locally; Phase 2 built on branch `phase2`; parity (4.A–J) not
 started.** See [Progress](#progress) for what is done, where it deviates from this plan and what is open.
 
 The work runs in the order you set:
@@ -20,7 +20,7 @@ features over one group at a time.
 | Part | State | Where |
 |---|---|---|
 | Phase 1: bundle served at `next/` behind Ingress | built, e2e green; add-on 0.6.431.2 waits for the PR merge, then LAN/Nabu Casa/Companion checks | add-on `dieter_bridge.py` (`serve_web`), `web/`, `tools/package.sh`, release v0.1.0 |
-| Phase 2: selection, find, accessibility | in progress | branch `phase2` |
+| Phase 2: selection, find, accessibility | built on branch `phase2` (not merged): selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
 | Phase 3: theme from HA | built, e2e green with a stand-in HA frontend; real HA check after deploy | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
 | 4.0 web host + `RemoteCore` | built; verified against Dieter's isolated fixture gateway (real boards, conversations, sending runs a turn) and in the add-on e2e | `host/`, `proto/dieter/web/v1/host.proto`, `web/…/RemoteCore.kt`, add-on `run.sh` + bridge relay |
 | 4.0 sign-in | built; needs the gateway to list the return address (your `DIETER_NATIVE_REDIRECT_URIS`) | `SignInRelay.kt`, add-on DOCS "Signing in the new page" |
@@ -196,6 +196,63 @@ Compose for Web draws everything into one `<canvas>`. What that changes compared
 
 **Done when** the measured checklist passes for the screens above and Ctrl/⌘+F works in conversation, mail and
 files.
+
+### Results (measured 2026-10-29, demo bundle, Chromium 1200×800)
+
+Measured by `tests/measure.spec.ts` (`npm run measure`, Playwright 1.59.1) against the packaged demo
+bundle: the accessibility tree Compose for Web mirrors into `#cmp_a11y_root`, its ARIA snapshot, keyboard
+only (Tab ×1–8 then Enter, Space, Escape) and drag-select plus Ctrl+C. "Before" is the build without the
+Phase 2 changes, "after" is branch `phase2`. Escape on menus is judged by the pixels under the menu button:
+the accessibility tree is not reliable for that (see the open issues).
+
+**Before**
+
+| Screen | Exposed (nodes / buttons / unnamed) | Odd accessible names | Tab → Enter activates | Space | Escape closes | Drag-select + copy |
+|---|---|---|---|---|---|---|
+| Inbox | 32 / 18 / 0 | `Chat` (icon named instead of the row), `D Compose web UI…` (avatar initial first) | after 1–8 Tabs | no | menu: yes¹ | n/a |
+| Board | 44 / 29 / 0 | cards named `Last activity 1min` (text of merged children dropped) | after 2–8 | yes | menu: yes¹ | n/a |
+| Conversation | 48 / 27 / 0 | `Done, Done, Open, Open` (plan icons) | after 2–8 | yes | menu: yes¹ | ❌ nothing copied from a reply |
+| Mail message | 32 / 15 / 0 | none | after 2–8 | yes | menu: yes¹ | 🟡 one block at a time, no selection across blocks |
+| Files | 36 / 19 / 0 | as Inbox (list pane) | after 2–8 | yes | menu: yes¹ | 🟡 one block at a time |
+| New task | 50 / 28 / 0 | as Inbox | ❌ never | n/a | ❌ no (back handler was a no-op on the web) | n/a |
+
+¹ `DropdownMenu` closes on Escape in Compose for Web itself; the first run judged this from the stale tree
+and recorded "no", the after run measured it properly.
+
+**After**
+
+| Screen | Exposed (nodes / buttons / unnamed) | Odd accessible names | Tab → Enter activates | Space | Escape closes | Drag-select + copy |
+|---|---|---|---|---|---|---|
+| Inbox | 36 / 23 / 0 | ✅ none | ✅ after 1–8 | ✅ yes | ✅ menu | n/a |
+| Board | 44 / 29 / 0 | ✅ cards named by title (`UI Compose web UI…` is the card's label "UI", not an avatar) | ✅ after 2–8 | ✅ yes | ✅ menu | n/a |
+| Conversation | 49 / 29 / 0 | ✅ none; plan rows carry their state | ✅ after 2–8 | ✅ yes | ✅ menu, find bar | ✅ replies, tool output, subagent details |
+| Mail message | 65 / 18 / 0 (body is real DOM) | ✅ none | ✅ after 2–8 | ✅ yes | ✅ menu, find bar | ✅ native selection in the HTML island |
+| Files | 52 / 21 / 0 | ✅ none | ✅ after 2–8 | ✅ yes | ✅ menu, find bar | ✅ Markdown island native; text files in the editor |
+| New task | 50 / 30 / 0 | ✅ none | ❌ focus stays in the text field | n/a | 🟡 yes once the canvas has focus, not from a text field | n/a |
+
+Ctrl/⌘+F opens the app's find bar in the conversation, a mail message and a file (n/m, Enter / Shift+Enter
+and the arrow keys step and scroll, Escape closes the bar only); elsewhere it stays the browser's.
+Tests for all of this: `tests/{selection,find,islands,keyboard}.spec.ts`, run by CI against the packaged
+bundle.
+
+**Open issues**
+
+- **Compose for Web keeps a closed popup in the accessibility tree.** After any menu, dialog or sheet closes,
+  `#cmp_a11y_root` keeps the popup's nodes until the page reloads ("closed menu left in tree": yes on Board,
+  Conversation, Mail, Files). `ComposeWebSemanticsListener` keeps only the last added `SemanticsOwner`.
+  Screen readers then read stale content. To report upstream (no issue found yet); no workaround in `:ui`.
+- **DOM focus does not follow Compose focus** (except into text fields). Tab moves Compose's focus, but a
+  screen reader's focus and the browser's focus ring stay on the canvas.
+- **Escape inside a text field** goes to the field's input element, not to the back handlers, so New task
+  closes on Escape only after clicking outside the field.
+- **Not measured, needs a person:** Orca (Linux desktop), VoiceOver (iPad/Mac) and TalkBack in the Companion
+  app; long press to select on touch screens. The tree above is what they get; whether it is usable is
+  still to be judged by ear.
+- HTML islands sit above the canvas. Menus, dialogs, sheets, snackbars and the find bar report their bounds
+  (`FloatingLayers` in `:ui`) and the island cuts them out (`clip-path`) or hides behind full-window layers.
+  A new kind of overlay must call `Modifier.floating()` or `CoversWindow()`.
+- The offline diagram renderer adds about 6 MB (uncompressed) to the bundle; it loads only when a diagram
+  is shown.
 
 ---
 

@@ -28,7 +28,14 @@ internal actual val platformSupportsDynamicColor: Boolean
 internal actual fun platformSymbolPainter(symbol: String, size: Dp, weight: GlyphWeight): Painter? =
     null
 
-@Composable internal actual fun SystemBackHandler(enabled: Boolean, onBack: () -> Unit) = Unit
+/**
+ * Compose for Web sends Escape to the back handlers (innermost first, after popups and sheets have
+ * had it), so Escape closes a screen or New task the way the system back gesture does elsewhere.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+internal actual fun SystemBackHandler(enabled: Boolean, onBack: () -> Unit) =
+    androidx.compose.ui.backhandler.BackHandler(enabled, onBack)
 
 /** Set by the web entry point once the bundled JetBrains Mono has loaded. */
 internal var browserMonospace: androidx.compose.ui.text.font.FontFamily? = null
