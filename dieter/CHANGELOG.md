@@ -2,6 +2,26 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.46 (2026-10-29)
+
+- **The bridge no longer keeps a Pi's CPU busy** (load 4-5 on 4 cores, 72 °C, overnight since 0.6.429.41). Every
+  `card list` costs the daemon 1-6 CPU-seconds on a Pi with ~300 cards, since it reads every card file whatever the
+  filters, and the bridge sent many of them. Since .41 every change frame of `dieter watch changes` (one every few
+  seconds per running agent) started a full poll, and since .42 the Dreamfall cache listed every lane of every stage
+  board every 10 s. Now:
+  - a change frame re-reads only the cards and chats it names (`card show`, ~0.05 s); another machine's card re-reads
+    its project's list; projects, boards and checkouts still list everything. Frames whose only news is an owned card's
+    `updatedAt` and token usage, kv records (Dreamfall watches those itself) and schedules start no poll at all;
+  - the full poll runs every 60 s while the change stream runs (30 s before), and after one that listed, the next waits
+    four times as long as that one took, unless only cards are re-read or a click waits for it;
+  - the Dreamfall cache makes no `card list` calls of its own: a project with stage boards is listed whole in the full
+    poll and the stage boards' lanes are taken from that list; changed cards come from the `card show` re-reads.
+
+  Measured on the Pi with a second bridge next to the live one: the .45 bridge added 78 points of daemon CPU (66 `card
+  list` in 2 min), the fixed one 20 (6 `card list`, 3 `card show`); both served the same `/api/state`, except that
+  cards now show their token count: `card list` sends it in snake_case and the board read 0. `python3 -m unittest
+  discover -s dieter/tests -p 'bridge_poll_test.py'` (16), `dreamfall_test.py` (32).
+
 ## 0.6.429.45 (2026-10-29)
 
 - Dreamfall: a fourth section in New Dreamfall board and Settings, **Implementation**: instructions for every card you
