@@ -17,8 +17,9 @@ Two homes, detected by /data/options.json:
 
 Endpoints:
   GET  /                      the page
-  GET  /api/state             everything the board needs (polled from the CLI whenever `dieter watch changes`
-                              reports a change, else every IDLE_POLL_S, or POLL_S while that stream is down)
+  GET  /api/state             everything the board needs (from the CLI: the cards `dieter watch changes` reports
+                              changed are re-read one by one, everything is listed every IDLE_POLL_S, or POLL_S
+                              while that stream is down)
   GET  /api/events            SSE: "state" whenever the board changed, heartbeats
   GET  /api/ha                compact summary for HA sensors
   GET  /api/dreamfall/card/ID  Dreamfall: a card's trail and provenance chain
@@ -109,8 +110,11 @@ BIND = os.environ.get("BRIDGE_BIND", "0.0.0.0")
 PORT = int(os.environ.get("BRIDGE_PORT", "8099" if ADDON else "4250"))
 HA_IP = os.environ.get("BRIDGE_HA_IP", "192.168.0.10")
 POLL_S = float(os.environ.get("BRIDGE_POLL_S", "8"))               # board poll while the change stream is down
-IDLE_POLL_S = float(os.environ.get("BRIDGE_IDLE_POLL_S", "30"))     # safety net while `dieter watch changes` runs
+IDLE_POLL_S = float(os.environ.get("BRIDGE_IDLE_POLL_S", "60"))     # full poll (safety net) while `dieter watch changes` runs
 POLL_GAP_S = float(os.environ.get("BRIDGE_POLL_GAP_S", "1"))        # rest between two polls (a burst of changes is one poll)
+POLL_REST = float(os.environ.get("BRIDGE_POLL_REST", "4"))          # after a poll that listed: rest this many times as long as it took
+SHOW_MAX = 24                                     # changed cards re-read one by one (`card show`); more, and the poll lists everything
+CARD_LIMIT = 200                                  # cards per project in the state (the daemon sorts by lane name, then position)
 SLOW_POLL_S = float(os.environ.get("BRIDGE_SLOW_POLL_S", "60"))
 MAIL_POLL_S = float(os.environ.get("BRIDGE_MAIL_POLL_S", "10"))      # Dieter Mail: the change stream does not carry it
 KEY_FILE = os.environ.get("BRIDGE_KEY_FILE", "/data/bridge_api_key" if ADDON else os.path.expanduser("~/.config/dieter-bridge/api_key"))
@@ -223,6 +227,7 @@ def norm_card(c, kind="card"):
     """snake_case (list) and camelCase (show/create) variants -> one shape."""
     g = lambda *ks: next((c[k] for k in ks if k in c and c[k] is not None), None)
     usage = g("token_usage", "tokenUsage") or {}
+    seq = lambda v: int(v) if str(v or "").isdigit() else v          # `card list` sends numbers, `card show` strings
     return {
         "kind": kind,
         "id": c.get("id"),
@@ -245,10 +250,12 @@ def norm_card(c, kind="card"):
         "owner_daemon_id": g("owner_daemon_id", "ownerDaemonId"),
         "summary": c.get("summary") or "",
         "initial_prompt_sent": bool(g("initial_prompt_sent_at", "initialPromptSentAt")),
-        "response_seq": g("response_seq", "responseSeq"),
-        "seen_response_seq": g("seen_response_seq", "seenResponseSeq"),
+        "response_seq": seq(g("response_seq", "responseSeq")),
+        "seen_response_seq": seq(g("seen_response_seq", "seenResponseSeq")),
         "label_ids": g("label_ids", "labelIds") or [],
-        "tokens": {k: int(usage.get(k) or 0) for k in ("inputTokens", "outputTokens", "totalTokens")} if usage else None,
+        # `card list` has snake_case keys here (input_tokens), `card show` camelCase
+        "tokens": {k: int(usage.get(k) or usage.get(snake) or 0) for k, snake in
+                   (("inputTokens", "input_tokens"), ("outputTokens", "output_tokens"), ("totalTokens", "total_tokens"))} if usage else None,
     }
 
 
@@ -1991,6 +1998,12 @@ def changeset(cid, project_id):
 
 
 # --------------------------------------------------------------------------- state poller
+def put_row(rows, cid, new):
+    """rows with the row of id cid replaced by new in place (appended if missing, removed if new is None)."""
+    out = [new if r["id"] == cid else r for r in rows if r["id"] != cid or new is not None]
+    return out if new is None or any(r["id"] == cid for r in rows) else out + [new]
+
+
 class State:
     def __init__(self):
         self.lock = threading.Lock()
@@ -2002,20 +2015,35 @@ class State:
         self.last_finished = None    # {"id","title","at","kind"}
         self.last_review = None
         self.polling = threading.Lock()   # one fast poll at a time: they would only queue up in the daemon
-        self.wake = threading.Event()     # a change was reported: poll now (after POLL_GAP_S)
+        self.wake = threading.Event()     # a change was reported: poll (after the rest, see loop)
+        self.hurry = threading.Event()    # someone waits for that poll (refresh(wait=True)): rest POLL_GAP_S only
         self.wanted = 0                   # refresh() requests ...
         self.polled = 0                   # ... covered by a finished poll (one that started after them)
+        self.want_full = False            # the next poll lists everything ...
+        self.want_ids = set()             # ... or re-reads only these cards and chats
+        self.base = None                  # the lists of the polls: status, projects, boards, cards (per project), chats
+        self.where = {}                   # card/chat id -> (kind, project id, owner daemon id) as the last poll saw it
+        self.last_full = 0
         self.project_ids = []             # the last poll's projects: their lists start without waiting for `project list`
         self.polled_lanes = {}            # card id -> lane as the last poll saw it (without patches), for dieter_card_review
         self.patches = {}                 # card id -> (fields, at): changes made here that a poll may not have seen yet
         self.mail = {"messages": [], "error": None, "machine": None}   # Mail.poll() keeps it; part of every /api/state
 
-    def refresh(self, wait=False, timeout=30):
-        """Something changed: poll again as soon as possible. wait=True returns once a poll that started after
-        this call has finished, so the change is in the next /api/state."""
+    def refresh(self, wait=False, timeout=30, ids=None):
+        """Something changed: poll again soon. ids = the cards and chats that changed: the poll re-reads only these
+        (`card show`, ~0.05 s for the daemon); without ids it lists everything (on a Pi with ~300 cards several
+        CPU-seconds). wait=True returns once a poll that started after this call has finished, so the change is in
+        the next /api/state."""
+        ids = {i for i in ids or () if i} or None
         with self.lock:
             self.wanted += 1
             want = self.wanted
+            if ids is None:
+                self.want_full = True
+            else:
+                self.want_ids |= ids
+        if wait:
+            self.hurry.set()
         self.wake.set()
         if wait:
             with self.lock:
@@ -2033,7 +2061,7 @@ class State:
                                              for k in ("cards", "chats")}}
                 self.rev += 1
                 self.cond.notify_all()
-        self.refresh()
+        self.refresh(ids=[cid])
 
     def snapshot(self):
         with self.lock:
@@ -2053,55 +2081,155 @@ class State:
             noted[what] = str(err)
             log(f"{what}: {err}")
 
-    def fetch(self):
+    def card_list(self, pid):
+        """A project's cards. A project with Dreamfall stage boards is listed whole: the daemon reads every card file
+        for each `card list` whatever its filters, so the stage boards' lanes come from this list (dreamfall.Cache.feed)
+        instead of lists of their own; the state keeps CARD_LIMIT of them, as with --limit."""
+        whole = pid in DREAMFALL.stage_projects()
+        cards = [norm_card(c) for c in unwrap(run(["card", "list", "--project", pid, "--format", "json", "--limit",
+                                                    "2000" if whole else str(CARD_LIMIT)], timeout=30), "cards")]
+        if whole:
+            DREAMFALL.feed(pid, cards)
+        return cards[:CARD_LIMIT]
+
+    def fetch_all(self):
         """status, projects, boards, cards and chats from the CLI. The calls run in parallel: one after the other
         they took ~7 s with three projects on a Pi 5. `card list` without --project answers for one project only
         (the CLI's default), so it runs per project and the lists are merged; the last poll's projects start at
         once, a project that is new since then once `project list` has answered. `chat list` without --project
         lists every project's chats, in ~0.4 s where each --project call took ~2 s."""
-        def card_list(pid):
-            return ex.submit(run, ["card", "list", "--project", pid, "--format", "json", "--limit", "200"], timeout=20)
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
             f_status = ex.submit(run, ["status", "--format", "json"], timeout=15)
             f_projects = ex.submit(run, ["project", "list", "--format", "json"], timeout=15)
             f_boards = ex.submit(run, ["board", "list", "--format", "json"], timeout=15)
             f_chats = ex.submit(run, ["chat", "list", "--format", "json"], timeout=15)
-            f_cards = {pid: card_list(pid) for pid in self.project_ids}
+            f_cards = {pid: ex.submit(self.card_list, pid) for pid in self.project_ids}
             projects = unwrap(f_projects.result(), "projects")
             for p in projects:
                 if p["id"] not in f_cards:
-                    f_cards[p["id"]] = card_list(p["id"])
+                    f_cards[p["id"]] = ex.submit(self.card_list, p["id"])
             status = f_status.result() or {}
             boards = unwrap(f_boards.result(), "boards")
-            cards = [norm_card(c) for p in projects for c in unwrap(f_cards[p["id"]].result(), "cards")]
+            cards = {p["id"]: f_cards[p["id"]].result() for p in projects}
             pids = {p["id"] for p in projects}
             chats = [norm_card(c, "chat") for c in unwrap(f_chats.result(), "chats")]
             chats = [c for c in chats if c["project_id"] in pids]   # as before: only the listed projects' chats
         self.project_ids = [p["id"] for p in projects]
-        return status, projects, boards, cards, chats
+        return {"status": status, "projects": projects, "boards": boards, "cards": cards, "chats": chats}
+
+    def fetch_some(self, ids):
+        """Re-read only the cards and chats that changed: this machine's one by one (`card show`, ~0.05 s for the
+        daemon, where every list costs it 1-3 CPU-seconds on a Pi), another machine's (`card show` refuses those)
+        with their project's list or the chat list. Returns (base, what it re-read) or None: list everything."""
+        base, local_id = self.base, local_daemon_info()[0]
+        show, projects, chats = [], set(), False
+        for cid in ids:
+            kind, pid, owner = self.where.get(cid) or (None, None, None)
+            if kind and owner and local_id and owner != local_id:
+                if kind == "chat":
+                    chats = True
+                elif pid in base["cards"]:
+                    projects.add(pid)
+                else:
+                    return None
+            else:
+                show.append(cid)
+        if len(show) > SHOW_MAX:
+            return None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            f_show = {cid: ex.submit(run, ["card", "show", cid], timeout=15) for cid in show}
+            f_lists = {pid: ex.submit(self.card_list, pid) for pid in projects}
+            f_chats = ex.submit(run, ["chat", "list", "--format", "json"], timeout=15) if chats else None
+            shown = {}
+            for cid, f in f_show.items():
+                try:
+                    shown[cid] = unwrap(f.result(), "card") or None
+                except CliError as e:
+                    if "not found" not in str(e).lower():
+                        return None      # e.g. a new card of another machine: `card show` refuses it, its project is unknown
+                    shown[cid] = None    # deleted
+            cards = {**base["cards"], **{pid: f.result() for pid, f in f_lists.items()}}
+            chat_rows = base["chats"]
+            if f_chats:
+                chat_rows = [c for c in (norm_card(c, "chat") for c in unwrap(f_chats.result(), "chats")) if c["project_id"] in cards]
+        gone, fresh = [], []
+        for cid, raw in shown.items():
+            kind = "chat" if raw and (raw.get("scope") == "chat" or not (raw.get("boardId") or raw.get("board_id"))) else "card"
+            c = norm_card(raw, kind) if raw else None
+            known = self.where.get(cid)
+            if c is None or c["archived"]:
+                if known and known[0] == "chat":
+                    chat_rows = put_row(chat_rows, cid, None)
+                elif known and known[1] in cards:
+                    cards[known[1]] = put_row(cards[known[1]], cid, None)
+                gone.append(cid)
+            elif c["project_id"] not in cards:
+                return None              # a project the last `project list` did not have
+            elif kind == "chat":
+                chat_rows = put_row(chat_rows, cid, c)
+            else:
+                cards[c["project_id"]] = put_row(cards[c["project_id"]], cid, c)
+                fresh.append(c)
+        DREAMFALL.put_cards(fresh, gone)
+        return {**base, "cards": cards, "chats": chat_rows}, (set(shown), projects, chats)
+
+    def cheap(self):
+        """Whether the pending poll only re-reads cards and chats of this machine (`card show`, ~0.05 s each)."""
+        with self.lock:
+            if self.want_full or not self.want_ids or len(self.want_ids) > SHOW_MAX or time.time() - self.last_full > IDLE_POLL_S:
+                return False
+            ids = list(self.want_ids)
+        local_id = local_daemon_info()[0]
+        return all(not (w := self.where.get(i)) or not w[2] or not local_id or w[2] == local_id for i in ids)
 
     def poll_fast(self):
+        """One poll: what refresh() asked for since the last one, everything when nothing was named (the timed
+        poll) or the last full poll is IDLE_POLL_S old. Returns whether it listed (the expensive calls)."""
         with self.polling:
             with self.lock:
                 want = self.wanted
+                ids = self.want_ids
+                if self.want_full or not ids or time.time() - self.last_full > IDLE_POLL_S or self.base is None:
+                    ids = None
+                self.want_full, self.want_ids = False, set()
             try:
-                self._poll_fast()
+                return self._poll_fast(ids)
             finally:
                 with self.lock:
                     self.polled = max(self.polled, want)
                     self.cond.notify_all()
 
-    def _poll_fast(self):
+    def _poll_fast(self, ids=None):
         started = time.time()
         try:
-            status, projects, boards, cards, chats = self.fetch()
+            got = None
+            if ids is not None:
+                try:
+                    got = self.fetch_some(ids)
+                except CliError as e:
+                    log(f"poll: re-reading {len(ids)} cards failed, listing everything: {e}")
+            if got is None:
+                base, (shown, listed, chats_listed) = self.fetch_all(), (set(), None, True)
+                self.last_full = time.time()
+            else:
+                base, (shown, listed, chats_listed) = got
         except CliError as e:
             with self.lock:
                 if self.data.get("ok") or self.data.get("error") != str(e):
                     self.data = {**self.data, "ok": False, "error": str(e), "generated_at": time.time()}
                     self.rev += 1
                     self.cond.notify_all()
-            return
+            return True
+        self.base = base
+        status, projects, boards = base["status"], base["projects"], base["boards"]
+        cards = [dict(c) for p in projects for c in base["cards"].get(p["id"], [])]   # copies: the lists are reused
+        chats = [dict(c) for c in base["chats"]]
+        self.where = {**{c["id"]: ("card", c["project_id"], c.get("owner_daemon_id")) for c in cards},
+                      **{c["id"]: ("chat", c["project_id"], c.get("owner_daemon_id")) for c in chats}}
+
+        def covered(cid):   # whether this poll read the card from the daemon
+            w = self.where.get(cid)
+            return listed is None or cid in shown or (w and (chats_listed if w[0] == "chat" else w[1] in listed))
         # Checkouts and cards of a machine identity the account no longer knows (e.g. the add-on's daemon
         # was removed and re-enrolled) cannot be used: hide such checkouts, mark such cards as orphaned.
         local_id, enrolled = local_daemon_info()
@@ -2162,7 +2290,7 @@ class State:
             data["mail"] = self.mail
             self.polled_lanes = {c["id"]: c["lane"] for c in cards}
             for cid, (fields, at) in list(self.patches.items()):
-                if at < started:                               # this poll asked the daemon after the change
+                if at < started and covered(cid):              # this poll asked the daemon after the change
                     del self.patches[cid]
                     continue
                 for c in cards + chats:
@@ -2174,6 +2302,7 @@ class State:
             if changed:
                 self.rev += 1
                 self.cond.notify_all()
+        return listed is None or bool(listed) or chats_listed
 
     def set_mail(self, mail):
         """A new mail listing (Mail.poll): push it to the pages if it differs."""
@@ -2246,16 +2375,25 @@ class State:
                 self.cond.notify_all()
 
     def loop(self):
-        """Fast polls: right after a reported change (refresh(), POLL_GAP_S after the previous poll so a burst of
-        changes is one poll), else every IDLE_POLL_S while the change stream runs and every POLL_S without it."""
+        """Fast polls: after a reported change (refresh()), else every IDLE_POLL_S while the change stream runs and
+        every POLL_S without it. A poll starts POLL_GAP_S after the previous one at the earliest (a burst of changes
+        is one poll), and after a poll that listed, POLL_REST times as long as that one took, unless all it has to do
+        is re-read this machine's cards or someone waits for it. On a Pi with ~300 cards every list costs the daemon
+        1-3 CPU-seconds, and with 0.6.429.41-.45 a full poll after every change frame (one every few seconds per
+        running agent) kept 2-4 of its cores busy."""
         threading.Thread(target=self.slow_loop, daemon=True).start()
-        last = 0
+        last, rest = 0, POLL_GAP_S
         while True:
             self.wake.wait(max(0, last + (IDLE_POLL_S if Watch.live else POLL_S) - time.time()))
+            if not self.hurry.is_set() and not self.cheap():
+                self.hurry.wait(max(0, last + rest - time.time()))
             time.sleep(max(0, last + POLL_GAP_S - time.time()))
             self.wake.clear()
-            self.poll_fast()
+            self.hurry.clear()
+            began = time.time()
+            listed = self.poll_fast()
             last = time.time()
+            rest = max(POLL_GAP_S, (last - began) * POLL_REST) if listed else POLL_GAP_S
 
     def slow_loop(self):
         """Machine, quota, harnesses: on their own thread, so a slow quota probe (up to a minute) does not hold up the board."""
@@ -2370,26 +2508,20 @@ STATE = State()
 
 
 # --------------------------------------------------------------------------- Dreamfall boards (bridge/dreamfall.py)
-DREAMFALL = dreamfall.Cache(norm_card, on_change=lambda: STATE.touch(), log=log)
+DREAMFALL = dreamfall.Cache(norm_card, on_change=lambda: STATE.touch(), on_boards=lambda: STATE.refresh(), log=log)
 
 
-def df_poll(pid=None, boards=None):
-    """Cards made or moved here must be in the next /api/state, not only after the next poll: the touched stage
-    boards are read while the state polls."""
-    t = threading.Thread(target=DREAMFALL.refresh, kwargs={"full": True, "only": pid, "boards": boards}, daemon=True)
-    t.start()
-    if hasattr(STATE, "refresh"):
-        STATE.refresh(wait=True)
-    else:
-        STATE.poll_fast()
-    t.join(30)
+def df_poll():
+    """Boards made or removed here and run cards started here must be in the next /api/state: a full poll, which
+    reads the stage boards too (their project is listed whole, see State.card_list)."""
+    STATE.refresh(wait=True)
 
 
 def df_apply(res):
     """A person's decision is shown from what act() reported, not after the boards are listed again: the new copy
     is read once (`card show`, fast), the moved cards change lane in the Dreamfall cache and in the state; the
-    boards are re-read in the background. df_poll waited for ~8 `card list` calls and a full state poll (5-10 s
-    on a Pi) before the page saw a pick."""
+    cards are re-read in the background (`card show`). df_poll waited for ~8 `card list` calls and a full state poll
+    (5-10 s on a Pi) before the page saw a pick."""
     lanes = res.pop("lanes", None) or {}
     cards = []
     if res.get("id"):
@@ -2401,8 +2533,7 @@ def df_apply(res):
     for cid, lane in lanes.items():
         if cid != res.get("id") or not cards:
             STATE.patch(cid, lane=lane)
-    DREAMFALL.touch_boards()
-    STATE.refresh()
+    STATE.refresh(ids=[*lanes, res.get("id")])
     res.pop("boards", None)
 
 
@@ -2423,7 +2554,7 @@ def dreamfall_post(path, body, user):
         if not path:
             p = dreamfall.create_pipeline(body, user)
             DREAMFALL.put_local("p." + p["id"], p)
-            df_poll(p["id"])
+            df_poll()
             log(f"dreamfall: {p['name']} ({p['id']}) created in {p['project_id']}")
             return {"ok": True, "id": p["id"], "pipeline": p}
         pid, action = path[0], (path[1] if len(path) > 1 else "")
@@ -2439,7 +2570,7 @@ def dreamfall_post(path, body, user):
             return res
         if action == "run":
             res = dreamfall.run_now(pid, str(body.get("stage") or ""))
-            df_poll(pid)
+            df_poll()
             return res
         if action == "act":
             res = dreamfall.act(pid, body, user, known=DREAMFALL.cards_of)
@@ -2484,13 +2615,19 @@ def dreamfall_created(cid, b, user):
 
 
 class Watch:
-    """`dieter watch changes`: the daemon's change frames (the stream the native apps hold). A change of the shared
-    records (projects, boards, cards, checkouts), of a card this machine runs, or of a conversation's status asks
-    for a poll at once, so the page follows within a few seconds instead of a poll interval. Activity frames that
-    only stream a running turn's text do not (the open conversation has its own stream), and neither does a card
-    summary whose only news is its lastActivityAt: a running agent bumps it every few seconds, and polling on each
-    bump kept the daemon a whole core busier (the timed poll brings activity times along)."""
+    """`dieter watch changes`: the daemon's change frames (the stream the native apps hold). What a frame changed on
+    the board decides the poll (classify): the cards and chats it names are re-read one by one, a change of projects,
+    boards or checkouts lists everything. Not counted: activity frames that only stream a running turn's text (the open
+    conversation has its own stream), a card summary whose only news is its lastActivityAt (a running agent bumps it
+    every ~2 s), an owned card whose only news is its updatedAt and token usage (every 5-10 s per running agent: each
+    started a full poll, ~10 full reads of the card files, and kept a Pi's daemon at 2-4 cores, 0.6.429.41-.45), the
+    Dreamfall records (kv, its cache watches them itself) and schedules. Activity and token counts come with the
+    timed full poll."""
     live = False   # caught up and running: the timed poll is only a safety net
+    QUIET_OWNED = ("updatedAt", "tokenUsage")
+
+    def __init__(self):
+        self.summaries, self.owned, self.checkouts, self.status = {}, {}, {}, {}
 
     @staticmethod
     def summary_key(record):
@@ -2500,6 +2637,47 @@ class Watch:
             return None
         return json.dumps([{k: x for k, x in v.items() if k != "lastActivityAt"} if isinstance(v, dict) else v for v in values], sort_keys=True)
 
+    def classify(self, frame):
+        """(full, ids): whether the frame changed projects, boards or checkouts (list everything), and which cards
+        and chats it changed (re-read those)."""
+        full = any(frame.get(k) for k in ("resetRecords", "resetLocal"))
+        ids = set()
+        for r in frame.get("records") or []:
+            if not isinstance(r, dict):
+                full = True
+                continue
+            kind, rid = str(r.get("kind") or ""), str(r.get("id") or "")
+            if kind.startswith("kv.") or kind == "schedule":
+                continue
+            cid, _, field = rid.partition(".")
+            if kind not in ("item", "") or not cid.startswith("c_"):
+                full = True
+                continue
+            if field == "summary":
+                key = self.summary_key(r)
+                if key is not None and self.summaries.get(rid) == key:
+                    continue
+                self.summaries[rid] = key
+            ids.add(cid)
+        for c in frame.get("ownedCards") or []:
+            if not isinstance(c, dict) or not c.get("id"):
+                continue
+            key = json.dumps({k: v for k, v in c.items() if k not in self.QUIET_OWNED}, sort_keys=True, default=str)
+            if self.owned.get(c["id"]) != key:
+                self.owned[c["id"]] = key
+                ids.add(c["id"])
+        for c in frame.get("ownedCheckouts") or []:
+            key = json.dumps(c, sort_keys=True, default=str)
+            co = c.get("id") if isinstance(c, dict) else key
+            if self.checkouts.get(co) != key:
+                self.checkouts[co] = key
+                full = True
+        for a in frame.get("activities") or []:
+            if isinstance(a, dict) and a.get("cardId") and self.status.get(a["cardId"]) != a.get("status"):
+                self.status[a["cardId"]] = a.get("status")
+                ids.add(a["cardId"])
+        return full, ids
+
     @classmethod
     def loop(cls):
         backoff = 2
@@ -2508,32 +2686,22 @@ class Watch:
             rc = None
             try:
                 p = subprocess.Popen([DIETER, "watch", "changes"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-                status, summaries = {}, {}
+                w = cls()
                 for line in p.stdout:
                     try:
                         frame = json.loads(line)
                     except ValueError:
                         continue
-                    changed = any(frame.get(k) for k in ("ownedCards", "ownedCheckouts", "resetRecords", "resetLocal"))
-                    for r in frame.get("records") or []:
-                        if not isinstance(r, dict) or not str(r.get("id", "")).endswith(".summary"):
-                            changed = True
-                            continue
-                        key = cls.summary_key(r)
-                        if key is None or summaries.get(r["id"]) != key:
-                            summaries[r["id"]] = key
-                            changed = True
-                    for a in frame.get("activities") or []:
-                        if isinstance(a, dict) and status.get(a.get("cardId")) != a.get("status"):
-                            status[a.get("cardId")] = a.get("status")
-                            changed = True
+                    full, ids = w.classify(frame)
                     if frame.get("caughtUp"):   # before that, the replay of what the daemon holds
                         if not cls.live:
                             cls.live = True
                             log("watch: following the daemon's changes")
-                            changed = True
-                        if changed:
+                            full = True
+                        if full:
                             STATE.refresh()
+                        elif ids:
+                            STATE.refresh(ids=ids)
                 rc = p.wait()
             except Exception as e:
                 rc = repr(e)
@@ -2941,7 +3109,7 @@ class Handler(BaseHTTPRequestHandler):
                         out = run(args + [cid], timeout=120, parse=False)
                     finally:
                         upload_forget(files)
-                    STATE.refresh()
+                    STATE.refresh(ids=[cid])
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action == "move" and kind == "card":
                     lane = body.get("lane")
@@ -2978,14 +3146,14 @@ class Handler(BaseHTTPRequestHandler):
                     if title:
                         STATE.patch(cid, title=title)
                     else:
-                        STATE.refresh()
+                        STATE.refresh(ids=[cid])
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action in ("cancel", "archive"):
                     out = run([kind, action, cid], timeout=60, parse=False)
                     if action == "archive":
                         STATE.patch(cid, archived=True)
                     else:
-                        STATE.refresh()
+                        STATE.refresh(ids=[cid])
                     return self.send_json({"ok": True, "output": (out or "").strip()[:500]})
                 if action == "read" and kind == "card":
                     seq = str(body.get("seq", "")).strip()
@@ -3050,7 +3218,7 @@ class Handler(BaseHTTPRequestHandler):
         if entity and cid:
             TITLE_PENDING[cid] = first_line_title(b["prompt"])
             threading.Thread(target=retitle, args=(kind, cid, b["prompt"], entity), daemon=True).start()
-        STATE.refresh(wait=True)   # the page opens the new card from /api/state
+        STATE.refresh(wait=True, ids=[cid])   # the page opens the new card from /api/state (without an id: a full poll)
         return {"ok": True, "id": cid, "card": norm_card(c or {}, kind)}
 
     def card_project(self, cid):
