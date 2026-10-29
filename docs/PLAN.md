@@ -63,7 +63,7 @@ features over one group at a time.
 | One patch | `MobileTheme.kt` is filtered at build time so the Material type scale uses `platformMonospace()` (the browser has no system monospace font; the web actual bundles JetBrains Mono). Upstream this is a two-line change |
 | Size | ≈ 15 MB optimized (Skia wasm 8.4 MB, app wasm 6.2 MB, JS 0.5 MB), ≈ 5 MB gzip |
 | Build times on your PC | First build 3 min, incremental dev build ~12 s, production build ~100 s |
-| Not real yet | Data (demo only); terminal, screen sharing, attachment picker, share sheet are no-ops (back: done since 0.4.0) |
+| Not real yet | Data (demo only); terminal and screen sharing are no-ops (back, attachment picker, attachment viewer/download and share: done since 0.4.0) |
 
 ### Target architecture (decided in the last discussion)
 
@@ -396,7 +396,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | New worktree vs project directory, branch fields | ✅ | none | `workspace segment…` |
 | Publishing override, Add to Todo vs start | ✅ | verify | `Add to Todo creates an unstarted card…` |
 | Vault / mail access switches | ✅ | verify | |
-| Attachments (≤ 4 × 20 MB) | 🟡 | `rememberAttachmentPicker` web actual (`<input type=file>` → `MessagePart`); size limits | `the Attach button does not break the form` |
+| Attachments (≤ 4 × 5 MB, 6 MB total: the apps' `Attachments` limits) | ✅ | `rememberAttachmentPicker` web actual: `<input type=file multiple>` → `Attachments.part`, the apps' limit messages | `the Attach button does not break the form`; `Attach in New task takes files from the browser's file dialog`; `a file over the limit is refused with the apps' message` |
 | Draft survives live updates, Escape closes, X cancels | ✅ | verify on web | `typing in the form survives live updates…`, `Escape closes the form`, … |
 | **Title model** (OpenAI vs Ollama via HA AI Task) | ❌ | the bridge renames after creation; for cards created through the core, the bridge must see them (`housekeeping`-style watcher) or the web host calls the bridge after create | |
 
@@ -407,7 +407,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Streaming timeline, tool rows, reasoning toggle, context use | ✅ | none | `a task runs on the mock harness and its conversation streams` |
 | Send, queue, steer, cancel; model/effort pickers | ✅ | none | `typing in the chat field keeps the focus…`, `model and effort pickers in the conversation work` |
 | Changes / diff, Files pane, subagents, processes | ✅ | none | |
-| Attachments in messages, image previews | 🟡 | attachment actual (E); viewer | `an image attached in the chat reaches the conversation…` |
+| Attachments in messages, image previews | 🟡 | picker ✅; viewer opens images, PDF, text, audio and video in a new tab, downloads the rest (Blob URL); in-chat previews still to check against the add-on | `an image attached in the chat reaches the conversation…` |
 | **Images from the agent**: tool-result images; `![](path)` from the checkout | 🟡 | verify what the apps render; the checkout-relative Markdown images are the add-on's → extension resolving through the bridge (`/api/{card,chat}/ID/image`) | |
 | **Agent questions** (Claude's AskUserQuestion relayed by the fork's worker, options + free text, decline, expiry) | ✅ add-on core (`questions` slice, `AnswerQuestion`), conversation widget | `conversationWidgets` extension + bridge `questions` endpoints; Inbox section | `a question from the agent is shown on the card…` |
 | Full-screen image viewer | 🟡 | verify | |
@@ -420,6 +420,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Markdown body incl. tables | ✅ | HTML island (Phase 2) for selection/find | |
 | vega-lite / vega / mermaid charts | 🟡 | `NativeMarkdownDiagram` web actual with the offline renderer (Phase 2) | |
 | Relative links open the file in the sender's checkout | 🟡 | verify; route to Files | |
+| Share a message | ✅ | `rememberTextSharer` web actual: the system share sheet where the browser has one (phones), else the Markdown downloads as `<subject>.md`; menus drawn over the HTML island take clicks (the island's interop wrapper lets pointer events through) | `Share on a mail message downloads its Markdown…` |
 
 #### H. Tools
 
@@ -428,7 +429,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Machines | machine info, CPU/GPU | ✅ | none | `Tools pages: Machines, Usage and Changes render…` |
 | Machines | **Gateway enroll / re-enroll** of the add-on's daemon | ✅ add-on core (`gateway` slice, `EnrollGateway`, `CloseEnrollment`, `UnenrollGateway`) | extension page calling the bridge's `gateway` endpoints. Note: needed *before* the Compose UI can work (D2), so it also stays on the old page | `Gateway: the Machines page offers enrollment…` |
 | Machines | **SSH key** of the add-on, copy, connection test | ✅ add-on core (`ssh` slice, `TestSsh`) | extension section + bridge `ssh` endpoints | `Machines shows the add-on's own SSH key…` |
-| Files | browse, dotfiles, text/images, download | ✅/🟡 | download needs a web actual (Blob + `<a download>`) | `Files browses the project's checkout…` |
+| Files | browse, dotfiles, text/images, download | ✅ | "Open preview" goes through the attachment viewer: a new tab, or a download for types a browser does not show | `Files browses the project's checkout…` |
 | Schedules | list, create (presets, preview), run, pause, history, delete | ✅ | verify presets and next-run preview | `Schedules: create with the mock agent…` |
 | Usage | quotas (Claude, Codex, Antigravity groups) | ✅/🟡 | verify Antigravity's grouped windows from the fork | |
 | Usage | **Claude sign-in** (`claude auth login`, paste code, cancel, logout) | ✅ add-on core (`claude` slice, sign-in/code/cancel/sign-out commands) | extension section + bridge `claude` endpoints | `Usage offers the Claude sign-in…` |

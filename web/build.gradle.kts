@@ -142,3 +142,10 @@ compose.resources {
         directoryProvider = mergeComposeResources.map { webResources.get() },
     )
 }
+
+// Binaryen's step copies the JS import object (the @JsFun bodies) next to the optimized wasm but only tracks the
+// wasm: a change to JS alone would otherwise ship the old import object.
+tasks.matching { it.name == "compileProductionExecutableKotlinWasmJsOptimize" }.configureEach {
+    inputs.files(layout.buildDirectory.dir("compileSync/wasmJs/main/productionExecutable/kotlin").map { it.asFileTree.matching { include("*.mjs") } })
+        .withPropertyName("importObject")
+}

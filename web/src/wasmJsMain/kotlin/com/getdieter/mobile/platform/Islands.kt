@@ -124,6 +124,10 @@ import org.w3c.dom.HTMLElement
     // Keeps clear of what Compose draws over the island (menus, the find bar, snackbars): holes
     // in island pixels as [x, y, w, h, ...]; everything covered hides the island.
     clip(el, holes, hidden) {
+      // Compose ignores pointer events aimed at an interop element, and the wrapper it puts around the island
+      // fills the island's bounds: it lets them through, so a click in a hole reaches the menu drawn there.
+      if (el.parentElement) el.parentElement.style.pointerEvents = 'none';
+      el.style.pointerEvents = 'auto';
       el.style.visibility = hidden ? 'hidden' : '';
       if (!holes.length) { el.style.clipPath = ''; return; }
       const w = el.clientWidth + 100, h = el.clientHeight + 100;
