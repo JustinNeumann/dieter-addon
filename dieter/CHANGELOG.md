@@ -2,6 +2,20 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.48 (2026-10-29)
+
+- **Dreamfall's Pick and Start answer the click at once.** Until now nothing happened for 1-5 s after Pick (in its
+  dialog) or Start: the page waited for the action, then fetched the whole state (~700 KB) again before it drew
+  anything. Now the card shows "Picking…", "Starting…" (also Promote, Release, Park, Back to the queue) with a
+  spinner within ~0.1 s, ignores further clicks and stays busy until the state that shows the change has arrived. The
+  bridge's answer names that state (`rev`), and the page waits for it on the event stream instead of fetching the
+  state again; only when the stream is down or 5 s late does it fetch.
+- The event stream sends at most one state per 0.3 s (`BRIDGE_PUSH_GAP_S`). A click came as a burst of 8-10 full states
+  (~800 KB each) within 2 s, and the page parsed and drew every one. Now 3-6 are sent.
+- The action itself still takes as long as the daemon needs: on a Pi with 300 cards `card create` alone takes ~2 s,
+  a move ~0.5 s, a start ~0.6 s, and more while agents run. Running the move next to the create saved nothing (the
+  daemon was slower at both).
+
 ## 0.6.429.47 (2026-10-29)
 
 - **Mail tab**: the page lists Dieter Mail. Until now the tab was a placeholder that showed "No mail" while the

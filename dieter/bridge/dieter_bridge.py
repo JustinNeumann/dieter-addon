@@ -113,6 +113,7 @@ POLL_S = float(os.environ.get("BRIDGE_POLL_S", "8"))               # board poll 
 IDLE_POLL_S = float(os.environ.get("BRIDGE_IDLE_POLL_S", "60"))     # full poll (safety net) while `dieter watch changes` runs
 POLL_GAP_S = float(os.environ.get("BRIDGE_POLL_GAP_S", "1"))        # rest between two polls (a burst of changes is one poll)
 POLL_REST = float(os.environ.get("BRIDGE_POLL_REST", "4"))          # after a poll that listed: rest this many times as long as it took
+PUSH_GAP_S = float(os.environ.get("BRIDGE_PUSH_GAP_S", "0.3"))    # /api/events: at most one state push per this many seconds
 SHOW_MAX = 24                                     # changed cards re-read one by one (`card show`); more, and the poll lists everything
 CARD_LIMIT = 200                                  # cards per project in the state (the daemon sorts by lane name, then position)
 SLOW_POLL_S = float(os.environ.get("BRIDGE_SLOW_POLL_S", "60"))
@@ -2576,6 +2577,7 @@ def dreamfall_post(path, body, user):
             res = dreamfall.act(pid, body, user, known=DREAMFALL.cards_of)
             df_sync("c." + str(body.get("card") or ""), ("c." + res["id"]) if res.get("id") else "")
             df_apply(res)
+            res["rev"] = STATE.rev    # the state that shows the change: the page keeps the card busy until it has it
             return res
         raise ValueError("not found")
     except dreamfall.DfError as e:
@@ -3261,12 +3263,16 @@ class Handler(BaseHTTPRequestHandler):
         self.start_sse()
         rev, data = STATE.snapshot()
         self.sse("state", {"rev": rev, **data})
-        last_beat = time.time()
+        last_beat = last_push = time.time()
         while True:
             new = STATE.wait_change(rev, 15)
             if new != rev:
+                # a click comes as a burst of changes (the move, the re-read cards, the Dreamfall records): ~10 in
+                # 1.5 s, each a full state of ~800 KB the page parses and draws again. One push per PUSH_GAP_S.
+                time.sleep(max(0.0, last_push + PUSH_GAP_S - time.time()))
                 rev, data = STATE.snapshot()
                 self.sse("state", {"rev": rev, **data})
+                last_push = time.time()
             elif time.time() - last_beat > 14:
                 self.sse("ping", {"t": time.time()})
                 last_beat = time.time()
