@@ -2,6 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.49 (2026-10-29)
+
+- Dreamfall: picked cards said **Running** for hours after their agents had finished. Dieter's board instructions move
+  a card to Review only once its pull request exists, and in a project without a git remote there is none, so the
+  agents left their cards in Running. A picked card's brief now says to move it to Review when the work is committed
+  and checked, without a pull request if the project has no remote. On the board, an Implementation card whose agent is
+  idle in Running shows **Finished · still in Running** with a **Review** button, and the column counts those as
+  finished, not running.
+
 ## 0.6.429.48 (2026-10-29)
 
 - **Dreamfall's Pick and Start answer the click at once.** Until now nothing happened for 1-5 s after Pick (in its

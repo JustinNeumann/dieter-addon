@@ -211,6 +211,9 @@ line, the times, the agent and the stage boards are optional.
 - **Implementation**: yours. Only your **Pick** on a Navigation idea copies it here as a Todo draft (in a
   new worktree or the project directory, optionally started at once). **Park** keeps an idea for later,
   **Back to the queue** undoes a release or a park, and you can promote a released idea yourself.
+  A picked card's brief tells its agent to move it to Review when the work is committed and checked, also
+  without a pull request when the project has no git remote. A card whose agent finished but left it in
+  Running shows **Finished · still in Running** and a **Review** button.
 
 The board shows the stages side by side with a funnel on top (stage, actor, schedule, waiting ideas,
 how many ideas pass) and, on a phone, as tabs. Released, transferred, parked and picked ideas sit in
