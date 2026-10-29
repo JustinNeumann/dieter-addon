@@ -57,6 +57,15 @@ find . -maxdepth 1 -type f \( -name '*.mjs' -o -name 'package.json' -o -name 'pa
   | LC_ALL=C sort | xargs sha256sum | sha256sum
 ```
 
+Verify `SHA256SUMS` before taking checksums from it. The add-on has no cosign, but the workstation can fetch
+the binary from `sigstore/cosign` (check it against `cosign_checksums.txt`) and run, in the release's download
+directory:
+
+```bash
+cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/JustinNeumann/dieter/.github/workflows/fork-server-release.yml@refs/tags/vX.Y.Z-antigravity.N
+```
+
 ## Upstream screening
 
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
