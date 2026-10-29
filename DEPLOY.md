@@ -71,6 +71,10 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (scheduled card).
 
+- **2026-10-29**, fork release **`0.6.431-antigravity.6`** (`2c576408`): `fork-release` merged with upstream main
+  (v0.6.431, `7f2afded`, the range screened below), the fork's CI fixed and green, bumped to it in 0.6.431.1.
+  Adapter file (`antigravity-runtime.mjs`), runtime sources checksum and both harness archives are the same as in
+  `0.6.429-antigravity.5`; tarball checksums from its `SHA256SUMS`, verified with cosign.
 - **2026-10-28**, screened through upstream **v0.6.431** (`7f2afded`, = main). Baseline: the pinned fork
   release `0.6.429-antigravity.3` already contains upstream through `2d736128` (after v0.6.430), so the range
   was `2d736128..7f2afded`: only Mail rendering in the apps (#171, #172), tests and fixtures; no change to
