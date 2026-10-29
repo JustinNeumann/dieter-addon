@@ -156,11 +156,22 @@
     return j;
   }
   const SNAP = q.get("snap") === "1"; // screenshots: load once, no streams
+  S.revWaits = [];
+  // Resolves once S.data has the bridge's state revision rev (an action's answer names the state that shows its
+  // change): the stream brings it, a fetch of the whole state (~700 KB) only when the stream is down or slow.
+  function untilRev(rev) {
+    if (rev == null || (S.data?.rev ?? -1) >= rev) return Promise.resolve();
+    if (!S.es || S.es.readyState !== 1) return refreshState();
+    return new Promise((done) => {
+      const w = { rev, done }; S.revWaits.push(w);
+      setTimeout(() => { if (!S.revWaits.includes(w)) return; S.revWaits = S.revWaits.filter((x) => x !== w); refreshState().then(done); }, 5000);
+    });
+  }
   function connect() {
     if (SNAP) { api("api/state").then((d) => { S.data = d; render(); }); return; }
     if (S.es) S.es.close();
     S.es = new EventSource("api/events"); S.esAlive = Date.now();
-    S.es.addEventListener("state", (e) => { S.esAlive = Date.now(); S.data = JSON.parse(e.data); render(); });
+    S.es.addEventListener("state", (e) => { S.esAlive = Date.now(); S.data = JSON.parse(e.data); S.revWaits = S.revWaits.filter((w) => (S.data.rev >= w.rev ? (w.done(), false) : true)); render(); });
     S.es.addEventListener("ping", () => { S.esAlive = Date.now(); });
   }
 
@@ -561,6 +572,7 @@
       if (next?.actor === "human") { foot = `<div class="agent">Waiting for you</div>`; button = `<button class="btn tonal with-icon df-btn" data-act="df-pick" data-id="${c.id}" data-pid="${p.id}">${ico("arrow_forward", 16)}Pick</button>`; }
       else foot = `<div class="agent">Waiting for ${esc(next?.name || "the next stage")}${next?.cron ? " · " + dfHHMM(next.cron) : ""}</div>`;
     } else foot = `<div class="agent">${esc(DF_LANES[st.role]?.[c.lane] || c.lane)} · ${esc(cardAge(c) || "")}</div>`;
+    if (S.df.busy[c.id]) button = dfBusyBtn(c, st.human ? "filled" : "tonal");
     const open = st.human ? `data-act="open" data-id="${c.id}"` : `data-act="df-card" data-id="${c.id}"`;
     return `<div class="ccard workcard clickable df-card ${isSelected(c.id) ? "selected" : ""}" ${open}>
       <div class="body">${cat ? `<div class="labels">${dfCat(cat)}</div>` : ""}<div class="top"><div class="ttl clamp2">${esc(title)}</div>${cardAge(c) ? `<div class="age">${cardAge(c)}</div>` : ""}</div>
@@ -627,6 +639,16 @@
   }
   // ---- a Dreamfall card: brief, verdict, provenance (copies across stages) and the trail
   S.df = { detail: {} };
+  // A Dreamfall action takes 1-4 s on a Pi (the daemon's `card create` alone ~2 s): the card says so at once
+  // (S.df.busy: card id -> "Picking…") and stays busy until the state that shows the change has arrived.
+  S.df.busy = {};
+  const dfBusyBtn = (c, cls) => S.df.busy[c.id] ? `<button class="btn ${cls} with-icon df-btn" disabled><span class="spin"></span>${esc(S.df.busy[c.id])}</button>` : "";
+  async function dfAct(pid, id, body, busy, done) {
+    if (S.df.busy[id]) return;
+    S.df.busy[id] = busy; render();
+    try { const r = await api(`api/dreamfall/${pid}/act`, { ...body, card: id }); await untilRev(r.rev); delete S.df.busy[id]; render(); done?.(r); }
+    catch (e) { delete S.df.busy[id]; render(); snackbar(e.message); }
+  }
   function dfLoadDetail(id, want) {
     const d = S.df.detail[id]; if (d && (d.loading || d.want === want)) return;
     S.df.detail[id] = { ...(d || {}), loading: true, want };
@@ -671,6 +693,7 @@
       else btns.push(`<button class="btn text with-icon" data-act="df-do" data-do="promote" data-id="${c.id}" data-pid="${p.id}">${ico("thumb_up", 18)}Promote anyway</button>`);
     }
     if (st.human && c.lane === "todo" && !c.initial_prompt_sent) btns.push(`<button class="btn filled with-icon" data-act="df-start" data-id="${c.id}" data-pid="${p.id}">${ico("play_arrow", 18)}Start</button>`);
+    if (S.df.busy[c.id]) btns.splice(0, btns.length, dfBusyBtn(c, "filled"));
     btns.push(`<button class="btn text with-icon" data-act="open" data-id="${c.id}">${ico("forum", 18)}Conversation</button>`);
     const sname = (role) => (p.stages || []).find((x) => x.role === role)?.name || "";
     const chain = (d?.chain || []).map((n, i, arr) => {
@@ -711,8 +734,8 @@
   }
   async function dfPickOk() {
     const k = S.dfPick; if (!k) return; const note = ($("#df-note")?.value || "").trim(); closeDialog();
-    try { const r = await api(`api/dreamfall/${k.pid}/act`, { action: "pick", card: k.id, note, workspace: k.workspace, start: k.start }); await refreshState(); render(); snackbar(r.created === false ? "Already picked." : "Picked: a Todo draft on " + (dfNext(dfPipeline(k.pid), "navigation")?.name || "Implementation") + "."); }
-    catch (e) { snackbar(e.message); }
+    dfAct(k.pid, k.id, { action: "pick", note, workspace: k.workspace, start: k.start }, k.start ? "Picking, starting…" : "Picking…",
+      (r) => snackbar(r.created === false ? "Already picked." : `Picked: ${k.start ? "started" : "a Todo draft"} on ` + (dfNext(dfPipeline(k.pid), "navigation")?.name || "Implementation") + "."));
   }
   const DF_DO = { promote: ["Promote", "Copy it to the next stage; the original leaves the queue."], release: ["Release", "It leaves the queue and stays on the board as released."], park: ["Park", "It leaves your queue for later; you can pick it any time."], restore: ["Back to the queue", "It waits in its stage's queue again."] };
   function dfDoDialog(pid, id, what) {
@@ -725,11 +748,11 @@
   }
   async function dfDoOk() {
     const k = S.dfDo; if (!k) return; const note = ($("#df-note")?.value || "").trim(); closeDialog();
-    try { await api(`api/dreamfall/${k.pid}/act`, { action: k.what, card: k.id, note }); await refreshState(); render(); snackbar({ promote: "Promoted.", release: "Released.", park: "Parked.", restore: "Back in the queue." }[k.what]); }
-    catch (e) { snackbar(e.message); }
+    dfAct(k.pid, k.id, { action: k.what, note }, { promote: "Promoting…", release: "Releasing…", park: "Parking…", restore: "Restoring…" }[k.what],
+      () => snackbar({ promote: "Promoted.", release: "Released.", park: "Parked.", restore: "Back in the queue." }[k.what]));
   }
   async function dfStart(pid, id) {
-    try { await api(`api/dreamfall/${pid}/act`, { action: "start", card: id }); S.conv.awaiting = true; await refreshState(); render(); } catch (e) { snackbar(e.message); }
+    return dfAct(pid, id, { action: "start" }, "Starting…", () => { if (S.conv.id === id) { S.conv.awaiting = true; render(); } });
   }
   async function dfRun(pid, role) {
     const p = dfPipeline(pid); const s = (p?.stages || []).find((x) => x.role === role);
