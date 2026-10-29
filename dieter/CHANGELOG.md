@@ -2,6 +2,17 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.50 (2026-10-29)
+
+- **Start (and Add) in New task and New chat answer in about 0.1 s** instead of several seconds. The bridge created the
+  card in ~0.1 s, then waited for a full state poll that started after the create so the page would find it in
+  `api/state`; one poll takes ~5 s on a Pi 5 with three projects (`card list` per project), and a poll already running
+  had to finish first, so 5-10 s in all. The bridge now puts the new card or chat into its state at once, from the
+  create's answer (a started one as running), keeps it there through polls that began before the create and lets the
+  next poll that reads it (since 0.6.429.46 that is a `card show` of the new card, ~0.05 s, not a full listing)
+  replace it with the daemon's copy; a poll that re-read only other cards keeps it.
+  `python3 -m unittest discover -s dieter/tests -p 'state_test.py'` (8, on the fake CLI of `bridge_poll_test.py`).
+
 ## 0.6.429.49 (2026-10-29)
 
 - Dreamfall: picked cards said **Running** for hours after their agents had finished. Dieter's board instructions move
