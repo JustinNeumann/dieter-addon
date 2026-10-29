@@ -2,12 +2,118 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
-## 0.6.429.46 (2026-10-29)
+## 0.6.429.56 (2026-10-29)
 
 - Fixed: scrolling down the Tools tab (and other pages with a large title) in a tall window, e.g. the full-page kiosk view,
   threw you back to the top, so the end of the list was out of reach. Collapsing the big title made the list taller; when it
   overflowed by less than the title's height, the scroll range vanished and the page reset to the top. The title now
   collapses only when the list still scrolls afterwards.
+
+## 0.6.429.55 (2026-10-29)
+
+- Dreamfall: a **weekday picker** below the times in New Dreamfall board and Settings, one check box per day, Monday to
+  Sunday, all selected by default. The two agents run only on the checked days (at least one is required); the stage
+  headers show them ("Mon Wed Fri 02:00" instead of "daily 02:00").
+
+## 0.6.429.54 (2026-10-29)
+
+- **Work folder retention is a page setting**: Tools → Settings → **Keep finished work folders** (Never remove, 7, 14, 30,
+  60, 90, 180 or 365 days; any whole number 0-3650 through `POST /api/settings`). 0 keeps every folder, 30 removes a
+  folder 30 days after its task went to Done or was archived. It replaces the add-on option `worktree_retention_days`
+  of 0.6.429.52 (an install that changed it falls back to the default of 14 days until set here). A change is
+  applied at once, not at the next hourly sweep.
+- The same retention applies to the cards of a **Dreamfall Implementation board**: once started (any lane but Todo) and
+  untouched for that long, their work folder goes whatever lane they sit in (nobody moves picked cards to Done; they stay
+  in Review). Merged or commit-free work only, like every folder: a picked card with unmerged commits stays.
+
+## 0.6.429.53 (2026-10-29)
+
+- The Inbox list is 60 px wider on desktop (460 instead of 400 px): the **Review** filter chip, with its count, was cut off
+  at the right edge.
+
+## 0.6.429.52 (2026-10-29)
+
+- **Housekeeping of work folders**: the daemon keeps the folder of every worktree card forever (28 folders, 940 MB after
+  two days). The bridge now removes, once an hour, the folder and branch of a card that has been in Done or archived and
+  untouched for 14 days (option `worktree_retention_days`, 0 = off). It uses the daemon's own operations (`workspace run
+  --kind cleanup`; for a squash-merged pull request, whose branch Git does not see as merged, `discard` once GitHub
+  reports a merged pull request ending at the folder's last commit). Unmerged work and running cards stay.
+  `python3 -m unittest discover -s dieter/tests -p 'housekeeping_test.py'`.
+
+## 0.6.429.51 (2026-10-29)
+
+- New task and New chat now start with **New worktree** and **Publishing → Pull request** selected (before: Project
+  directory and the board's default). Switch back to Project directory, or pick Board default / Manual / Push to base
+  under Publishing, for a single card.
+
+## 0.6.429.50 (2026-10-29)
+
+- **Start (and Add) in New task and New chat answer in about 0.1 s** instead of several seconds. The bridge created the
+  card in ~0.1 s, then waited for a full state poll that started after the create so the page would find it in
+  `api/state`; one poll takes ~5 s on a Pi 5 with three projects (`card list` per project), and a poll already running
+  had to finish first, so 5-10 s in all. The bridge now puts the new card or chat into its state at once, from the
+  create's answer (a started one as running), keeps it there through polls that began before the create and lets the
+  next poll that reads it (since 0.6.429.46 that is a `card show` of the new card, ~0.05 s, not a full listing)
+  replace it with the daemon's copy; a poll that re-read only other cards keeps it.
+  `python3 -m unittest discover -s dieter/tests -p 'state_test.py'` (8, on the fake CLI of `bridge_poll_test.py`).
+
+## 0.6.429.49 (2026-10-29)
+
+- Dreamfall: picked cards said **Running** for hours after their agents had finished. Dieter's board instructions move
+  a card to Review only once its pull request exists, and in a project without a git remote there is none, so the
+  agents left their cards in Running. A picked card's brief now says to move it to Review when the work is committed
+  and checked, without a pull request if the project has no remote. On the board, an Implementation card whose agent is
+  idle in Running shows **Finished · still in Running** with a **Review** button, and the column counts those as
+  finished, not running.
+
+## 0.6.429.48 (2026-10-29)
+
+- **Dreamfall's Pick and Start answer the click at once.** Until now nothing happened for 1-5 s after Pick (in its
+  dialog) or Start: the page waited for the action, then fetched the whole state (~700 KB) again before it drew
+  anything. Now the card shows "Picking…", "Starting…" (also Promote, Release, Park, Back to the queue) with a
+  spinner within ~0.1 s, ignores further clicks and stays busy until the state that shows the change has arrived. The
+  bridge's answer names that state (`rev`), and the page waits for it on the event stream instead of fetching the
+  state again; only when the stream is down or 5 s late does it fetch.
+- The event stream sends at most one state per 0.3 s (`BRIDGE_PUSH_GAP_S`). A click came as a burst of 8-10 full states
+  (~800 KB each) within 2 s, and the page parsed and drew every one. Now 3-6 are sent.
+- The action itself still takes as long as the daemon needs: on a Pi with 300 cards `card create` alone takes ~2 s,
+  a move ~0.5 s, a start ~0.6 s, and more while agents run. Running the move next to the create saved nothing (the
+  daemon was slower at both).
+
+## 0.6.429.47 (2026-10-29)
+
+- **Mail tab**: the page lists Dieter Mail. Until now the tab was a placeholder that showed "No mail" while the
+  add-on's mailbox held messages. Modelled on the Android app: Inbox, Flagged, Unread, Archive and Trash with
+  counts, date groups, search, a project/sender/important filter, an unread badge on the tab, read/unread, flag,
+  archive, Trash and delete with Undo, Mark all read and Empty Trash. A message shows its sender, **Open
+  conversation** and the body as GitHub-flavored Markdown, with vega-lite, vega and mermaid charts drawn as SVG
+  (renderers from jsDelivr, pinned with integrity hashes; external data blocked; a broken chart keeps its source).
+  Bridge: `/api/state` carries the mail headers (listed every 10 s), `GET /api/mail/ID`, `POST /api/mail/mark`,
+  `POST /api/mail/delete`.
+- **vl-convert** for the agents (1.9.0, pinned by checksum, ≈ 80 MB): `vl-convert vl2png -i chart.json -o chart.png`
+  draws a Vega-Lite or Vega chart with bundled fonts and no browser. Agents that mail reports used to assemble their
+  own Vega setup with npm and an SVG rasterizer to see their charts first. Claude Code's note (`/data/.claude/CLAUDE.md`,
+  replaced while unedited) now tells agents to render a chart and look at it before mailing it as a `vega-lite` fence.
+
+## 0.6.429.46 (2026-10-29)
+
+- **The bridge no longer keeps a Pi's CPU busy** (load 4-5 on 4 cores, 72 °C, overnight since 0.6.429.41). Every
+  `card list` costs the daemon 1-6 CPU-seconds on a Pi with ~300 cards, since it reads every card file whatever the
+  filters, and the bridge sent many of them. Since .41 every change frame of `dieter watch changes` (one every few
+  seconds per running agent) started a full poll, and since .42 the Dreamfall cache listed every lane of every stage
+  board every 10 s. Now:
+  - a change frame re-reads only the cards and chats it names (`card show`, ~0.05 s); another machine's card re-reads
+    its project's list; projects, boards and checkouts still list everything. Frames whose only news is an owned card's
+    `updatedAt` and token usage, kv records (Dreamfall watches those itself) and schedules start no poll at all;
+  - the full poll runs every 60 s while the change stream runs (30 s before), and after one that listed, the next waits
+    four times as long as that one took, unless only cards are re-read or a click waits for it;
+  - the Dreamfall cache makes no `card list` calls of its own: a project with stage boards is listed whole in the full
+    poll and the stage boards' lanes are taken from that list; changed cards come from the `card show` re-reads.
+
+  Measured on the Pi with a second bridge next to the live one: the .45 bridge added 78 points of daemon CPU (66 `card
+  list` in 2 min), the fixed one 20 (6 `card list`, 3 `card show`); both served the same `/api/state`, except that
+  cards now show their token count: `card list` sends it in snake_case and the board read 0. `python3 -m unittest
+  discover -s dieter/tests -p 'bridge_poll_test.py'` (16), `dreamfall_test.py` (32).
 
 ## 0.6.429.45 (2026-10-29)
 
