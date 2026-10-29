@@ -84,7 +84,7 @@ jobs:
     # Selection, find, HTML islands and keyboard checks (tests/, Playwright) against the packaged bundle.
     name: Browser tests
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright 1.59 has no browsers for 26.04 yet
     steps:
       - uses: actions/checkout@v4
 
