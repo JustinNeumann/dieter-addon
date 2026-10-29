@@ -63,7 +63,7 @@ features over one group at a time.
 | One patch | `MobileTheme.kt` is filtered at build time so the Material type scale uses `platformMonospace()` (the browser has no system monospace font; the web actual bundles JetBrains Mono). Upstream this is a two-line change |
 | Size | ≈ 15 MB optimized (Skia wasm 8.4 MB, app wasm 6.2 MB, JS 0.5 MB), ≈ 5 MB gzip |
 | Build times on your PC | First build 3 min, incremental dev build ~12 s, production build ~100 s |
-| Not real yet | Data (demo only); terminal, screen sharing, attachment picker, share sheet, back button are no-ops |
+| Not real yet | Data (demo only); terminal, screen sharing, attachment picker, share sheet are no-ops (back: done since 0.4.0) |
 
 ### Target architecture (decided in the last discussion)
 
@@ -360,7 +360,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Most recently used project first, preselected in New task, opened by the Projects tab | 🟡 | verify; add if missing | `most recently used project is listed first…` |
 | Push deep link `/<panel>/card/<id>` through HA's app-panel messages (`home-assistant/subscribe-properties`, `home-assistant/navigate`) | ❌ | JS interop in the web entry point → `store.openConversation` | `a push to /<panel>/card/<id> opens the card…` |
 | `?card=`, `?tab=`, legacy `api/focus` | 🟡 `?route=card/<id>`, `?route=tab/<name>` and `<HA>/app/<slug>/next/<route>` done; push `api/focus` open | same entry point | `a push deep link (api/focus)…` |
-| Browser/Android back | 🟡 | `SystemBackHandler` web actual via the History API | |
+| Browser/Android back | ✅ | one history entry of the page's own while something can go back; `popstate` is a back event for Compose's handlers (`BrowserBack.kt`, a `NavigationEventInput`) | `the browser's Back closes New task, then leaves a board` |
 
 #### B. Inbox
 

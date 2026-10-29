@@ -87,6 +87,7 @@ private fun show(store: MobileStore, addon: AddonClient, script: String, route: 
                 if (script.isNotBlank()) store.runDebugScript(script)
             }
             ChromeColor(store)
+            BrowserBack()
             CompositionLocalProvider(LocalMobileExtensions provides extensions, LocalAddon provides addon) {
                 MobileApp(store, openUrl = ::openInNewTab)
             }

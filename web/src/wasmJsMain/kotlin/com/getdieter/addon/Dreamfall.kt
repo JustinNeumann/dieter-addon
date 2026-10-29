@@ -98,7 +98,8 @@ internal fun DreamfallListScreen(store: MobileStore) {
     val list = rememberDreamfalls()
     val actions = rememberAddonActions(store)
     val new = { store.present(MobileRoute.Extension("dreamfall-form", "new:")) }
-    Screen(ScreenChrome("Dreamfall", primary = ChromeAction("dreamfall-new", "New Dreamfall board", Glyph.ADD) { new() })) {
+    // a bar action, not `primary`: beside the navigation rail the shared UI leaves `primary` to the rail's New task
+    Screen(ScreenChrome("Dreamfall", actions = listOf(ChromeAction("dreamfall-new", "New Dreamfall board", Glyph.ADD) { new() }))) {
         LazyColumn(Modifier.fillMaxSize().testTag("dreamfall-list"), state = listState, contentPadding = padding) {
             item {
                 when {

@@ -74,6 +74,8 @@ kotlin {
             implementation("com.materialkolor:material-color-utilities:5.0.1")
             // Escape reaches Compose's back handlers on the web (SystemBackHandler's actual).
             implementation("org.jetbrains.compose.ui:ui-backhandler:${libs.versions.compose.multiplatform.get()}")
+            // The browser's Back and Forward as navigation events (BrowserInput, popstate); the version Compose pins
+            implementation("org.jetbrains.androidx.navigationevent:navigationevent-compose:1.1.0")
         }
     }
 }
