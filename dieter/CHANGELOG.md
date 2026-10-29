@@ -2,7 +2,7 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
-## 0.6.429.53 (2026-10-29)
+## 0.6.429.54 (2026-10-29)
 
 - **Work folder retention is a page setting**: Tools → Settings → **Keep finished work folders** (Never remove, 7, 14, 30,
   60, 90, 180 or 365 days; any whole number 0-3650 through `POST /api/settings`). 0 keeps every folder, 30 removes a
@@ -12,6 +12,11 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
 - The same retention applies to the cards of a **Dreamfall Implementation board**: once started (any lane but Todo) and
   untouched for that long, their work folder goes whatever lane they sit in (nobody moves picked cards to Done; they stay
   in Review). Merged or commit-free work only, like every folder: a picked card with unmerged commits stays.
+
+## 0.6.429.53 (2026-10-29)
+
+- The Inbox list is 60 px wider on desktop (460 instead of 400 px): the **Review** filter chip, with its count, was cut off
+  at the right edge.
 
 ## 0.6.429.52 (2026-10-29)
 
