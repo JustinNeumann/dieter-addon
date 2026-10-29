@@ -1,7 +1,9 @@
 """Housekeeping of the work folders (`$DIETER_HOME/worktrees/PROJECT/CARD`) the daemon makes for worktree cards.
 
 The daemon never removes one by itself. This sweep removes the folder of a card that has been in Done (or
-archived) and untouched for `days` days, with the daemon's own operations, so the Dieter CLI stays as it is:
+archived) and untouched for `days` days, with the daemon's own operations, so the Dieter CLI stays as it is.
+A card on a Dreamfall Implementation board counts as soon as it has been started (any lane but Todo): nobody has
+to move those to Done, they wait in Review or Running for good.
 
 1. `workspace run --kind cleanup`: removes the folder and the branch; the daemon refuses unless the branch is
    merged into its base (a fast-forward or merge commit).
@@ -26,11 +28,12 @@ def parse_time(s):
         return None
 
 
-def idle_since(card):
+def idle_since(card, started_counts=False):
     """When a Done or archived card was last touched: its last agent activity or its move into Done (archived
-    cards also count the archiving, which the daemon records in updatedAt). None unless it is Done or archived."""
+    cards also count the archiving, which the daemon records in updatedAt). None unless it is Done or archived,
+    or, with started_counts, started (any lane but Todo)."""
     archived = bool(card.get("archived"))
-    if not archived and card.get("lane") != "done":
+    if not archived and card.get("lane") != "done" and not (started_counts and card.get("lane") not in (None, "", "todo")):
         return None
     keys = ("lastActivityAt", "phaseChangedAt") + (("updatedAt",) if archived else ())
     times = [t for t in (parse_time(card.get(k)) for k in keys) if t]
@@ -60,10 +63,13 @@ def gh_merged_head(path, branch, head):
 
 
 class Sweeper:
-    """`run(args, timeout, parse)` is the bridge's CLI runner, `log` its logger; `merged_head` is replaceable for tests."""
+    """`run(args, timeout, parse)` is the bridge's CLI runner, `log` its logger; `merged_head` is replaceable for tests.
+    `implementation_boards()` -> ids of the Dreamfall Implementation boards (cards there count once started)."""
 
-    def __init__(self, run, log, days=14, merged_head=gh_merged_head, now=time.time):
+    def __init__(self, run, log, days, merged_head=gh_merged_head, now=time.time, implementation_boards=lambda: ()):
         self.run, self.log, self.days, self.merged_head, self.now = run, log, days, merged_head, now
+        self.implementation_boards = implementation_boards
+        self.df_boards = set()
         self.skipped = {}   # card -> reason last logged, so a card that stays put is logged once, not every sweep
 
     def remove(self, card_id, kind):
@@ -74,6 +80,11 @@ class Sweeper:
         """One pass over every project. Returns {card id: "cleanup" | "discard"} for the folders it removed."""
         removed = {}
         cutoff = self.now() - self.days * 86400
+        try:
+            self.df_boards = set(self.implementation_boards())
+        except Exception as e:   # Dreamfall is optional: without it, only Done and archived cards count
+            self.df_boards = set()
+            self.note("dreamfall", f"Implementation boards unknown: {e}")
         projects = self.run(["project", "list", "--format", "json"], timeout=20) or {}
         for p in (projects.get("projects") if isinstance(projects, dict) else projects) or []:
             ws = self.run(["workspace", "list", "--project", p["id"]], timeout=30) or {}
@@ -94,7 +105,7 @@ class Sweeper:
     def one(self, project, w, cutoff):
         cid = w["cardId"]
         card = (self.run(["card", "show", cid], timeout=20) or {}).get("card") or {}
-        since = idle_since(card)
+        since = idle_since(card, started_counts=card.get("boardId") in self.df_boards)
         if since is None or since > cutoff or card.get("runtime") == "running":
             return None
         status, error = self.remove(cid, "cleanup")

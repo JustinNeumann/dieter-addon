@@ -50,7 +50,6 @@ agents run arbitrary tooling under `/data`.
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
 | `gateway_url`, `gateway_host_ip`, `machine_name` | enroll the add-on's daemon with your Dieter gateway so the apps see it (see Gateway below); `gateway_host_ip` adds a hosts entry for the gateway's name |
 | `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **+** → *Add repository* (Git URL, optional name and base branch); *New folder* creates an empty Git repository `/data/projects/<name>` without a remote and registers it (an existing folder there is adopted). Further boards next to a project's *Main* board: the project's ⋮ menu (or a board's ⋮ menu) → *New board…* (name, *Review lane* on or off). Boards are listed in the order you choose: drag a board row (touch: long press first) on the Projects list or the project's page; the order is kept by the add-on for all devices. The page lists the most recently used project first, preselects it in New task and opens it when the Projects tab is tapped |
-| `worktree_retention_days` | 14 by default, 0 keeps everything. Work folders of worktree cards (`/data/dieter/worktrees/PROJECT/CARD`, one checkout per card) are never removed by the daemon. Once an hour the bridge removes the folder and branch of a card that has been in Done (or archived) and untouched for this many days, if its work is merged: the branch is merged into its base, or GitHub has a merged pull request ending at the folder's last commit (squash merges). Unmerged work and running cards are kept; `discard` keeps a recovery copy in `/data/dieter/recovery`. Log lines start with `housekeeping:` |
 | `log_level` | bridge log level |
 
 Agents work in `/data/projects/*` on branches; publishing means push branch + pull request. The
@@ -320,6 +319,22 @@ New task with an empty title field, the `dieter_create_task` rest_command withou
 
 The choice is stored in `/data/bridge_settings.json`. Tasks that agents create with the `dieter` CLI do
 not pass the bridge and keep Dieter's own title.
+
+## Work folders
+
+A task with its own worktree (New task → New worktree) gets a folder `/data/dieter/worktrees/PROJECT/CARD`, one
+checkout per task, and the daemon never removes it. Tools → Settings → **Keep finished work folders** sets how long
+they stay: 0 (*Never remove*) keeps everything, 30 removes a folder 30 days after its task went to Done (or was
+archived) without anything happening in it since. The default is 14 days; the choice is stored in
+`/data/bridge_settings.json` and checked once an hour and right after you change it (log lines start with
+`housekeeping:`). The folder and its branch are removed when the work is merged: the branch is merged into its base,
+or GitHub has a merged pull request ending at the folder's last commit (squash merges; that removal keeps a recovery
+copy in `/data/dieter/recovery`). Unmerged work and running tasks are kept.
+
+The cards of a Dreamfall Implementation board follow the same retention from the moment they are started: nobody
+moves a picked card to Done, so a started card whose last activity is older than the retention loses its folder
+whatever lane it is in. A card that only produced a report, a chart or a mail has no commits and is removed; one with
+unmerged commits stays.
 
 ## Agent instructions
 

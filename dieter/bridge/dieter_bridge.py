@@ -53,8 +53,9 @@ Endpoints:
   POST /api/boards/order     {ids: [board id, ...]}  the boards' order on the page (dragged); kept in the settings file
   POST /api/focus             {id}   remember which card the next page load should open (push deep link)
   GET  /api/focus?consume=1   {id|null} and forget it (valid 15 min)
-  GET  /api/settings          {title_model, title_models: [{id, name, available, detail}]}
-  POST /api/settings          {title_model: openai|ollama}  who titles cards created without a title
+  GET  /api/settings          {title_model, title_models: [{id, name, available, detail}], worktree_retention_days}
+  POST /api/settings          {title_model: openai|ollama}  who titles cards created without a title;
+                              {worktree_retention_days: 0..3650}  days a finished card's work folder is kept (0: forever)
   GET  /api/prompts           the daemon's prompt templates {template, board_skill, chat_skill, variables,
                               overrides: [{kind: project|board, id, name, project?}]} (dieter prompt show)
   POST /api/prompts           {template?, board_skill?, chat_skill?: text, reset?: [key]}  dieter prompt update
@@ -501,6 +502,9 @@ def ha_api(path, body, timeout=10):
 #   entity the daemon's --auto-title applies.
 SETTINGS_FILE = os.environ.get("BRIDGE_SETTINGS_FILE", "/data/bridge_settings.json" if ADDON else os.path.expanduser("~/.config/dieter-bridge/settings.json"))
 TITLE_MODELS = {"openai": "OpenAI", "ollama": "Ollama (HA)"}
+RETENTION_DEFAULT_DAYS = 14                       # work folders of finished worktree cards, see housekeeping_loop()
+RETENTION_MAX_DAYS = 3650
+HOUSEKEEPING_WAKE = threading.Event()             # set when the retention changes: sweep now, not at the next hour
 TITLE_DETECT_TTL_S = 600
 TITLE_TIMEOUT_S = 120                             # a cold Ollama loads the model first
 TITLE_MAX = 80
@@ -515,8 +519,10 @@ def settings():
     except (OSError, ValueError):
         d = {}
     order = d.get("board_order")
+    days = d.get("worktree_retention_days")
     return {"title_model": d.get("title_model") if d.get("title_model") in TITLE_MODELS else "openai",
-            "board_order": [str(x) for x in order] if isinstance(order, list) else []}
+            "board_order": [str(x) for x in order] if isinstance(order, list) else [],
+            "worktree_retention_days": days if isinstance(days, int) and not isinstance(days, bool) and 0 <= days <= RETENTION_MAX_DAYS else RETENTION_DEFAULT_DAYS}
 
 
 def settings_save(cur):
@@ -534,6 +540,15 @@ def settings_update(body):
             raise ValueError("title_model: " + " or ".join(TITLE_MODELS))
         cur["title_model"] = body["title_model"]
         TITLER["at"] = 0                          # look the entity up again
+    if "worktree_retention_days" in body:
+        d = body["worktree_retention_days"]
+        if isinstance(d, str) and d.strip().isdigit():
+            d = int(d)
+        if not isinstance(d, int) or isinstance(d, bool) or not 0 <= d <= RETENTION_MAX_DAYS:
+            raise ValueError(f"worktree_retention_days: whole days, 0 (keep everything) to {RETENTION_MAX_DAYS}")
+        if d != cur["worktree_retention_days"]:
+            HOUSEKEEPING_WAKE.set()
+        cur["worktree_retention_days"] = d
     settings_save(cur)
     return settings_view()
 
@@ -829,23 +844,21 @@ def prune_harness_staged():
 
 
 def housekeeping_loop():
-    """Remove the work folders of worktree cards that were Done (or archived) and untouched for `worktree_retention_days`
-    days (14; 0 turns it off). The daemon keeps every folder until someone cleans it up; see bridge/housekeeping.py."""
-    try:
-        days = int(OPTS.get("worktree_retention_days", 14))
-    except (TypeError, ValueError):
-        days = 14
-    if days <= 0:
-        log("housekeeping: work folder retention is off (worktree_retention_days: 0)")
-        return
-    sweeper = housekeeping.Sweeper(run, log, days=days)
+    """Remove the work folders of worktree cards that were Done (or archived; on a Dreamfall Implementation board: started)
+    and untouched for the retention set in Settings (14 days; 0 keeps everything), once an hour and right after the setting changes. The daemon keeps every
+    folder until someone cleans it up; see bridge/housekeeping.py."""
+    sweeper = housekeeping.Sweeper(run, log, RETENTION_DEFAULT_DAYS, implementation_boards=lambda: {
+        s["board_id"] for p in dreamfall.list_pipelines() for s in p.get("stages") or [] if s.get("role") == "implementation" and s.get("board_id")})
     time.sleep(600)   # the daemon and the first board poll come first
     while True:
-        try:
-            sweeper.sweep()
-        except Exception as e:
-            log("housekeeping: sweep failed:", e)
-        time.sleep(3600)
+        sweeper.days = settings()["worktree_retention_days"]
+        HOUSEKEEPING_WAKE.clear()
+        if sweeper.days > 0:
+            try:
+                sweeper.sweep()
+            except Exception as e:
+                log("housekeeping: sweep failed:", e)
+        HOUSEKEEPING_WAKE.wait(3600)
 
 
 def seed_managed_bun():
