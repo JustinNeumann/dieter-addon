@@ -12,6 +12,10 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
   (renderers from jsDelivr, pinned with integrity hashes; external data blocked; a broken chart keeps its source).
   Bridge: `/api/state` carries the mail headers (listed every 10 s), `GET /api/mail/ID`, `POST /api/mail/mark`,
   `POST /api/mail/delete`.
+- **vl-convert** for the agents (1.9.0, pinned by checksum, ≈ 80 MB): `vl-convert vl2png -i chart.json -o chart.png`
+  draws a Vega-Lite or Vega chart with bundled fonts and no browser. Agents that mail reports used to assemble their
+  own Vega setup with npm and an SVG rasterizer to see their charts first. Claude Code's note (`/data/.claude/CLAUDE.md`,
+  replaced while unedited) now tells agents to render a chart and look at it before mailing it as a `vega-lite` fence.
 
 ## 0.6.429.45 (2026-10-29)
 
