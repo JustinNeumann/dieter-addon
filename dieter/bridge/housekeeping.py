@@ -62,7 +62,7 @@ def gh_merged_head(path, branch, head):
 class Sweeper:
     """`run(args, timeout, parse)` is the bridge's CLI runner, `log` its logger; `merged_head` is replaceable for tests."""
 
-    def __init__(self, run, log, days=14, merged_head=gh_merged_head, now=time.time):
+    def __init__(self, run, log, days, merged_head=gh_merged_head, now=time.time):
         self.run, self.log, self.days, self.merged_head, self.now = run, log, days, merged_head, now
         self.skipped = {}   # card -> reason last logged, so a card that stays put is logged once, not every sweep
 

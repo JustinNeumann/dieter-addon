@@ -1408,6 +1408,8 @@
       const fallback = cur && !cur.available ? sectionFooter(cur.detail) : "";
       body = `${sectionHeader("Task titles")}<div class="group">${listRow({ title: "Title model", value: cur?.name || d.title_model, glyph: "title", tile: "#5E5CE6", act: "settings-pick", extra: `data-key="title_model"`, trailing: ico("expand_more", 20, "c-secondary") })}</div>
         ${fallback || sectionFooter("Names tasks and chats created without a title. OpenAI: Dieter's auto-title. Ollama (HA): a local model through Home Assistant's AI Task; the task is saved under its first line and renamed a moment later.")}
+        ${sectionHeader("Work folders")}<div class="group">${listRow({ title: "Keep finished work folders", value: retentionLabel(d.worktree_retention_days), glyph: "folder_delete", tile: "#FF9F0A", act: "settings-pick", extra: `data-key="worktree_retention_days"`, trailing: ico("expand_more", 20, "c-secondary") })}</div>
+        ${sectionFooter("Every task with its own worktree leaves a folder on the device. Once a task has been in Done or archived and untouched for this long, its folder is removed, if its work is merged; unmerged work and running tasks are kept. Checked every hour.")}
         ${sectionHeader("Agent instructions")}${!pr ? `<div class="group">${listRow({ title: "Loading…", glyph: "hourglass_empty" })}</div>`
           : pr.error ? `<div class="group">${listRow({ title: "Instructions unavailable", subtitle: pr.error, glyph: "error", glyphTint: "var(--warning)", act: "prompts-reload" })}</div>`
           : `<div class="group">${Object.entries(PROMPTS).map(([k, [title, glyph, tile]], i, all) => listRow({ title, subtitle: promptSummary(pr[k]), glyph, tile, position: pos(i, all.length), act: "prompt-edit", extra: `data-key="${k}"`, trailing: ico("chevron_right", 20, "c-secondary") })).join("")}</div>`}
@@ -1452,8 +1454,20 @@
     try { S.set.data = await api("api/settings"); } catch (e) { S.set.data = { error: e.message }; }
     render();
   }
+  const RETENTION_DAYS = [0, 7, 14, 30, 60, 90, 180, 365];
+  const retentionLabel = (n) => (n === 0 ? "Never remove" : n === 1 ? "1 day" : `${n} days`);
+  function retentionPick(d) {
+    const days = RETENTION_DAYS.includes(d.worktree_retention_days) ? RETENTION_DAYS : [...RETENTION_DAYS, d.worktree_retention_days].sort((a, b) => a - b);
+    showDialog("Keep finished work folders", days.map((n) => [String(n), retentionLabel(n), n === 0 ? `<span class="c-secondary">Keep every folder</span>` : ""]), String(d.worktree_retention_days), async (v) => {
+      if (Number(v) === d.worktree_retention_days) return;
+      try { S.set.data = await api("api/settings", { worktree_retention_days: Number(v) }); snackbar(Number(v) ? `Finished work folders are removed after ${retentionLabel(Number(v))}.` : "Work folders are kept."); } catch (e) { snackbar(e.message); }
+      render();
+    });
+  }
   function settingsPick(key) {
-    const d = S.set?.data; if (!d || key !== "title_model") return;
+    const d = S.set?.data; if (!d) return;
+    if (key === "worktree_retention_days") return retentionPick(d);
+    if (key !== "title_model") return;
     showDialog("Title model", d.title_models.map((m) => [m.id, m.name, `<span class="${m.available ? "c-secondary" : "c-warning"}">${esc(m.detail)}</span>`]), d.title_model, async (v) => {
       if (v === d.title_model) return;
       try { S.set.data = await api("api/settings", { title_model: v }); } catch (e) { snackbar(e.message); }
