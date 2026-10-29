@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+// The browser <-> web host protocol: one WebSocket (binary frames), each frame one message below.
+// It carries the UI's core contract unchanged: `MobileCore.dispatch(Command)` and
+// `MobileCore.observe(Slice, scope)` of dieter.client.v1, the same contract the iOS app uses through
+// its byte bridge. The web host runs the Kotlin core (ClientApi) on the JVM next to the add-on's daemon.
+package dieter.web.v1;
+
+import "dieter/client/v1/client.proto";
+
+option java_package = "com.getdieter.web.v1";
+
+// Browser -> web host.
+message ClientFrame {
+  oneof frame {
+    Dispatch dispatch = 1;
+    Observe observe = 2;
+    Unobserve unobserve = 3;
+    Ping ping = 4;
+    Context context = 5;
+  }
+}
+
+// What the page knows about where it runs; sent first on every connection.
+message Context {
+  // Where the gateway should send this browser back after GitHub sign-in: an address of this Home
+  // Assistant that reaches the add-on's page (…/app/<slug>/next/signin). The gateway accepts only the
+  // exact addresses in its DIETER_NATIVE_REDIRECT_URIS.
+  string sign_in_callback = 1;
+}
+
+// Runs one command; answered by exactly one Replied with the same id.
+message Dispatch {
+  uint64 id = 1;
+  dieter.client.v1.Command command = 2;
+}
+
+// Starts observing a slice; every Update of it comes as Updated with this id. The first update is a
+// snapshot, as with ClientApi.observe. After a reconnect the browser observes again (new ids).
+message Observe {
+  uint64 id = 1;
+  dieter.client.v1.Slice slice = 2;
+  string scope = 3;
+}
+
+message Unobserve { uint64 id = 1; }
+
+message Ping { uint64 id = 1; }
+
+// Web host -> browser.
+message HostFrame {
+  oneof frame {
+    Hello hello = 1;
+    Replied replied = 2;
+    Updated updated = 3;
+    Pong pong = 4;
+  }
+}
+
+// First frame of every connection.
+message Hello {
+  // The Dieter release the host's core was built from.
+  string core_version = 1;
+  // This host's own version (dieter-addon-kotlin).
+  string host_version = 2;
+  // The Home Assistant user behind Ingress (X-Remote-User-Display-Name), if any.
+  string user_name = 3;
+  // The sign-in callback the host uses when the add-on pins one (option web_sign_in_callback); empty
+  // when it follows the page's Context.
+  string pinned_sign_in_callback = 4;
+}
+
+message Replied {
+  uint64 id = 1;
+  dieter.client.v1.Reply reply = 2;
+}
+
+message Updated {
+  uint64 id = 1;
+  dieter.client.v1.Update update = 2;
+}
+
+message Pong { uint64 id = 1; }

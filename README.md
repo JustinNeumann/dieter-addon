@@ -12,9 +12,11 @@ The plan and its progress: [docs/PLAN.md](docs/PLAN.md).
 | Path | What |
 |---|---|
 | `dieter/` | Git submodule: [JustinNeumann/dieter](https://github.com/JustinNeumann/dieter) (upstream + the add-on's harness changes), pinned to the commit the add-on runs. The UI, the core and the Wire models are compiled from here, not copied |
-| `web/` | The browser build (`wasmJs`): the browser actuals of the UI's platform hooks, the loader page and the entry point |
+| `web/` | The browser build (`wasmJs`): the browser actuals of the UI's platform hooks, the loader page, the entry point and `RemoteCore` (the UI's core over a WebSocket) |
+| `host/` | The web host (JVM): Dieter's Kotlin core (`ClientApi`) with the JVM platform, serving it to browsers over one WebSocket; sign-in relay; `host/build/libs/dieter-web-host-<version>.jar` |
+| `proto/` | `dieter/web/v1/host.proto`: the browser ↔ web host protocol (dispatch/observe of `dieter.client.v1`, as the iOS byte bridge) |
 | `tools/package.sh` | Packs the production build into `dieter-web-<version>.tar.gz` (hashed file names, `.wasm.gz` for the loader, `.br`/`.gz` copies) |
-| `.github/workflows/web.yml` | Builds every push; a tag `vX.Y.Z` publishes the tarball and `SHA256SUMS` as a release |
+| `.github/workflows/web.yml` | Builds and tests every push; a tag `vX.Y.Z` publishes the tarball, the host jar and `SHA256SUMS` as a release |
 
 The submodule's own Gradle build is not used (it needs the Android SDK); `web/build.gradle.kts` compiles
 the needed source sets directly and takes every version from the submodule's version catalog.
@@ -26,19 +28,24 @@ git clone --recurse-submodules https://github.com/JustinNeumann/dieter-addon-kot
 cd dieter-addon-kotlin
 ./gradlew :web:wasmJsBrowserDistribution          # production build, ~3 min the first time
 tools/package.sh 0.0.0-local                       # -> build/package/dieter-web-0.0.0-local.tar.gz
-./gradlew :web:wasmJsBrowserDevelopmentRun -t      # dev server with rebuilds on change
+./gradlew :host:jvmTest :host:fatJar               # web host tests and host/build/libs/dieter-web-host-*.jar
+./gradlew :web:wasmJsBrowserDevelopmentRun -t      # dev server with rebuilds on change (open with ?demo)
 ```
 
-JDK 17 or newer. Gradle downloads Node and webpack for the wasm build.
+JDK 21 (with `javac`; the host targets Java 21). Gradle downloads Node and webpack for the wasm build.
 
-URL options of the page: `?theme=dark|light` overrides the theme, `?script=tab projects; board Main`
-replays the app's debug navigation script.
+**Against real data without your account:** Dieter's isolated fixture gateway
+(`go run ./tools/fixtures/gateway -showcase-fixture` in `dieter/`, prints a session token and a pairing code)
+plus the host jar; the host adopts the fixture session with `AdoptSession` over its WebSocket.
+
+URL options of the page: `?demo` uses demo data instead of the web host, `?theme=dark|light` overrides
+the theme, `?script=tab projects; board Main` replays the app's debug navigation script.
 
 ## Release and the add-on
 
 1. Tag `vX.Y.Z` and push the tag; CI publishes `dieter-web-X.Y.Z.tar.gz` and `SHA256SUMS`.
-2. In `dieter-addon`, set `DIETER_WEB_VERSION` and `DIETER_WEB_SHA` in `dieter/Dockerfile` (the sha256 from
-   the release's `SHA256SUMS`) and bump the add-on version.
+2. In `dieter-addon`, set `DIETER_WEB_VERSION`, `DIETER_WEB_SHA` and `DIETER_WEB_HOST_SHA` in `dieter/Dockerfile`
+   (the lines of the release's `SHA256SUMS`) and bump the add-on version.
 
 The bridge serves the unpacked bundle from `/opt/web` at `/next/`: hashed files as immutable,
 `index.html` and the Compose resources with `no-cache` and an ETag. Home Assistant's Ingress removes

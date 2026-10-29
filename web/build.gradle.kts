@@ -76,7 +76,10 @@ kotlin {
 }
 
 wire {
-    sourcePath { srcDir(dieter.resolve("api/proto")) }
+    sourcePath {
+        srcDir(dieter.resolve("api/proto"))
+        srcDir(rootDir.resolve("proto")) // the browser <-> web host protocol
+    }
     kotlin {
         rpcRole = "client"
         rpcCallStyle = "suspending"

@@ -14,3 +14,9 @@ internal external fun queryParameter(name: String): String?
 
 @JsFun("() => { const l = document.getElementById('loading'); if (l) l.remove() }")
 internal external fun hideLoading()
+
+@JsFun("() => document.hidden")
+internal external fun pageHidden(): Boolean
+
+@JsFun("(cb) => document.addEventListener('visibilitychange', () => cb())")
+internal external fun onVisibilityChange(callback: () -> Unit)

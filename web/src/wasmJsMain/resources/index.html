@@ -141,7 +141,21 @@
     window.addEventListener("focus", schedule);
     setInterval(function () { if (!document.hidden) check(); }, 1000); // hass.themes can change without a DOM change
   }
+  // ---- where the gateway should send this browser back after GitHub sign-in. Inside Home Assistant's
+  // frontend: <HA address>/app/<add-on slug>/next/signin (the classic page forwards that deep link to
+  // next/signin, which the bridge relays to the web host). Elsewhere: this page's own address.
+  function signInCallback() {
+    try {
+      if (window.parent !== window) {
+        var p = window.parent.location;
+        var m = p.pathname.match(/^\/(?:app\/|hassio\/ingress\/)?((?:[0-9a-f]{8}|local)_[a-z0-9_]+)(?:\/|$)/);
+        if (m) return p.origin + "/app/" + m[1] + "/next/signin";
+      }
+    } catch (e) {}
+    return location.origin + location.pathname.replace(/[^/]*$/, "") + "signin";
+  }
   window.dieterHost = {
+    signInCallback: signInCallback,
     theme: function () { check(); return currentJson; },
     onThemeChange: function (callback) { listeners.push(callback); watch(); },
     setChrome: function (color, dark) {

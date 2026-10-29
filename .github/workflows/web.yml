@@ -1,6 +1,6 @@
-# Builds the Compose web bundle (:web, Kotlin/Wasm) on every push and pull request; a tag vX.Y.Z
-# publishes dieter-web-X.Y.Z.tar.gz + SHA256SUMS as a GitHub release. The add-on
-# (JustinNeumann/dieter-addon, dieter/Dockerfile) pins the tarball by version and sha256.
+# Builds the Compose web bundle (:web, Kotlin/Wasm) and the web host (:host, JVM) on every push and pull
+# request; a tag vX.Y.Z publishes dieter-web-X.Y.Z.tar.gz, dieter-web-host-X.Y.Z.jar and SHA256SUMS as a
+# GitHub release. The add-on (JustinNeumann/dieter-addon, dieter/Dockerfile) pins both by version and sha256.
 name: Web bundle
 
 on:
@@ -38,21 +38,25 @@ jobs:
           echo "version=${v}" >> "$GITHUB_OUTPUT"
           echo "bundle version ${v}, dieter $(git -C dieter rev-parse --short HEAD)"
 
-      - name: Build the web bundle
-        run: ./gradlew --console=plain :web:wasmJsBrowserDistribution
+      - name: Build the web bundle and the web host, test the host
+        run: ./gradlew --console=plain :web:wasmJsBrowserDistribution :host:jvmTest :host:fatJar
         env:
           DIETER_WEB_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Package
         run: |
           sudo apt-get install -y -qq brotli >/dev/null
-          tools/package.sh "${{ steps.version.outputs.version }}"
+          v="${{ steps.version.outputs.version }}"
+          tools/package.sh "${v}"
+          cp "host/build/libs/dieter-web-host-${v}.jar" build/package/
+          (cd build/package && sha256sum "dieter-web-${v}.tar.gz" "dieter-web-host-${v}.jar" > SHA256SUMS && cat SHA256SUMS)
 
       - uses: actions/upload-artifact@v4
         with:
           name: dieter-web-${{ steps.version.outputs.version }}
           path: |
             build/package/dieter-web-*.tar.gz
+            build/package/dieter-web-host-*.jar
             build/package/SHA256SUMS
 
       - name: Release
@@ -61,6 +65,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${{ steps.version.outputs.version }}"
-          notes="Compose web bundle ${v} (Dieter $(git -C dieter rev-parse --short HEAD)). sha256: $(cut -d' ' -f1 build/package/SHA256SUMS)"
-          gh release create "${GITHUB_REF_NAME}" build/package/dieter-web-${v}.tar.gz build/package/SHA256SUMS \
+          notes="Compose web bundle and web host ${v} (Dieter $(git -C dieter rev-parse --short HEAD)).
+
+          \`\`\`
+          $(cat build/package/SHA256SUMS)
+          \`\`\`"
+          gh release create "${GITHUB_REF_NAME}" build/package/dieter-web-${v}.tar.gz build/package/dieter-web-host-${v}.jar build/package/SHA256SUMS \
             --title "dieter-web ${v}" --notes "${notes}"

@@ -13,8 +13,8 @@
 set -euo pipefail
 VERSION=${1:?usage: tools/package.sh <version> [dist dir] [output dir]}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-DIST=${2:-$ROOT/web/build/dist/wasmJs/productionExecutable}
-OUT=${3:-$ROOT/build/package}
+DIST=$(realpath -m "${2:-$ROOT/web/build/dist/wasmJs/productionExecutable}")
+OUT=$(realpath -m "${3:-$ROOT/build/package}")
 NAME="dieter-web-${VERSION}"
 STAGE="$OUT/$NAME"
 

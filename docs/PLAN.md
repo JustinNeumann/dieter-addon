@@ -1,8 +1,7 @@
 # Compose web UI for the Dieter add-on: plan
 
-Status: **plan only.** Nothing here is implemented yet, apart from the throwaway spike in
-`~/dieter/spike/web` (the real `apps/kotlin` UI compiled for the browser with demo data, shown in HA as the
-temporary *Dieter (web)* Webpage dashboard).
+Status (2026-10-29): **Phases 1, 3 and 4.0 built and tested locally; Phase 2 in progress; parity (4.A–J) not
+started.** See [Progress](#progress) for what is done, where it deviates from this plan and what is open.
 
 The work runs in the order you set:
 
@@ -13,6 +12,40 @@ The work runs in the order you set:
 
 Phases 1–3 can be done on demo data. Phase 4 starts with the real data path (4.0) and then moves the add-on's
 features over one group at a time.
+
+---
+
+## Progress
+
+| Part | State | Where |
+|---|---|---|
+| Phase 1: bundle served at `next/` behind Ingress | built, e2e green; add-on 0.6.431.2 waits for the PR merge, then LAN/Nabu Casa/Companion checks | add-on `dieter_bridge.py` (`serve_web`), `web/`, `tools/package.sh`, release v0.1.0 |
+| Phase 2: selection, find, accessibility | in progress | branch `phase2` |
+| Phase 3: theme from HA | built, e2e green with a stand-in HA frontend; real HA check after deploy | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
+| 4.0 web host + `RemoteCore` | built; verified against Dieter's isolated fixture gateway (real boards, conversations, sending runs a turn) and in the add-on e2e | `host/`, `proto/dieter/web/v1/host.proto`, `web/…/RemoteCore.kt`, add-on `run.sh` + bridge relay |
+| 4.0 sign-in | built; needs the gateway to list the return address (your `DIETER_NATIVE_REDIRECT_URIS`) | `SignInRelay.kt`, add-on DOCS "Signing in the new page" |
+| 4.A–J parity, extension points, Dreamfall, switch to `/` | not started | |
+
+**Deviations from the plan, and why:**
+
+- The bridge keeps serving the bundle (Phase 1) and *relays* `next/core` (WebSocket) and `next/signin` to the web
+  host on loopback. Only one Ingress port exists, the bridge already owns it, and its caching/precompression
+  work is done. The host answers only requests carrying a per-boot secret that `run.sh` hands to the bridge on an
+  inherited descriptor; the host runs as its own user (`dieter-web`) with `/data/web-host` private, so the
+  agents (user `dieter`) can neither read the session nor talk to the host.
+- D5: the bundle and the host jar are released from *this* repository (tag `vX.Y.Z` → `dieter-web-X.Y.Z.tar.gz`,
+  `dieter-web-host-X.Y.Z.jar`, `SHA256SUMS`), not from the fork's server release.
+- Sign-in: the gateway only redirects to exact registered addresses, and how you reach HA varies (Nabu Casa,
+  LAN), so each sign-in starts with the address the page is on: `<HA>/app/<slug>/next/signin`. HA opens the
+  add-on at its root for any `/app/<slug>/…` path, so the classic page forwards `next/…` deep links (which also
+  makes `<HA>/app/<slug>/next/` a direct link to the new page). The host completes the code under its fixed
+  internal callback (the core checks only the prefix and exchanges code + PKCE verifier). Pasting the landed
+  address into the gateway field also completes. The session belongs to the add-on, so every browser and the
+  Companion app share one sign-in and one pairing.
+- Foreground: the core keeps its streams open only while "the app" is shown. Each tab reports its visibility;
+  the host runs the core while any tab is shown and stops two minutes after the last one hides.
+- RAM: about 100 MB RSS idle and about 200 MB with the showcase workspace on x86 (JVM flags in `run.sh`
+  cap heap 160 MB, metaspace 96 MB, code cache 48 MB). Measure on the Pi after deploy.
 
 ---
 
@@ -107,8 +140,8 @@ login and the Companion app all work without anything extra. This is also the pr
 - [ ] Nabu Casa `https://…ui.nabu.casa` → same
 - [ ] Companion app Android and iOS (phone + tablet), incl. a cold start on mobile data
 - [ ] First-load and cached-load times recorded (target: < 3 s cached on a phone)
-- [ ] Playwright: port `page loads through Ingress with relative assets` to `/next/` (the e2e suite's
-      Ingress-like proxy already exists: `tests/ingress-proxy.mjs`)
+- [x] Playwright: port `page loads through Ingress with relative assets` to `/next/` (the e2e suite's
+      Ingress-like proxy already exists: `tests/ingress-proxy.mjs`) → add-on `tests/e2e/next.spec.mjs`
 
 **Done when** `/next/` works everywhere the current page works.
 

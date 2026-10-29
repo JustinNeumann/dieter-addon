@@ -19,6 +19,7 @@ import com.getdieter.mobile.platform.WebHost
 import com.getdieter.mobile.platform.browserMonospace
 import com.getdieter.mobile.platform.platformDynamicScheme
 import com.getdieter.mobile.resources.Res
+import com.getdieter.mobile.store.MobileCore
 import com.getdieter.mobile.store.MobilePreferences
 import com.getdieter.mobile.store.MobileStore
 import com.getdieter.mobile.store.runDebugScript
@@ -26,21 +27,29 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 
 /**
- * The real Dieter Compose UI in the browser, driven by [DemoCore] instead of a gateway.
- * `?script=tab projects; board Main` replays the debug navigation script used for screenshots.
+ * The real Dieter Compose UI in the browser. Its core runs in the add-on's web host and is reached
+ * over a WebSocket at `core` next to this page ([RemoteCore]); `?demo` uses [DemoCore] instead (no
+ * account, nothing leaves the page). `?script=tab projects; board Main` replays the debug navigation
+ * script used for screenshots.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
     WebHost.start()
+    val core: MobileCore =
+        if (queryParameter("demo") != null) DemoCore() else RemoteCore("core", MainScope()).also { it.start() }
     val store =
         MobileStore(
-            DemoCore(),
+            core,
             preferences =
                 MobilePreferences(
                     read = { storageRead("dieter.$it") },
                     write = { key, value -> storageWrite("dieter.$key", value) },
                 ),
         )
+    // The tab's visibility is the app's foreground (Android: onResume/onPause): the core keeps its streams
+    // open only while shown. The web host combines all tabs.
+    store.setForeground(!pageHidden())
+    onVisibilityChange { store.setForeground(!pageHidden()) }
     val script = queryParameter("script").orEmpty()
     MainScope().launch {
         browserMonospace =

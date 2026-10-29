@@ -36,3 +36,6 @@ rootProject.name = "dieter-addon-kotlin"
 
 // The Compose UI compiled for the browser (Kotlin/Wasm).
 include(":web")
+
+// The web host (JVM): runs the Kotlin core next to the add-on's daemon, one WebSocket to the browser.
+include(":host")
