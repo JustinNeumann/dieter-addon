@@ -2,6 +2,10 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.53 (2026-10-29)
+
+- The Inbox list is 60 px wider on desktop (460 instead of 400 px): the **Review** filter chip, with its count, was cut off
+  at the right edge.
 ## 0.6.429.52 (2026-10-29)
 
 - **Housekeeping of work folders**: the daemon keeps the folder of every worktree card forever (28 folders, 940 MB after
