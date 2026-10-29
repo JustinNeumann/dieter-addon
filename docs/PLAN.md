@@ -24,7 +24,9 @@ features over one group at a time.
 | Phase 3: theme from HA | built, e2e green with a stand-in HA frontend; real HA check after deploy | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
 | 4.0 web host + `RemoteCore` | built; verified against Dieter's isolated fixture gateway (real boards, conversations, sending runs a turn) and in the add-on e2e | `host/`, `proto/dieter/web/v1/host.proto`, `web/…/RemoteCore.kt`, add-on `run.sh` + bridge relay |
 | 4.0 sign-in | built; needs the gateway to list the return address (your `DIETER_NATIVE_REDIRECT_URIS`) | `SignInRelay.kt`, add-on DOCS "Signing in the new page" |
-| 4.A–J parity, extension points, Dreamfall, switch to `/` | not started | |
+| 4.A deep links | `<HA>/app/<slug>/next/card/<id>` and `…/next/tab/<name>` open the card or tab (release v0.2.1, add-on e2e) | `Main.kt` (`openRoute`), add-on `app.js` |
+| 4.A–J parity rest, extension points, Dreamfall, switch to `/` | not started; Mail, Tools, Inbox, boards and conversations already show real data from the fixture gateway | |
+| Upstream proposal | drafted | `docs/proposals/web-client.md` |
 
 **Deviations from the plan, and why:**
 
@@ -45,7 +47,8 @@ features over one group at a time.
 - Foreground: the core keeps its streams open only while "the app" is shown. Each tab reports its visibility;
   the host runs the core while any tab is shown and stops two minutes after the last one hides.
 - RAM: about 100 MB RSS idle and about 200 MB with the showcase workspace on x86 (JVM flags in `run.sh`
-  cap heap 160 MB, metaspace 96 MB, code cache 48 MB). Measure on the Pi after deploy.
+  cap heap 160 MB, metaspace 96 MB, code cache 48 MB). The Pi has 8 GB and the add-on uses about 1 GB today;
+  measure the host there after deploy.
 
 ---
 
@@ -291,7 +294,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Six tabs, rail from 600 px, two panes from 840 px | ✅ | none | |
 | Most recently used project first, preselected in New task, opened by the Projects tab | 🟡 | verify; add if missing | `most recently used project is listed first…` |
 | Push deep link `/<panel>/card/<id>` through HA's app-panel messages (`home-assistant/subscribe-properties`, `home-assistant/navigate`) | ❌ | JS interop in the web entry point → `store.openConversation` | `a push to /<panel>/card/<id> opens the card…` |
-| `?card=`, `?tab=`, legacy `api/focus` | ❌ | same entry point | `a push deep link (api/focus)…` |
+| `?card=`, `?tab=`, legacy `api/focus` | 🟡 `?route=card/<id>`, `?route=tab/<name>` and `<HA>/app/<slug>/next/<route>` done; push `api/focus` open | same entry point | `a push deep link (api/focus)…` |
 | Browser/Android back | 🟡 | `SystemBackHandler` web actual via the History API | |
 
 #### B. Inbox
