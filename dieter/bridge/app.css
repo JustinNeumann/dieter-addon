@@ -110,7 +110,7 @@ a { color: var(--info); }
 #bottombar .nav-item .badge { left: calc(50% + 6px); top: 10px; }
 body.immersive #bottombar { display: none; }
 @media (min-width: 600px) { #rail { display: flex; } #bottombar { display: none !important; } }
-@media (min-width: 840px) { #list { flex: none; width: 400px; } #divider { display: block; } #detail { display: flex; } }
+@media (min-width: 840px) { #list { flex: none; width: 460px; } #divider { display: block; } #detail { display: flex; } }
 @media (min-width: 840px) { body.fullpane #list { flex: 1; width: auto; } body.fullpane #divider, body.fullpane #detail { display: none; } }
 
 /* ------------------------------------------------------------- screens, app bars */

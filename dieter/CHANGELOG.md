@@ -2,6 +2,11 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.46 (2026-10-29)
+
+- The Inbox list is 60 px wider on desktop (460 instead of 400 px): the **Review** filter chip, with its count, was cut off
+  at the right edge.
+
 ## 0.6.429.45 (2026-10-29)
 
 - Dreamfall: a fourth section in New Dreamfall board and Settings, **Implementation**: instructions for every card you
