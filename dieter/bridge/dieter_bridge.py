@@ -36,6 +36,12 @@ Endpoints:
   GET  /api/machines          enrolled machines (also part of /api/state)
   GET  /api/machine/ID/info   live host telemetry of one enrolled machine (`dieter machine info ID`)
   GET  /app.css, /app.js      the page's assets
+  GET  /next/...              the new Compose page (Kotlin/Wasm bundle in /opt/web, DIETER_WEB_DIR): hashed files
+                              immutable, index.html and resources no-cache + ETag; *.wasm.gz raw for the loader,
+                              .br/.gz by Accept-Encoding only outside Ingress (Ingress strips that header)
+  GET  /next/core             WebSocket to the web host (the page's core; relayed with the per-boot secret)
+  GET  /next/signin?code=…    the gateway's redirect after GitHub sign-in, relayed to the web host
+  GET  /api/ws/echo           WebSocket echo (checks that WebSockets pass Ingress; Phase 1 of the Compose page)
   POST /api/card              create {project, board, title, prompt, provider, model, effort, workspace, branch?, base?, publish?, vault?, mail?, lane, attachments?}
                               without a title: --auto-title, or with Settings → Ollama (HA) renamed in the background (title_entity)
   POST /api/chat              create {project, title, prompt, provider, model, effort}
@@ -86,6 +92,7 @@ import queue
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -2812,6 +2819,87 @@ def in_nets(ip, nets):
     return any(a in n for n in nets)
 
 
+# --------------------------------------------------------------------------- Compose web UI (/next/)
+# The bundle of github.com/JustinNeumann/dieter-addon-kotlin (Dockerfile: DIETER_WEB_VERSION, sha256-pinned).
+WEB_DIR = os.environ.get("DIETER_WEB_DIR", "/opt/web")
+# webpack's wasm assets (20 hex) and the packaged dieter.<16 hex>.js never change under their name
+WEB_HASHED = re.compile(r"(^|[./])[0-9a-f]{16,}\.(wasm|js|mjs)(\.LICENSE\.txt)?(\.gz|\.br)?$")
+WEB_TYPES = {
+    ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+    ".wasm": "application/wasm", ".json": "application/json", ".txt": "text/plain; charset=utf-8",
+    ".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png",
+    ".css": "text/css; charset=utf-8", ".xml": "application/xml",
+}
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def web_file(rel):
+    """Absolute path of a file of the web bundle, None if missing or outside WEB_DIR."""
+    root = os.path.realpath(WEB_DIR)
+    path = os.path.realpath(os.path.join(root, rel))
+    if path != root and not path.startswith(root + os.sep):
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def accepted_encodings(header):
+    """Content codings with q > 0 from an Accept-Encoding header."""
+    out = set()
+    for item in (header or "").lower().split(","):
+        name, _, params = item.strip().partition(";")
+        q = 1.0
+        m = re.search(r"q=([0-9.]+)", params)
+        if m:
+            try:
+                q = float(m.group(1))
+            except ValueError:
+                q = 0.0
+        if name and q > 0:
+            out.add(name.strip())
+    return out
+
+
+# The web host (dieter-addon-kotlin host/): the Compose page's core on the JVM, run by run.sh as its own user
+# with a private state directory (/data/web-host: device key, gateway session). It listens on loopback and
+# only answers requests that carry the per-boot secret, which run.sh hands to this bridge on an inherited
+# file descriptor (never in a file or the environment the agents could read). The bridge relays
+# next/core (the page's WebSocket) and next/signin (the gateway's redirect after GitHub sign-in).
+WEB_HOST_ADDR = os.environ.get("DIETER_WEB_HOST_ADDR", "127.0.0.1:8097")
+WEB_HOST_SECRET = None
+
+
+def read_web_host_secret():
+    """Takes the secret from the descriptor named by DIETER_WEB_SECRET_FD and closes it (before any child starts)."""
+    global WEB_HOST_SECRET
+    fd = os.environ.pop("DIETER_WEB_SECRET_FD", "")
+    if not fd.isdigit():
+        return
+    # Agents run as this bridge's user (they descend from it through the daemon): as a non-dumpable process its
+    # memory, environment and descriptors under /proc are closed to them, so the secret stays in this process.
+    try:
+        import ctypes
+        if ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0) != 0:   # PR_SET_DUMPABLE, 0
+            log("web host: could not make the bridge non-dumpable, errno", ctypes.get_errno())
+    except Exception as e:
+        log("web host: prctl unavailable:", e)
+    data = b""
+    try:
+        while True:
+            chunk = os.read(int(fd), 4096)
+            if not chunk:
+                break
+            data += chunk
+    except OSError as e:
+        log("web host: secret unreadable:", e)
+    finally:
+        try:
+            os.close(int(fd))
+        except OSError:
+            pass
+    WEB_HOST_SECRET = data.decode(errors="replace").strip() or None
+    log("web host: relay to", WEB_HOST_ADDR, "enabled" if WEB_HOST_SECRET else "disabled (no secret)")
+
+
 # --------------------------------------------------------------------------- http
 INDEX = os.path.join(HERE, "index.html")
 
@@ -2961,6 +3049,194 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(n) if n else b""
         return json.loads(raw or b"{}")
 
+    # ---- the Compose web UI (/next/)
+    def serve_web(self, u, parts):
+        if u.path == "/next":
+            # relative Location keeps the Ingress prefix: .../<token>/next -> .../<token>/next/
+            self.send_response(302)
+            self.send_header("Location", "next/" + (f"?{u.query}" if u.query else ""))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        rel = "/".join(parts[1:]) or "index.html"
+        path = web_file(rel)
+        if not path:
+            if not os.path.isdir(WEB_DIR):
+                return self.send_text("The Compose web UI is not part of this build.", 404)
+            return self.send_text("not found", 404)
+        name = os.path.basename(rel)
+        if name.endswith(".wasm.gz"):
+            ctype = "application/octet-stream"   # inflated by the loader (DecompressionStream)
+        else:
+            ctype = WEB_TYPES.get(os.path.splitext(name)[1].lower()) or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        encoding = None
+        if not self.headers.get("X-Ingress-Path") and not name.endswith((".gz", ".br")):
+            accepted = accepted_encodings(self.headers.get("Accept-Encoding"))
+            for coding, suffix in (("br", ".br"), ("gzip", ".gz")):
+                if coding in accepted and os.path.isfile(path + suffix):
+                    path, encoding = path + suffix, coding
+                    break
+        st = os.stat(path)
+        etag = f'"{st.st_size:x}-{int(st.st_mtime):x}{"-" + encoding if encoding else ""}"'
+        cache = "public, max-age=31536000, immutable" if WEB_HASHED.search(name) else "no-cache"
+        if etag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", cache)
+            self.send_header("Vary", "Accept-Encoding")
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(st.st_size))
+        self.send_header("Cache-Control", cache)
+        self.send_header("ETag", etag)
+        self.send_header("Vary", "Accept-Encoding")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
+        self.end_headers()
+        with open(path, "rb") as f:
+            shutil.copyfileobj(f, self.wfile, 256 * 1024)
+
+    def web_host_relay(self, u, parts):
+        """next/core (WebSocket) and next/signin to the web host on loopback, with the per-boot secret."""
+        if not WEB_HOST_SECRET:
+            return self.send_text("The web host is not running in this build.", 503)
+        host, _, port = WEB_HOST_ADDR.rpartition(":")
+        try:
+            up = socket.create_connection((host, int(port)), timeout=5)
+        except OSError:
+            return self.send_text("The web host is starting or not running. Try again in a moment.", 503)
+        upgrade = (self.headers.get("Upgrade") or "").lower() == "websocket"
+        path = "/" + "/".join(parts) + (f"?{u.query}" if u.query else "")
+        lines = [f"GET {path} HTTP/1.1", f"Host: {WEB_HOST_ADDR}", f"X-Dieter-Web-Secret: {WEB_HOST_SECRET}"]
+        names = ["X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name"]
+        names += ["Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"] if upgrade else []
+        for name in names:
+            value = self.headers.get(name)
+            if value and "\r" not in value and "\n" not in value:
+                lines.append(f"{name}: {value}")
+        if not upgrade:
+            lines.append("Connection: close")
+        self.close_connection = True
+        try:
+            up.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1", "replace"))
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = up.recv(4096)
+                if not chunk:
+                    raise ConnectionError("the web host closed the connection")
+                head += chunk
+                if len(head) > 65536:
+                    raise ConnectionError("oversized response head")
+            up.settimeout(None)
+            if not upgrade:
+                body = head
+                while True:
+                    chunk = up.recv(65536)
+                    if not chunk:
+                        break
+                    body += chunk
+                self.connection.sendall(body)
+                return
+            self.connection.sendall(head)
+            if not head.startswith(b"HTTP/1.1 101"):
+                return
+
+            def downstream():   # host -> browser
+                try:
+                    while True:
+                        chunk = up.recv(65536)
+                        if not chunk:
+                            break
+                        self.connection.sendall(chunk)
+                except OSError:
+                    pass
+                finally:
+                    for sock in (self.connection, up):
+                        try:
+                            sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+
+            t = threading.Thread(target=downstream, daemon=True)
+            t.start()
+            try:   # browser -> host (rfile may already hold the first frames)
+                while True:
+                    chunk = self.rfile.read1(65536)
+                    if not chunk:
+                        break
+                    up.sendall(chunk)
+            except (OSError, ValueError):
+                pass
+            finally:
+                try:
+                    up.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                t.join(5)
+        except (ConnectionError, OSError) as e:
+            log("web host relay:", e)
+            try:
+                if not upgrade:
+                    self.send_text("The web host did not answer.", 502)
+            except OSError:
+                pass
+        finally:
+            up.close()
+
+    def websocket_echo(self):
+        """RFC 6455 echo for checking WebSockets through Ingress: text and binary frames come back."""
+        key = self.headers.get("Sec-WebSocket-Key")
+        if (self.headers.get("Upgrade") or "").lower() != "websocket" or not key:
+            return self.send_json({"error": "WebSocket upgrade expected"}, 400)
+        accept = base64.b64encode(hashlib.sha1((key.strip() + WS_GUID).encode()).digest()).decode()
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        self.wfile.flush()
+        self.close_connection = True
+
+        def read(n):
+            data = b""
+            while len(data) < n:
+                chunk = self.rfile.read(n - len(data))
+                if not chunk:
+                    raise EOFError
+                data += chunk
+            return data
+
+        def send(opcode, payload):
+            n = len(payload)
+            head = bytes([0x80 | opcode]) + (bytes([n]) if n < 126 else bytes([126]) + n.to_bytes(2, "big") if n < 65536
+                                             else bytes([127]) + n.to_bytes(8, "big"))
+            self.wfile.write(head + payload)
+            self.wfile.flush()
+
+        try:
+            while True:
+                b0, b1 = read(2)
+                opcode, n = b0 & 0x0F, b1 & 0x7F
+                if n == 126:
+                    n = int.from_bytes(read(2), "big")
+                elif n == 127:
+                    n = int.from_bytes(read(8), "big")
+                if n > 1_000_000:
+                    return send(0x8, (1009).to_bytes(2, "big"))
+                mask = read(4) if b1 & 0x80 else b"\0\0\0\0"
+                payload = bytes(c ^ mask[i % 4] for i, c in enumerate(read(n)))
+                if opcode == 0x8:
+                    return send(0x8, payload[:2])
+                if opcode == 0x9:
+                    send(0xA, payload)
+                elif opcode in (0x0, 0x1, 0x2):
+                    send(opcode, payload)
+        except (EOFError, ConnectionError, OSError):
+            return
+
     # ---- routing
     def do_GET(self):
         try:
@@ -2969,6 +3245,12 @@ class Handler(BaseHTTPRequestHandler):
             parts = [p for p in u.path.split("/") if p]
             if not self.may_read():
                 return self.send_json({"error": "forbidden"}, 403)
+            if parts[:2] in (["next", "core"], ["next", "signin"]) and len(parts) == 2:
+                return self.web_host_relay(u, parts)
+            if parts and parts[0] == "next":
+                return self.serve_web(u, parts)
+            if parts == ["api", "ws", "echo"]:
+                return self.websocket_echo()
             if not parts or parts == ["index.html"]:
                 return self.send_text(open(INDEX, "rb").read(), ctype="text/html; charset=utf-8")
             if parts in (["app.css"], ["app.js"]):
@@ -3423,6 +3705,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    read_web_host_secret()   # first: no child may inherit the descriptor
     if ADDON:
         log(f"dieter bridge (add-on) on {BIND}:{PORT}, store {DIETER_HOME}")
         os.makedirs(DIETER_HOME, mode=0o700, exist_ok=True)

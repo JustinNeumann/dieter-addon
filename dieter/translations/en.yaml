@@ -17,6 +17,9 @@ configuration:
   antigravity_token:
     name: Antigravity credentials
     description: "Sign-in file of the Antigravity CLI (JSON). On a computer where `agy` is signed in, run: cat \"$HOME/.gemini/antigravity-cli/antigravity-oauth-token\" and paste the output here."
+  web_sign_in_callback:
+    name: New page sign-in address
+    description: "Optional. Where your Dieter gateway sends the browser back after GitHub sign-in on the new page, e.g. https://<your Home Assistant address>/app/<this add-on's slug>/next/signin. Empty: the address you opened Home Assistant with. The gateway must list it in DIETER_NATIVE_REDIRECT_URIS."
   projects:
     name: Projects
     description: "Repositories to clone into /data/projects and register with Dieter: name, git_url, branch (optional)."

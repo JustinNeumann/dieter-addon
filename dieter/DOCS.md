@@ -377,6 +377,55 @@ Home Assistant's time zone. The system log holds WARNING and above since the las
 `/api/error_log` for the whole log file, which Home Assistant OS does not provide (it logs to the journal, and the
 Supervisor's `/core/logs` needs `hassio_api`, which stays off). The Claude Code note in `CLAUDE.md` mentions it.
 
+## New page (preview)
+
+**Tools → Preview → New page** opens Dieter's own app screens (the Compose UI of the Android and iOS apps)
+compiled for the browser, at `next/` of this page. It is built in
+[dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) and pinned in the image by version
+and sha256; its plan lists what comes next. It will replace this page once it does everything this one does.
+
+- Served behind Ingress like this page: HA login, Nabu Casa and the Companion app work.
+- **Its own sign-in.** The new page is a Dieter *client* like the Android app: it signs in to your Dieter gateway
+  with GitHub and is then paired like a new device. Its core runs inside this add-on (the *web host*, a small
+  Java process), so the sign-in belongs to the add-on, not to a browser: sign in once and every browser and the
+  Companion app that open the page use it. Until then it shows the sign-in screen; `next/?demo` shows demo data.
+- **Theme:** Appearance *System* follows Home Assistant's light/dark mode (your HA profile, also when it differs
+  from the device's), live without a reload. **Dynamic color** (Settings) takes Dieter's colours from Home
+  Assistant's primary colour, including custom themes.
+- **Browsers:** it needs WebAssembly GC: current Chrome, Edge and Firefox, Android's WebView (Companion app),
+  Safari and iPhone/iPad from iOS 18.2. Older browsers see a note with a link back to this page.
+- First load about 5 MB (the WebAssembly is fetched gzip-compressed and inflated in the browser, because Ingress
+  neither forwards `Accept-Encoding` nor compresses WebAssembly), afterwards from the browser cache.
+- `next/?theme=dark|light` overrides the theme, `next/?script=tab projects; board Main` replays the app's debug
+  navigation. `<your HA address>/app/<this add-on's slug>/next/` opens the new page directly.
+
+### Signing in the new page
+
+GitHub sends you back to your gateway, and the gateway sends the browser back to the app. For the new page that
+return address is your Home Assistant: `https://<your HA address>/app/<this add-on's slug>/next/signin` (the
+slug is the part after `/app/` when you open the add-on, e.g. `4d8f2a84_dieter`). The gateway accepts only
+return addresses it lists, so once:
+
+1. On the gateway's machine add the address to `DIETER_NATIVE_REDIRECT_URIS` (comma-separated, exact, keep the
+   app's existing entries), e.g. in the gateway's `.env`, and restart the gateway. Add one address per way you
+   open Home Assistant for signing in (e.g. the Nabu Casa address).
+2. Open the new page through that address, enter the gateway address, **Sign in**, approve on GitHub and on the
+   gateway's confirmation page. The browser comes back to Home Assistant and the page says *Signed in*.
+3. The page then shows a pairing code: approve it on a device that is already trusted (the Dieter app's Devices
+   screen, or `dieter device approve <code>` on a paired machine).
+
+Sign in from a browser where you are logged in to Home Assistant (a desktop browser is easiest; the Companion app
+opens sign-in in your phone's browser). If the return lands somewhere else, paste the full address you landed on
+into the page's gateway field and press Sign in. The option `web_sign_in_callback` pins the return address
+instead of using the one you opened Home Assistant with.
+
+**What the web host holds:** this install's device key and the gateway session, in `/data/web-host` (part of
+the add-on's backups). It runs as its own user, so the agents (user `dieter`) can neither read that directory
+nor talk to it: it answers only the bridge, which proves itself with a secret created at every start and kept
+only in the bridge's memory (the bridge is non-dumpable, so processes of the agents' user cannot read it). The
+session gives full access to every machine of your Dieter account, like any signed-in app. Sign out in the new
+page's Settings, or revoke the device in the Dieter app.
+
 ## Backups
 
 `/data` is backed up with the add-on, except the harness runtime and the project checkouts

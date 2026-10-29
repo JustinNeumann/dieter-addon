@@ -1,7 +1,9 @@
 #!/bin/bash
 # End-to-end tests of the Dieter add-on: builds the amd64 image, starts it on the host network with
 # Dieter's deterministic mock harness, puts an Ingress-like proxy in front and runs Playwright.
-# Usage: tests/run.sh [playwright args]      E2E_DATA=<dir> keeps the staged runtime between runs.
+# Usage: tests/run.sh [playwright args]      E2E_DATA=<dir> keeps the staged runtime between runs,
+#        WEB_BUNDLE=<dir> mounts a local Compose bundle over /opt/web,
+#        WEB_HOST_JAR=<file> builds without downloading the web host and mounts this jar instead.
 set -euo pipefail
 cd "$(dirname "$0")"
 DATA="${E2E_DATA:-$HOME/.cache/dieter-addon-e2e/data}"
@@ -9,10 +11,11 @@ IMAGE=dieter-addon-e2e
 mkdir -p "$DATA"
 [ -f "$DATA/options.json" ] || echo '{"git_user":"E2E","git_email":"e2e@example.invalid","github_token":"","claude_code_oauth_token":"","openai_api_key":"","antigravity_token":"","projects":[],"log_level":"info"}' > "$DATA/options.json"
 echo "building image…"
-docker build -q --build-arg BUILD_ARCH=amd64 -t "$IMAGE" .. >/dev/null
+docker build -q --build-arg BUILD_ARCH=amd64 ${WEB_HOST_JAR:+--build-arg DIETER_WEB_HOST_SHA=skip} -t "$IMAGE" .. >/dev/null
 docker rm -f dieter-e2e >/dev/null 2>&1 || true
 pkill -f '^node ingress-proxy.mjs' >/dev/null 2>&1 || true
-docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" "$IMAGE" >/dev/null
+# WEB_BUNDLE=<dir> serves a local build of the Compose page (dieter-addon-kotlin: tools/package.sh) instead of the pinned one
+docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" ${WEB_BUNDLE:+-v "$WEB_BUNDLE:/opt/web:ro"} ${WEB_HOST_JAR:+-v "$WEB_HOST_JAR:/opt/web-host/dieter-web-host.jar:ro"} "$IMAGE" >/dev/null
 cleanup() { kill "${PROXY:-}" 2>/dev/null || true; [ -n "${E2E_KEEP:-}" ] || docker rm -f dieter-e2e >/dev/null 2>&1 || true; }   # E2E_KEEP=1 leaves the container for `docker logs dieter-e2e`
 trap cleanup EXIT
 echo "waiting for the bridge and daemon (first run stages the harness runtime, ~800 MB)…"

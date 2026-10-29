@@ -119,6 +119,8 @@ RUN chmod 755 /usr/local/bin/ha-logs && ha-logs --help >/dev/null
 # The daemon and its agents run as this user, not as root (Claude Code refuses
 # --dangerously-skip-permissions as root); /data is handed to it at start.
 RUN useradd --uid 1000 --user-group --home-dir /data --no-create-home --shell /bin/bash dieter
+# the web host's own user (see run.sh): agents run as dieter and cannot read /data/web-host
+RUN useradd --uid 1001 --user-group --home-dir /data/web-host --no-create-home --shell /usr/sbin/nologin dieter-web
 
 # Harness runtime sources of exactly this Dieter build (the fork's internal/harness/runtime without
 # tests and node_modules); the bridge combines them with the release's node_modules archive.
@@ -136,6 +138,32 @@ RUN set -eu; \
     rm -rf /tmp/patches; \
     rm -rf /tmp/src /tmp/src.tar.gz /tmp/sources.sha; \
     ls /opt/dieter-runtime | wc -l
+
+# The new page (Compose UI in the browser, Kotlin/Wasm) from github.com/JustinNeumann/dieter-addon-kotlin: the
+# same files for every architecture. The bridge serves them at /next/. The sha256 is the release's SHA256SUMS line.
+ARG DIETER_WEB_VERSION=0.2.1
+ARG DIETER_WEB_SHA=0a64c5767507eec0acedd2c2ae8d5a5f29bf8e35f64d5fdc04511affc8cd829f
+RUN set -eu; \
+    curl -fsSL -o /tmp/web.tar.gz "https://github.com/JustinNeumann/dieter-addon-kotlin/releases/download/v${DIETER_WEB_VERSION}/dieter-web-${DIETER_WEB_VERSION}.tar.gz"; \
+    echo "${DIETER_WEB_SHA}  /tmp/web.tar.gz" | sha256sum -c -; \
+    mkdir -p /opt/web; \
+    tar -xzf /tmp/web.tar.gz -C /opt/web --strip-components=1 --no-same-owner; \
+    rm /tmp/web.tar.gz; \
+    test -f /opt/web/index.html && cat /opt/web/BUILD.json
+
+# The web host (the new page's core on the JVM, same repository and release) and a headless Java 21 runtime
+# from Debian. run.sh starts it as user dieter-web on loopback; the bridge relays next/core and next/signin.
+ARG DIETER_WEB_HOST_SHA=d88ec49c0262c654c674d0bda06ed474573af749f50143f595b30b81454cf34a
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends openjdk-21-jre-headless; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /opt/web-host; \
+    if [ "${DIETER_WEB_HOST_SHA}" = skip ]; then echo "web host not downloaded (tests/run.sh WEB_HOST_JAR mounts one)"; else \
+      curl -fsSL -o /opt/web-host/dieter-web-host.jar "https://github.com/JustinNeumann/dieter-addon-kotlin/releases/download/v${DIETER_WEB_VERSION}/dieter-web-host-${DIETER_WEB_VERSION}.jar"; \
+      echo "${DIETER_WEB_HOST_SHA}  /opt/web-host/dieter-web-host.jar" | sha256sum -c -; \
+    fi; \
+    java -version 2>&1 | head -1
 
 COPY bridge/ /opt/bridge/
 # dreamfall: the command of the Dreamfall stage agents (bridge/dreamfall.py; they run it from their run cards)
