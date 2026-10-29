@@ -264,7 +264,8 @@
   }
   function tabBadges() {
     const items = activityItems(); const attention = items.filter((i) => i.needsYou).length;
-    return { inbox: attention > 0 ? String(attention) : "" };
+    const mail = mailUnread();
+    return { inbox: attention > 0 ? String(attention) : "", mail: mail > 0 ? (mail > 99 ? "99+" : String(mail)) : "" };
   }
 
   // ------------------------------------------------------------------ building blocks
@@ -312,6 +313,7 @@
       case "pane": return paneScreen(route, opts);
       case "tool": return toolScreen(route, opts);
       case "machine": return machineScreen(route, opts);
+      case "mail": return mailMessageScreen(route, opts);
     }
     return "";
   }
@@ -890,8 +892,357 @@
       <div class="t-subheadline c-secondary clamp2">${esc(c.summary || project(c.project_id)?.name || "")}</div></div></div></div>`;
   }
 
-  // ---- Mail / Channels (not exposed by the bridge yet)
-  const mailScreen = (opts) => `<div class="screen">${appbar({ title: "Mail", large: true, back: opts.back })}<div class="content" data-scroll="mail">${emptyState("mail", "No mail", "Reports agents send you appear here.")}</div></div>`;
+  // ---- Mail (MailScreen.kt, MailMessageScreen.kt, MailRules.kt): this machine's Dieter Mail, newest first in date groups
+  const MAIL_BOXES = [["inbox", "Inbox", "inbox"], ["flagged", "Flagged", "flag"], ["unread", "Unread", "mark_email_unread"], ["archive", "Archive", "archive"], ["trash", "Trash", "delete"]];
+  // changes made here show at once and stay until the bridge's listing has them (a state pushed while the change
+  // was on its way would put the old state back), at most MAIL_PENDING_MS; a message deleted here stays hidden
+  const MAIL_PENDING_MS = 15000;
+  function mailAll() {
+    const src = S.data?.mail?.messages || [], pend = mailState().pending, t = now();
+    if (src !== mailState().src) { // a new listing: drop what it confirms
+      for (const [id, p] of Object.entries(pend)) { const m = src.find((x) => x.id === id); if (p.sent && (t - p.at > MAIL_PENDING_MS || (p.gone ? !m : m && Object.keys(p.fields).every((k) => m[k] === p.fields[k])))) delete pend[id]; }
+      mailState().src = src; mailState().view = null;
+    }
+    if (!mailState().view) mailState().view = src.filter((m) => !pend[m.id]?.gone).map((m) => (pend[m.id] ? { ...m, ...pend[m.id].fields } : m));
+    return mailState().view;
+  }
+  function mailPend(ids, fields, gone) {
+    const pend = mailState().pending, at = now();
+    ids.forEach((id) => (pend[id] = { fields: { ...(pend[id]?.fields || {}), ...fields }, gone, at, sent: false }));
+    mailState().view = null;
+    return () => ids.forEach((id) => { if (pend[id]?.at === at) { pend[id].sent = true; pend[id].at = now(); } });   // the bridge has it: wait for its listing
+  }
+  const mailForget = (ids) => { ids.forEach((id) => delete mailState().pending[id]); mailState().view = null; };
+  const mailMsg = (id) => mailAll().find((m) => m.id === id);
+  // Inbox, Archive and Trash are folders; Flagged is flagged mail outside the Trash, Unread is unread Inbox mail
+  function mailInBox(m, box) {
+    if (box === "flagged") return m.flagged && m.folder !== "trash";
+    if (box === "unread") return !m.read && m.folder === "inbox";
+    return m.folder === box;
+  }
+  const mailUnread = () => mailAll().filter((m) => mailInBox(m, "unread")).length;
+  const mailMachine = () => S.data?.mail?.machine || "this machine";
+  // the schedule, else the conversation, else the operator's label, else "Operator on Home Assistant"
+  const mailSender = (m) => { const f = m.sender || {}; return (f.schedule_name || "").trim() || (f.title || "").trim() || (f.label || "").trim() || `${f.agent ? "Agent" : "Operator"} on ${mailMachine()}`; };
+  const mailStyle = (m) => { const f = m.sender || {}; return f.schedule_id ? "schedule" : f.scope === "chat" ? "chat" : !f.agent ? "operator" : "card"; };
+  const mailSenderKey = (m) => { const f = m.sender || {}; return f.schedule_id ? "schedule:" + f.schedule_id : f.agent ? "card:" + f.card_id : "operator:" + ((f.label || "").trim() || f.device_id || "local"); };
+  const harnessName = (id) => (S.data.harnesses || []).find((h) => h.id === id)?.name || HARNESS_NAMES[id] || id;
+  function mailAgentLabel(f) {
+    const agent = harnessName(f.harness || ""), h = (S.data.harnesses || []).find((x) => x.id === f.harness);
+    const model = ((h?.models || []).find((x) => x.id === f.model)?.name || f.model || "").trim();
+    if (!model) return agent; if (!agent) return model;
+    return model.toLowerCase().startsWith(agent.split(" ")[0].toLowerCase()) ? model : `${agent} ${model}`;
+  }
+  // "Schedule · dieter · Home Assistant · Claude Code opus"
+  const mailReaderDetail = (m) => { const f = m.sender || {}; return [{ schedule: "Schedule", chat: "Chat", operator: "Operator", card: "Card" }[mailStyle(m)], f.project_name, mailMachine(), f.agent ? mailAgentLabel(f) : ""].filter(Boolean).join(" · "); };
+  function mailInitials(name) { const w = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean); return (!w.length ? "?" : w.length === 1 ? w[0].slice(0, 2) : w[0][0] + w[1][0]).toUpperCase(); }
+  const MAIL_HARNESS_COLORS = [["claude", "#D97757"], ["codex", "#10A37F"], ["gemini", "#4285F4"], ["antigravity", "#4285F4"], ["opencode", "#5E5CE6"]];
+  function mailAvatar(m, size = 40) {
+    const name = mailSender(m), style = mailStyle(m), f = m.sender || {};
+    const inner = style === "schedule" ? ico("schedule", Math.round(size * 0.5)) : style === "operator" ? ico("terminal", Math.round(size * 0.48)) : `<span>${esc(mailInitials(name))}</span>`;
+    const hc = f.agent && f.harness ? (MAIL_HARNESS_COLORS.find(([k]) => f.harness.startsWith(k))?.[1] || "#8E8E93") : "";
+    return `<span class="mail-av" style="width:${size}px;height:${size}px;background:${stableColor(mailSenderKey(m))}">${inner}${hc ? `<span class="hb" style="background:${hc}" title="${esc(harnessName(f.harness))}">${ico("auto_awesome", 11)}</span>` : ""}</span>`;
+  }
+  // dates in the browser's time zone: "09:14" today, "Mon" within the last week, "12 Oct" this year, else "12 Oct 2025"
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dayNo = (d) => Math.floor((d.getTime() - d.getTimezoneOffset() * 60000) / 86400000);
+  const clock = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  function mailTime(at) {
+    const d = new Date(at), t = new Date(); if (!at || isNaN(d)) return "";
+    const ago = dayNo(t) - dayNo(d);
+    return ago <= 0 ? clock(d) : ago <= 6 ? WEEKDAYS[d.getDay()] : `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === t.getFullYear() ? "" : " " + d.getFullYear()}`;
+  }
+  function mailSent(at) {
+    const d = new Date(at); if (!at || isNaN(d)) return "";
+    const ago = dayNo(new Date()) - dayNo(d);
+    return ago <= 0 ? `Today ${clock(d)}` : ago === 1 ? `Yesterday ${clock(d)}` : `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${clock(d)}`;
+  }
+  // Today, Yesterday, This week, Last week (weeks start on Monday), then the month
+  function mailSection(at) {
+    const d = new Date(at); if (!at || isNaN(d)) return ["earlier", "Earlier"];
+    const day = dayNo(d), today = dayNo(new Date()), week = today - ((new Date().getDay() + 6) % 7);
+    if (day >= today) return ["today", "Today"]; if (day === today - 1) return ["yesterday", "Yesterday"];
+    if (day >= week) return ["this-week", "This week"]; if (day >= week - 7) return ["last-week", "Last week"];
+    return [`${d.getFullYear()}-${d.getMonth()}`, `${d.toLocaleString("en", { month: "long" })} ${d.getFullYear()}`];
+  }
+  const mailState = () => (S.mail ||= { box: "inbox", filter: { project: "", sender: "", important: false }, bodies: {}, pending: {}, src: null, view: null });
+  const mailFiltered = (f) => !!(f.project || f.sender || f.important);
+  function mailListed() {
+    const v = mailState(), f = v.filter, query = (S.search.mail || "").trim().toLowerCase();
+    return mailAll().filter((m) => mailInBox(m, v.box)
+      && (!f.project || m.sender?.project_id === f.project) && (!f.sender || mailSenderKey(m) === f.sender) && (!f.important || m.important)
+      && (!query || [m.subject, mailSender(m), m.sender?.project_name, m.preview].some((x) => (x || "").toLowerCase().includes(query))))
+      .sort((a, b) => (Date.parse(b.sent_at || 0) || 0) - (Date.parse(a.sent_at || 0) || 0) || (b.id < a.id ? -1 : 1));
+  }
+  function mailEmpty(boxEmpty) {
+    const v = mailState(), query = (S.search.mail || "").trim(), title = MAIL_BOXES.find((b) => b[0] === v.box)[1];
+    if (!boxEmpty) return query ? ["search", "No results", `Nothing matches “${query}”.`] : ["filter_list", "No results", `No message in ${title} matches the filter.`];
+    return { inbox: mailAll().length ? ["inbox", "Inbox is empty", "New reports from your agents arrive here."] : ["mail", "No mail yet", "Agents in cards, chats and schedules created with Mail access send their reports here."],
+      flagged: ["flag", "No flagged mail", "Flag a message to keep it at hand."], unread: ["mark_email_read", "No unread mail", "You have read every message."],
+      archive: ["archive", "Archive is empty", "Archived messages stay here until you delete them."], trash: ["delete", "Trash is empty", "Deleted mail stays here for 30 days."] }[v.box];
+  }
+  function mailScreen(opts) {
+    const v = mailState(), all = mailAll(), rows = mailListed(), err = S.data.mail?.error;
+    const selected = stack().find((r) => r.kind === "mail")?.id;
+    const boxes = MAIL_BOXES.map(([b, t]) => {
+      const members = all.filter((m) => mailInBox(m, b)); const n = b === "flagged" || b === "trash" ? members.length : members.filter((m) => !m.read).length;
+      return chip(n ? `${t} ${n > 99 ? "99+" : n}` : t, v.box === b, "mail-box", `data-box="${b}"`);
+    }).join("");
+    const groups = []; let key = null;
+    for (const m of rows) { const [k, t] = mailSection(m.sent_at); if (k !== key) { groups.push(sectionHeader(t, { prominent: true })); key = k; } groups.push(mailRow(m, m.id === selected)); }
+    const unread = mailUnread();
+    const body = rows.length ? `<div class="mail-list">${groups.join("")}</div>` : emptyState(...mailEmpty(!all.some((m) => mailInBox(m, v.box))));
+    return `<div class="screen">${appbar({ title: MAIL_BOXES.find((b) => b[0] === v.box)[1], subtitle: unread ? `${unread} unread` : "", large: true, back: opts.back,
+        actions: `<button class="iconbtn ${mailFiltered(v.filter) ? "on" : ""}" data-act="menu" data-menu="mail-filter" title="Filter">${ico(mailFiltered(v.filter) ? "filter_alt" : "filter_list")}</button>${iconAction("more_vert", "menu", `data-menu="mail-more"`, "More")}` })}
+      <div class="content" data-scroll="mail">${searchField("mail", "Search mail")}<div class="chips">${boxes}</div>
+      ${err ? `<div class="banner warning" style="margin:6px 16px">${ico("cloud_off", 22)}<div><div class="t">Mail could not be loaded</div><div class="m">${esc(err)}</div></div></div>` : ""}${body}</div></div>`;
+  }
+  function mailRow(m, sel) {
+    const away = m.folder === "archive" ? ["move_to_inbox", "Move to Inbox"] : m.folder === "trash" ? ["restore_from_trash", "Move to Inbox"] : ["archive", "Archive"];
+    return `<div class="mail-row ${m.read ? "" : "unread"} ${sel ? "selected" : ""}" data-act="mail-open" data-id="${esc(m.id)}" title="${esc(m.subject)}">
+      <div class="dotcol">${m.read ? "" : `<span class="udot"></span>`}</div>${mailAvatar(m)}
+      <div class="main"><div class="hd"><span class="from ellipsis">${esc(mailSender(m))}</span>${m.important ? `<span class="imp" title="Important">!</span>` : ""}${m.flagged ? `<span class="flg">${ico("flag", 14, "fill")}</span>` : ""}<span class="time">${esc(mailTime(m.sent_at))}</span></div>
+        <div class="subj ellipsis">${esc(m.subject)}</div>${m.preview ? `<div class="prev clamp2">${esc(m.preview)}</div>` : ""}</div>
+      <div class="qa"><button class="iconbtn small" data-act="mail-quick" data-do="read" data-id="${esc(m.id)}" title="${m.read ? "Mark unread" : "Mark read"}">${ico(m.read ? "mark_email_unread" : "mark_email_read", 20)}</button>
+        <button class="iconbtn small" data-act="mail-quick" data-do="away" data-id="${esc(m.id)}" title="${away[1]}">${ico(away[0], 20)}</button></div></div>`;
+  }
+  // changes show at once (the bridge lists again right after); Undo puts back what each message had
+  async function mailChange(ms, change, verb) {
+    ms = ms.filter(Boolean); if (!ms.length) return;
+    const before = ms.map((m) => ({ id: m.id, read: m.read, flagged: m.flagged, folder: m.folder })), ids = ms.map((m) => m.id);
+    const sent = mailPend(ids, change); render();
+    try { await api("api/mail/mark", { ids, ...change }); sent(); }
+    catch (e) { snackbar("Mail could not be changed: " + e.message); mailForget(ids); render(); return; }
+    if (!verb) return;
+    snackbar(ms.length === 1 ? `${verb} “${ms[0].subject}”` : `${verb} ${counts(ms.length, "message")}`, { label: "Undo", onClick: async () => {
+      const groups = {}; before.forEach((b) => { const k = JSON.stringify(Object.fromEntries(Object.keys(change).map((x) => [x, b[x]]))); (groups[k] ||= []).push(b.id); });
+      for (const [k, ids] of Object.entries(groups)) { const ch = JSON.parse(k), done = mailPend(ids, ch); render(); await api("api/mail/mark", { ids, ...ch }).then(done, (e) => { mailForget(ids); render(); snackbar(e.message); }); }
+    } });
+  }
+  const mailMoved = (folder) => ({ archive: "Archived", trash: "Moved to Trash", inbox: "Moved to Inbox" }[folder]);
+  function mailMove(m, folder, close) { if (close) mailClose(m.id); mailChange([m], { folder }, mailMoved(folder)); }
+  function mailClose(id) { const st = stack(); if (st[st.length - 1]?.kind === "mail" && st[st.length - 1].id === id) pop(); }
+  async function mailDelete(ids, empty) {
+    if (!confirm(empty ? "Empty Trash? Every message in the Trash is deleted for good." : ids.length === 1 ? "Delete this message? Deleted messages cannot be restored." : `Delete ${counts(ids.length, "message")}? Deleted messages cannot be restored.`)) return;
+    if (empty) ids = mailAll().filter((m) => m.folder === "trash").map((m) => m.id);
+    ids.forEach(mailClose);
+    const sent = mailPend(ids, {}, true); render();
+    try { await api("api/mail/delete", empty ? { empty_trash: true } : { ids }); sent(); } catch (e) { snackbar("Mail could not be deleted: " + e.message); mailForget(ids); render(); }
+  }
+  function mailOpen(id) {
+    const m = mailMsg(id); if (!m) return;
+    showFrom(null, { kind: "mail", id });
+    if (!m.read) mailChange([m], { read: true });     // opening a message marks it read, as in the apps
+  }
+  function mailBody(id) {
+    const st = mailState(), b = st.bodies[id];
+    if (!b) { st.bodies[id] = { loading: true }; api(`api/mail/${id}`).then((r) => { st.bodies[id] = { body: r.body }; render(); }).catch((e) => { st.bodies[id] = { error: e.message }; render(); }); return st.bodies[id]; }
+    return b;
+  }
+  function mailMessageScreen(route, opts) {
+    const m = mailMsg(route.id);
+    if (!m) return `<div class="screen">${appbar({ title: "", back: opts.back })}<div class="center-fill">${emptyState("mail", "Message unavailable", "It was deleted or is no longer on this machine.")}</div></div>`;
+    const b = mailBody(m.id), f = m.sender || {}, trash = m.folder === "trash";
+    const live = f.agent && f.card_id && conv(f.card_id) && !conv(f.card_id).archived;
+    const why = live ? "" : f.agent ? "The conversation was deleted" : f.label ? `Sent by ${f.label.trim()}` : `Sent by an operator on ${mailMachine()}`;
+    const actions = `<button class="iconbtn" data-act="mail-do" data-do="archive" data-id="${esc(m.id)}" title="Archive" ${m.folder === "archive" ? "disabled" : ""}>${ico("archive")}</button>
+      <button class="iconbtn" data-act="mail-do" data-do="delete" data-id="${esc(m.id)}" title="${trash ? "Delete permanently" : "Delete"}">${ico(trash ? "delete_forever" : "delete")}</button>${iconAction("more_vert", "menu", `data-menu="mail-message" data-id="${esc(m.id)}"`, "More")}`;
+    const content = b.error ? emptyState("cloud_off", "The message can't be shown", b.error) : b.loading ? `<div style="display:flex;justify-content:center;padding:48px 0"><div class="spinner"></div></div>`
+      : `<div class="rich mail-body">${mailMarkdown(b.body || "", m)}</div>`;
+    return `<div class="screen">${appbar({ title: "", back: opts.back, actions })}<div class="content" data-scroll="mail-${esc(m.id)}">
+      <div class="mail-head"><div class="subject">${esc(m.subject)}</div>${m.important ? `<span class="imp-pill">Important</span>` : ""}
+        <div class="from">${mailAvatar(m, 44)}<div class="who"><div class="t-headline">${esc(mailSender(m))}</div><div class="t-footnote c-secondary">${esc(mailReaderDetail(m))}</div><div class="t-footnote c-secondary">${esc(mailSent(m.sent_at))}</div></div>
+        ${m.flagged ? `<span class="flg">${ico("flag", 20, "fill")}</span>` : ""}</div>
+        <div><button class="btn tonal" data-act="mail-conv" data-id="${esc(f.card_id || "")}" ${live ? "" : "disabled"}>${ico("chat", 18)}Open conversation</button>${why ? `<div class="t-footnote c-secondary" style="margin-top:4px">${esc(why)}</div>` : ""}</div></div>
+      <div class="mail-rule"></div>${content}</div></div>`;
+  }
+  function mailMessageMenu(el, id) {
+    const m = mailMsg(id); if (!m) return; const b = mailState().bodies[id], f = m.sender || {};
+    showMenu(el, [{ id: "read", label: m.read ? "Mark unread" : "Mark read", icon: m.read ? "mark_email_unread" : "mark_email_read", onClick: () => mailChange([m], { read: !m.read }) },
+      { id: "flag", label: m.flagged ? "Unflag" : "Flag", icon: "flag", onClick: () => mailChange([m], { flagged: !m.flagged }) },
+      ...(m.folder !== "inbox" ? [{ id: "inbox", label: "Move to Inbox", icon: "move_to_inbox", onClick: () => mailMove(m, "inbox", false) }] : []),
+      ...(m.folder !== "trash" ? [{ id: "trash", label: "Move to Trash", icon: "delete", onClick: () => mailMove(m, "trash", true) }] : []), "-",
+      { id: "copy", label: "Copy Markdown", icon: "content_copy", onClick: () => b?.body != null && navigator.clipboard?.writeText(b.body).then(() => snackbar("Markdown copied."), () => snackbar("Copy failed.")) },
+      { id: "copy-id", label: "Copy ID", sub: m.id, icon: "tag", onClick: () => navigator.clipboard?.writeText(m.id) },
+      ...(f.agent && f.card_id && conv(f.card_id) ? [{ id: "conv", label: "Open conversation", icon: "chat", onClick: () => openConversation(f.card_id) }] : [])]);
+  }
+  function mailFilterMenu(el) {
+    const v = mailState(), f = v.filter, set = (k, val) => { v.filter = { ...f, [k]: val }; render(); };
+    const projects = {}, senders = {};
+    mailAll().forEach((m) => { if (m.sender?.project_id) projects[m.sender.project_id] = m.sender.project_name || project(m.sender.project_id)?.name || m.sender.project_id; senders[mailSenderKey(m)] = mailSender(m); });
+    const opts = (o, k) => Object.entries(o).sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => ({ id: k + "-" + id, label: name, checked: f[k] === id, onClick: () => set(k, f[k] === id ? "" : id) }));
+    showMenu(el, [{ id: "important", label: "Important only", checked: f.important, onClick: () => set("important", !f.important) },
+      ...(Object.keys(projects).length ? ["-", { title: "Project" }, ...opts(projects, "project")] : []), ...(Object.keys(senders).length > 1 ? ["-", { title: "Sender" }, ...opts(senders, "sender")] : []),
+      ...(mailFiltered(f) ? ["-", { id: "clear", label: "Clear filter", icon: "filter_list_off", onClick: () => { v.filter = { project: "", sender: "", important: false }; render(); } }] : [])]);
+  }
+  function mailMoreMenu(el) {
+    const v = mailState(), unread = mailListed().filter((m) => !m.read);
+    showMenu(el, [{ id: "all-read", label: "Mark all read", icon: "mark_email_read", onClick: () => (unread.length ? mailChange(unread, { read: true }, "Marked as read") : snackbar("Every message here is read.")) },
+      ...(v.box === "trash" && mailListed().length ? [{ id: "empty", label: "Empty Trash", icon: "delete_forever", destructive: true, onClick: () => mailDelete([], true) }] : [])]);
+  }
+
+  // GitHub-flavored Markdown of a mail body (the apps' subset): raw HTML stays text, images are links, relative
+  // links open the file in the sender's checkout; mermaid, vega-lite and vega fences are drawn (mailCharts)
+  function mailMarkdown(md, m) {
+    const lines = String(md).replace(/\r\n?/g, "\n").replace(/\t/g, "    ").split("\n");
+    const card = m.sender?.agent && m.sender.card_id && conv(m.sender.card_id) ? m.sender.card_id : "";
+    return mdBlocks(lines, { card, project: m.sender?.project_id || "" });
+  }
+  const MD_FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)[^`]*$/, MD_HR = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/, MD_HEAD = /^ {0,3}(#{1,6})(?:\s+(.*?))?(?:\s+#+)?\s*$/;
+  const MD_LIST = /^( {0,3})([-*+]|\d{1,9}[.)])(\s+|$)/, MD_QUOTE = /^ {0,3}>\s?/, MD_TROW = /^\s*\|?.*\|.*$/, MD_TSEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+  const mdStarts = (l, next) => MD_FENCE.test(l) || MD_HR.test(l) || MD_HEAD.test(l) || MD_QUOTE.test(l) || MD_LIST.test(l) || (MD_TROW.test(l) && MD_TSEP.test(next || ""));
+  function mdBlocks(lines, ctx) {
+    const out = []; let i = 0;
+    while (i < lines.length) {
+      const l = lines[i];
+      if (!l.trim()) { i++; continue; }
+      let mt;
+      if ((mt = MD_FENCE.exec(l))) {
+        const fence = mt[1], lang = mt[2].toLowerCase(), buf = []; i++;
+        while (i < lines.length && !new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(lines[i])) buf.push(lines[i++]);
+        i++; out.push(mdFence(lang, buf.join("\n"))); continue;
+      }
+      if (MD_HR.test(l)) { out.push("<hr>"); i++; continue; }
+      if ((mt = MD_HEAD.exec(l))) { const n = mt[1].length; out.push(`<h${n}>${mdInline(mt[2] || "", ctx)}</h${n}>`); i++; continue; }
+      if (MD_QUOTE.test(l)) { const buf = []; while (i < lines.length && lines[i].trim() && (MD_QUOTE.test(lines[i]) || !mdStarts(lines[i], lines[i + 1]))) buf.push(lines[i++].replace(MD_QUOTE, "")); out.push(`<blockquote>${mdBlocks(buf, ctx)}</blockquote>`); continue; }
+      if (MD_TROW.test(l) && MD_TSEP.test(lines[i + 1] || "")) {
+        const cells = (r) => { const t = r.trim().replace(/^\|/, "").replace(/(^|[^\\])\|$/, "$1"); const cs = []; let cur = "", code = false; for (let k = 0; k < t.length; k++) { const c = t[k]; if (c === "\\" && t[k + 1] === "|") { cur += "|"; k++; } else if (c === "`") { code = !code; cur += c; } else if (c === "|" && !code) { cs.push(cur.trim()); cur = ""; } else cur += c; } cs.push(cur.trim()); return cs; };
+        const head = cells(l), align = cells(lines[i + 1]).map((c) => (/^:-+:$/.test(c) ? "center" : /-+:$/.test(c) ? "right" : /^:-+/.test(c) ? "left" : ""));
+        i += 2; const body = []; while (i < lines.length && lines[i].trim() && MD_TROW.test(lines[i]) && !mdStarts(lines[i], "") ) body.push(cells(lines[i++]));
+        const td = (tag, c, k) => `<${tag}${align[k] ? ` style="text-align:${align[k]}"` : ""}>${mdInline(c || "", ctx)}</${tag}>`;
+        out.push(`<div class="table-wrap"><table><thead><tr>${head.map((c, k) => td("th", c, k)).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${head.map((_, k) => td("td", r[k], k)).join("")}</tr>`).join("")}</tbody></table></div>`); continue;
+      }
+      if ((mt = MD_LIST.exec(l))) { const r = mdList(lines, i, ctx); out.push(r.html); i = r.next; continue; }
+      const buf = []; while (i < lines.length && lines[i].trim() && (!buf.length || !mdStarts(lines[i], lines[i + 1]))) buf.push(lines[i++]);
+      out.push(`<p>${mdInline(buf.map((x) => x.replace(/^\s+/, "")).join("\n"), ctx)}</p>`);
+    }
+    return out.join("");
+  }
+  // a list and its nested blocks: an item's lines are those indented past its marker (blank lines included)
+  function mdList(lines, i, ctx) {
+    const first = MD_LIST.exec(lines[i]), ordered = /\d/.test(first[2]), start = ordered ? parseInt(first[2], 10) : 1, items = [];
+    let tight = true;
+    while (i < lines.length) {
+      const mt = MD_LIST.exec(lines[i]); if (!mt || /\d/.test(mt[2]) !== ordered) break;
+      const indent = mt[1].length + mt[2].length + Math.min(mt[3].length || 1, 4), buf = [lines[i].slice(mt[0].length)]; i++;
+      while (i < lines.length) {
+        const l = lines[i];
+        if (!l.trim()) { if (i + 1 < lines.length && (lines[i + 1].search(/\S/) >= indent)) { buf.push(""); tight = false; i++; continue; } break; }
+        const lead = l.search(/\S/);
+        if (lead >= indent || (lead > mt[1].length && MD_LIST.test(l))) { buf.push(l.slice(Math.min(lead, indent))); i++; continue; }
+        if (MD_LIST.test(l) || mdStarts(l, lines[i + 1])) break;
+        buf.push(l.trim()); i++;   // lazy continuation of the item's paragraph
+      }
+      let task = null; const tm = /^\[([ xX])\]\s+/.exec(buf[0]); if (tm) { task = tm[1] !== " "; buf[0] = buf[0].slice(tm[0].length); }
+      items.push({ task, buf });
+      if (i < lines.length && !lines[i].trim() && MD_LIST.test(lines[i + 1] || "") && (MD_LIST.exec(lines[i + 1])[1].length === first[1].length)) { tight = false; i++; }
+    }
+    const li = items.map(({ task, buf }) => {
+      let inner = mdBlocks(buf, ctx);
+      if (tight) inner = inner.replace(/^<p>([\s\S]*?)<\/p>/, "$1");
+      return `<li${task != null ? ` class="task"` : ""}>${task != null ? `<input type="checkbox" disabled${task ? " checked" : ""}> ` : ""}${inner}</li>`;
+    }).join("");
+    return { html: ordered ? `<ol${start !== 1 ? ` start="${start}"` : ""}>${li}</ol>` : `<ul>${li}</ul>`, next: i };
+  }
+  function mdFence(lang, src) {
+    const kind = lang === "mermaid" ? "mermaid" : lang === "vega-lite" || lang === "vegalite" ? "vega-lite" : lang === "vega" ? "vega" : "";
+    if (kind) { const c = mailChart(kind, src); if (c.svg) return `<div class="mail-chart">${c.svg}</div>`;
+      if (!c.error) return `<div class="mail-chart loading"><div class="spinner"></div></div>`;
+      return `<div class="mail-chart-failed"><div class="t-footnote c-secondary">${ico("error", 16)} ${esc(c.error)}</div><pre><code>${esc(src)}</code></pre></div>`; }
+    return `<pre${lang ? ` data-lang="${esc(lang)}"` : ""}><code>${esc(src)}</code></pre>`;
+  }
+  function mdInline(text, ctx) {
+    const out = []; let i = 0, plain = "";
+    const flush = () => { if (plain) { out.push(mdText(plain)); plain = ""; } };
+    const link = (label, href, image) => {
+      href = href.trim().replace(/^<|>$/g, ""); const title = image ? `Image: ${label || href}` : href;
+      if (/^(https?:|mailto:)/i.test(href)) return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(title)}">${image ? ico("image", 16) + " " + esc(label || href) : label}</a>`;
+      if (/^[a-z][\w+.-]*:/i.test(href) || href.startsWith("//") || href.startsWith("#") || !href) return image ? esc(label || href) : label;   // other schemes stay inert
+      let path = href.split(/[?#]/)[0].replace(/^\.\//, "").replace(/^\/+/, ""); try { path = decodeURIComponent(path); } catch (e) { /* keep it as written */ }
+      return ctx.card ? `<a href="#" data-act="mail-file" data-card="${esc(ctx.card)}" data-project="${esc(ctx.project)}" data-path="${esc(path)}" title="${esc(path)}">${image ? ico("image", 16) + " " + esc(label || path) : label}</a>` : `<span class="inert-link" title="${esc(path)}">${image ? esc(label || path) : label}</span>`;
+    };
+    while (i < text.length) {
+      const c = text[i], rest = text.slice(i); let mt;
+      if (c === "\\" && /[\\`*_{}\[\]()#+\-.!|~<>]/.test(text[i + 1] || "")) { plain += text[i + 1]; i += 2; continue; }
+      if (c === "\\" && text[i + 1] === "\n") { flush(); out.push("<br>"); i += 2; continue; }
+      if (c === "`" && (mt = /^(`+)([\s\S]*?[^`])\1(?!`)/.exec(rest))) { flush(); out.push(`<code>${esc(mt[2].replace(/\n/g, " ").replace(/^ (.+) $/, "$1"))}</code>`); i += mt[0].length; continue; }
+      if (c === "!" && (mt = /^!\[([^\]]*)\]\(\s*(<[^>]*>|[^\s)]*)(?:\s+"[^"]*")?\s*\)/.exec(rest))) { flush(); out.push(link(mt[1], mt[2], true)); i += mt[0].length; continue; }
+      if (c === "[" && (mt = /^\[((?:\\.|`[^`]*`|[^\]\\])*)\]\(\s*(<[^>]*>|[^\s)]*(?:\([^\s)]*\)[^\s)]*)*)(?:\s+"[^"]*")?\s*\)/.exec(rest))) { flush(); out.push(link(mdInline(mt[1], { ...ctx, nolinks: true }), mt[2], false)); i += mt[0].length; continue; }
+      if (c === "<" && (mt = /^<((?:https?|mailto):[^\s<>]+)>/i.exec(rest))) { flush(); out.push(link(esc(mt[1]), mt[1], false)); i += mt[0].length; continue; }
+      if (!ctx.nolinks && /[hw]/i.test(c) && !/[\w/]$/.test(plain) && (mt = /^(?:https?:\/\/|www\.)[^\s<]*[^\s<?!.,:;*_~'")\]]/i.exec(rest))) { flush(); const u = mt[0]; out.push(link(esc(u), /^www\./i.test(u) ? "https://" + u : u, false)); i += u.length; continue; }
+      if ((c === "*" || c === "_" || c === "~") && (mt = /^(\*\*|__|~~|\*|_|~)(?=\S)([\s\S]*?\S)\1(?!\1)/.exec(rest)) && !(c === "_" && /\w$/.test(plain))) {
+        const tag = mt[1] === "~~" || mt[1] === "~" ? "del" : mt[1].length === 2 ? "strong" : "em"; flush(); out.push(`<${tag}>${mdInline(mt[2], ctx)}</${tag}>`); i += mt[0].length; continue;
+      }
+      if (c === "\n") { const hard = / {2,}$/.test(plain); plain = plain.replace(/ +$/, ""); flush(); out.push(hard ? "<br>" : "\n"); i++; continue; }
+      plain += c; i++;
+    }
+    plain = plain.replace(/ +$/, ""); flush(); return out.join("");
+  }
+  const mdText = (t) => esc(t);
+
+  // charts: vega-lite, vega and mermaid drawn to static SVG in the page, like the apps' bundled renderer. The
+  // libraries load from jsDelivr (pinned, with subresource integrity) the first time a message has a chart; the
+  // SVGs are cached by source and theme. External data, images and links are blocked; a chart that can't be
+  // drawn keeps its readable source.
+  const CHART_LIBS = {
+    vega: ["https://cdn.jsdelivr.net/npm/vega@5.33.1/build/vega.min.js", "sha384-NMXhl2TbCXxcN7o4ROC56Funm78m4AylL8gMg/7Kn4YU+wrm23K9l7cY8lDRXQ9d"],
+    "vega-lite": ["https://cdn.jsdelivr.net/npm/vega-lite@5.23.0/build/vega-lite.min.js", "sha384-D9LYH0esGjcxQJsBuxOuXtCDJGXRWW1+KhluzWPqi0rLJmiR/ygPChefaD+rFFDQ"],
+    mermaid: ["https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js", "sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2"],
+  };
+  const CHARTS = new Map(), LIBS = {};
+  function loadLib(name) {
+    return (LIBS[name] ||= new Promise((ok, fail) => {
+      const s = document.createElement("script"); s.src = CHART_LIBS[name][0]; s.integrity = CHART_LIBS[name][1]; s.crossOrigin = "anonymous";
+      s.onload = ok; s.onerror = () => { delete LIBS[name]; fail(new Error("The chart renderer could not be loaded (offline?)")); }; document.head.appendChild(s);
+    }));
+  }
+  function mailChart(kind, src) {
+    const dark = document.documentElement.dataset.theme === "dark", key = kind + (dark ? ":dark:" : ":light:") + src;
+    let c = CHARTS.get(key); if (c) return c;
+    c = {}; CHARTS.set(key, c);
+    drawChart(kind, src, dark).then((svg) => { c.svg = svg; }, (e) => { c.error = `Chart not drawn: ${String(e?.message || e).split("\n")[0].slice(0, 200)}`; }).then(render);
+    return c;
+  }
+  // text colours follow the message surface unless the chart sets its own background; the author's config wins
+  function chartTheme(dark) {
+    // SVG presentation attributes take no var(): the values of --on-surface and --on-surface-variant (app.css)
+    return dark ? { label: "#E4E2E6", second: "#C7C5D0", grid: "rgba(255,255,255,.16)", font: "Roboto, system-ui, sans-serif" }
+      : { label: "#1B1B1F", second: "#46464F", grid: "rgba(0,0,0,.14)", font: "Roboto, system-ui, sans-serif" };
+  }
+  async function drawChart(kind, src, dark) {
+    if (kind === "mermaid") {
+      if (src.length > 100000) throw new Error("the diagram is longer than 100,000 characters");
+      await loadLib("mermaid");
+      window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "default", fontFamily: "Roboto, system-ui, sans-serif" });
+      const { svg } = await window.mermaid.render("mmd" + Math.random().toString(36).slice(2), src);
+      return chartSafe(svg);
+    }
+    if (src.length > 1e6) throw new Error("the chart JSON is larger than 1 MB");
+    const spec = JSON.parse(src), depth = (x, d) => {
+      if (d > 100) throw new Error("the chart JSON is nested deeper than 100 levels");
+      if (x && typeof x === "object") Object.entries(x).forEach(([k, y]) => { if (k === "url" && typeof y === "string") throw new Error("external datasets and resources are blocked; use inline data"); depth(y, d + 1); });
+    };
+    depth(spec, 0);
+    const t = chartTheme(dark), own = spec.background != null;   // an explicit background stays opaque with the default text colours
+    const axis = { domainColor: t.grid, tickColor: t.grid, gridColor: t.grid, labelColor: t.second, titleColor: t.label, labelFont: t.font, titleFont: t.font };
+    const legend = { labelColor: t.second, titleColor: t.label, labelFont: t.font, titleFont: t.font };
+    const title = { color: t.label, subtitleColor: t.second, font: t.font, subtitleFont: t.font };
+    await loadLib("vega");
+    let vspec = spec;
+    if (kind === "vega-lite") {
+      await loadLib("vega-lite");
+      const cfg = own ? { font: t.font } : { background: null, font: t.font, axis, legend, title, header: { labelColor: t.second, titleColor: t.label }, text: { color: t.label }, view: { stroke: t.grid } };
+      vspec = window.vegaLite.compile(spec, { config: cfg }).spec;
+    } else if (!own) vspec = { ...spec, background: null, config: { axis, legend, title, text: { fill: t.label }, ...(spec.config || {}) } };
+    const loader = window.vega.loader(); const blocked = () => Promise.reject(new Error("external datasets and resources are blocked; use inline data"));
+    loader.load = blocked; loader.sanitize = blocked; loader.http = blocked; loader.file = blocked;
+    const view = new window.vega.View(window.vega.parse(vspec), { renderer: "none", loader, logLevel: window.vega.Error });
+    try { return chartSafe(await view.toSVG()); } finally { view.finalize(); }
+  }
+  // no links, images or scripts out of a chart: only fragment references (gradients, markers, clip paths) stay
+  const chartSafe = (svg) => String(svg).replace(/<script[\s\S]*?<\/script>/gi, "").replace(/\s(?:xlink:)?href\s*=\s*("(?!#)[^"]*"|'(?!#)[^']*')/gi, "").replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, "");
+
+  // ---- Channels (not exposed by the bridge yet)
   const channelsScreen = (opts) => `<div class="screen">${appbar({ title: "Channels", large: true, back: opts.back })}<div class="content" data-scroll="channels">${emptyState("tag", "No channels", "Agent channels are off for every project.")}</div></div>`;
 
   // ---- Tools (ToolsScreen.kt)
@@ -1968,7 +2319,11 @@
     S.menu = m; setTimeout(() => document.addEventListener("click", closeMenu, { once: true }), 0);
   }
   function closeMenu() { if (S.menu) { S.menu.remove(); S.menu = null; } }
-  function snackbar(text) { const s = $("#snackbar"); s.innerHTML = `<span>${esc(text)}</span><button class="iconbtn small x" data-act="close-snack">${ico("close", 20)}</button>`; s.classList.add("show"); clearTimeout(s._t); s._t = setTimeout(() => s.classList.remove("show"), 6000); }
+  function snackbar(text, action) {
+    const s = $("#snackbar"); S.snackAction = action?.onClick || null;
+    s.innerHTML = `<span>${esc(text)}</span>${action ? `<button class="btn text" data-act="snack-action">${esc(action.label)}</button>` : ""}<button class="iconbtn small x" data-act="close-snack">${ico("close", 20)}</button>`;
+    s.classList.add("show"); clearTimeout(s._t); s._t = setTimeout(() => { s.classList.remove("show"); S.snackAction = null; }, action ? 8000 : 6000);
+  }
   function cardMenu(c) {
     const items = [];
     const dfs = c.kind !== "chat" ? dfStageOfBoard(c.board_id) : [null, null];
@@ -2158,6 +2513,15 @@
       case "close-dialog": if (el.tagName === "BUTTON" || e.target === el) { if ($("[data-claude-login]")) claudeLoginCancel(); else closeDialog(); } break; // the Cancel button or the scrim itself; clicks inside the dialog body do nothing
       case "edit-save": saveCardEdit(id); break;
       case "close-snack": $("#snackbar").classList.remove("show"); break;
+      case "snack-action": { const f = S.snackAction; S.snackAction = null; $("#snackbar").classList.remove("show"); f?.(); break; }
+      case "mail-box": mailState().box = el.dataset.box; render(); break;
+      case "mail-open": mailOpen(id); break;
+      case "mail-quick": { const m = mailMsg(id); if (!m) break; if (el.dataset.do === "read") mailChange([m], { read: !m.read }, m.read ? "Marked as unread" : "Marked as read");
+        else if (m.folder === "inbox") mailMove(m, "archive", true); else mailMove(m, "inbox", false); break; }
+      case "mail-do": { const m = mailMsg(id); if (!m) break; if (el.dataset.do === "archive") mailMove(m, "archive", true); else if (m.folder === "trash") mailDelete([m.id]); else mailMove(m, "trash", true); break; }
+      case "mail-conv": if (id && conv(id)) openConversation(id); break;
+      case "mail-file": { e.preventDefault(); const path = el.dataset.path, dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+        push({ kind: "tool", page: "files", cardId: el.dataset.card, projectId: el.dataset.project || conv(el.dataset.card)?.project_id, path: dir, file: path }); break; }
       case "when": S.creation.runNow = el.dataset.i === "0"; render(); break;
       case "workspace": S.creation.workspace = el.dataset.i === "0" ? "worktree" : "project"; render(); break;
       case "toggle": S.creation[el.dataset.field] = !S.creation[el.dataset.field]; render(); break;
@@ -2203,6 +2567,9 @@
       { id: "toggle", label: s.enabled ? "Pause" : "Resume", icon: s.enabled ? "pause" : "play_circle", onClick: () => scheduleAction(id, s.enabled ? "pause" : "resume") }, "-",
       { id: "delete", label: "Delete schedule", icon: "delete", destructive: true, onClick: () => { if (!confirm(`Delete the schedule "${s.name}"? Its cards and history stay.`)) return; scheduleAction(id, "delete", () => { const st = stack(); S.stacks[S.tab] = st.slice(0, -1); snackbar("Schedule deleted"); }); } }]); }
     else if (menu === "dreamfall") dfMenu(el, id);
+    else if (menu === "mail-filter") mailFilterMenu(el);
+    else if (menu === "mail-more") mailMoreMenu(el);
+    else if (menu === "mail-message") mailMessageMenu(el, id);
     else if (menu === "dfcard") { const c = conv(id); if (c) showMenu(el, dfCardMenu(c)); }
     else if (menu === "project") showMenu(el, [{ id: "open", label: "Open project", icon: "folder_open", onClick: () => showFrom(null, { kind: "project", id }) }, { id: "new-board", label: "New board…", icon: "view_kanban", onClick: () => newBoard(id) }, { id: "new-df", label: "New Dreamfall board…", icon: "waterfall_chart", onClick: () => dfForm(id) }, { id: "copy", label: "Copy path", icon: "content_copy", onClick: () => navigator.clipboard?.writeText(project(id)?.path || "") }]);
     else if (menu === "inbox-filter") showMenu(el, [{ title: "Project" }, { id: "all", label: "All projects", checked: !S.inboxProject, onClick: () => { S.inboxProject = ""; render(); } }, ...(S.data.projects || []).map((p) => ({ id: "p-" + p.id, label: p.name, checked: S.inboxProject === p.id, onClick: () => { S.inboxProject = p.id; render(); } })), "-", { id: "theme", label: "Theme: " + (load("theme", "system")), icon: "brightness_6", onClick: () => { const n = { system: "dark", dark: "light", light: "system" }[load("theme", "system")]; save("theme", n); applyTheme(); } }]);

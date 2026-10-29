@@ -84,6 +84,22 @@ RUN set -eu; \
     rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${G}"; \
     gh --version
 
+# vl-convert for the agents: Vega-Lite and Vega specs to SVG, PNG or PDF with bundled fonts and no browser, so an agent
+# can look at a chart before it mails it (Dieter Mail draws vega-lite fences) or shows it in the chat. Release zip;
+# sha256 = the release's asset digests. The zip is unpacked with Python (no unzip in the image).
+ARG VL_CONVERT_VERSION=1.9.0
+RUN set -eu; \
+    case "${BUILD_ARCH}" in \
+      aarch64) V=linux-aarch64; VSHA=99a5f96436efbb46fa469b88c28c9c9d864c02c283f18c38fd2b730eeb0ea320 ;; \
+      amd64)   V=linux-64;      VSHA=f557637a159c7510a1486e1e41a86c3919abd71c18abc0826b499c76c712aa53 ;; \
+    esac; \
+    curl -fsSL -o /tmp/vlc.zip "https://github.com/vega/vl-convert/releases/download/v${VL_CONVERT_VERSION}/vl-convert_${V}.zip"; \
+    echo "${VSHA}  /tmp/vlc.zip" | sha256sum -c -; \
+    python3 -c "import zipfile; zipfile.ZipFile('/tmp/vlc.zip').extract('bin/vl-convert', '/tmp/vlc')"; \
+    install -m 755 /tmp/vlc/bin/vl-convert /usr/local/bin/vl-convert; \
+    rm -rf /tmp/vlc.zip /tmp/vlc; \
+    vl-convert --version
+
 # hass-cli for the agents (REST API of HA core; the bridge sets HASS_SERVER to the Supervisor's core
 # proxy and HASS_TOKEN to the add-on's token, homeassistant_api in config.yaml). PyPI, version-pinned.
 # The Supervisor CLI `ha` is deliberately not included: it would need hassio_api and hand the agents

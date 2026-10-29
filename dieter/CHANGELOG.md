@@ -2,6 +2,21 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.47 (2026-10-29)
+
+- **Mail tab**: the page lists Dieter Mail. Until now the tab was a placeholder that showed "No mail" while the
+  add-on's mailbox held messages. Modelled on the Android app: Inbox, Flagged, Unread, Archive and Trash with
+  counts, date groups, search, a project/sender/important filter, an unread badge on the tab, read/unread, flag,
+  archive, Trash and delete with Undo, Mark all read and Empty Trash. A message shows its sender, **Open
+  conversation** and the body as GitHub-flavored Markdown, with vega-lite, vega and mermaid charts drawn as SVG
+  (renderers from jsDelivr, pinned with integrity hashes; external data blocked; a broken chart keeps its source).
+  Bridge: `/api/state` carries the mail headers (listed every 10 s), `GET /api/mail/ID`, `POST /api/mail/mark`,
+  `POST /api/mail/delete`.
+- **vl-convert** for the agents (1.9.0, pinned by checksum, ≈ 80 MB): `vl-convert vl2png -i chart.json -o chart.png`
+  draws a Vega-Lite or Vega chart with bundled fonts and no browser. Agents that mail reports used to assemble their
+  own Vega setup with npm and an SVG rasterizer to see their charts first. Claude Code's note (`/data/.claude/CLAUDE.md`,
+  replaced while unedited) now tells agents to render a chart and look at it before mailing it as a `vega-lite` fence.
+
 ## 0.6.429.46 (2026-10-29)
 
 - **The bridge no longer keeps a Pi's CPU busy** (load 4-5 on 4 cores, 72 °C, overnight since 0.6.429.41). Every
