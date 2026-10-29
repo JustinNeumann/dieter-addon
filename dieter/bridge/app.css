@@ -501,3 +501,4 @@ body.drag-active, body.drag-active * { cursor: grabbing !important; }
 .df-dialog .seg { margin-top: 4px; }
 .df-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 2px 0; font: 400 14px/20px var(--body); color: var(--label); cursor: pointer; }
 .df-logic { min-height: 180px !important; font: 400 14px/20px var(--body) !important; }
+.df-gate .df-gate-extra { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--secondary-label); font-size: 12px; }

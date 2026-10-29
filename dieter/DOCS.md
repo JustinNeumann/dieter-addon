@@ -168,7 +168,11 @@ Dreamfall board…** (or New board → **Dreamfall board**) creates three ordina
 **categories** to enumerate (one per line, or a categories file of the project), the **enumeration goal** (new ideas per
 category and night) and the **navigation logic**: in plain language, what makes an idea worth your time, what to drop
 and how selective to be. It starts with sensible criteria (value, realism, novelty, risk; about one idea in four) for you
-to rewrite. A topic line, the times, the agent and the stage boards are optional.
+to rewrite. A fourth, optional section, **Implementation**, holds instructions for every card you pick (for example
+"when done, add a chart of the result and mail me a short report with it"; they are added to the picked card's brief)
+and the switch **Picked cards may mail me**, which creates picked cards with mail access so their agents can send you
+reports in Dieter Mail, where vega-lite and mermaid charts are drawn. Both apply to cards picked from then on. A topic
+line, the times, the agent and the stage boards are optional.
 
 - **Enumeration**: an agent writes new ideas every night (at least *n* per category, as Todo cards
   `[Category] Title`), after checking every idea the board ever had so it does not repeat one.
@@ -187,7 +191,7 @@ collapsible groups under each queue (the newest 40). Tapping an idea opens its b
 the agent's reason and score, the **Provenance** (the copies across the stages) and the **Trail**: who
 created, judged, transferred, picked, parked or started it, when, and why. The board's ⋮ runs a stage
 now, pauses or resumes both schedules, changes the settings (name, topic, categories or a categories file
-of the project, ideas per category, navigation logic, times, time zone, agent; optionally a mail with the night's result)
+of the project, ideas per category, navigation logic, implementation instructions and mail, times, time zone, agent; optionally a mail with the night's result)
 and opens a stage as a normal Kanban board. **Remove Dreamfall…** deletes the schedules; the three boards
 and their cards stay. New board can also take existing boards of the project (with a Review lane) as
 stages instead of creating new ones.
