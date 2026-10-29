@@ -4,7 +4,7 @@
 # installs (the Supervisor pulls image:<version> built by .github/workflows/builder.yaml). For a local
 # build on the device (DEPLOY.md) drop the image: line, otherwise the Supervisor pulls instead of building.
 name: Dieter
-version: "0.6.429.45"
+version: "0.6.429.46"
 slug: dieter
 description: Dieter coding agents (daemon + page) behind Home Assistant Ingress
 url: https://github.com/JustinNeumann/dieter-addon
@@ -34,6 +34,7 @@ options:
   gateway_host_ip: ""
   machine_name: "home-assistant"
   projects: []
+  worktree_retention_days: 14
   log_level: info
 schema:
   git_user: str?
@@ -49,6 +50,7 @@ schema:
     - name: str
       git_url: str
       branch: str?
+  worktree_retention_days: int(0,3650)?
   log_level: list(debug|info|warning)?
 backup_exclude:
   - "dieter/runtime/harness/**"

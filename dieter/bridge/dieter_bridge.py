@@ -90,6 +90,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import dreamfall   # Dreamfall boards (bridge/dreamfall.py): pipelines, records, the agents' `dreamfall` command
+import housekeeping   # work folders of finished worktree cards (bridge/housekeeping.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTIONS_FILE = "/data/options.json"              # written by the Supervisor from the add-on's options
@@ -813,6 +814,26 @@ def prune_harness_staged():
         if n != HARNESS_VERSION:
             subprocess.run(["rm", "-rf", os.path.join(parent, n)], check=True, timeout=600)
             log(f"harness: removed the staged runtime {n}")
+
+
+def housekeeping_loop():
+    """Remove the work folders of worktree cards that were Done (or archived) and untouched for `worktree_retention_days`
+    days (14; 0 turns it off). The daemon keeps every folder until someone cleans it up; see bridge/housekeeping.py."""
+    try:
+        days = int(OPTS.get("worktree_retention_days", 14))
+    except (TypeError, ValueError):
+        days = 14
+    if days <= 0:
+        log("housekeeping: work folder retention is off (worktree_retention_days: 0)")
+        return
+    sweeper = housekeeping.Sweeper(run, log, days=days)
+    time.sleep(600)   # the daemon and the first board poll come first
+    while True:
+        try:
+            sweeper.sweep()
+        except Exception as e:
+            log("housekeeping: sweep failed:", e)
+        time.sleep(3600)
 
 
 def seed_managed_bun():
@@ -3087,6 +3108,7 @@ def main():
         except Exception as e:
             log("harness: seeding the managed Bun failed, OMP discovery will download it itself:", e)
         threading.Thread(target=Daemon().loop, daemon=True).start()
+        threading.Thread(target=housekeeping_loop, daemon=True).start()
 
         def after_daemon():
             if Daemon.wait_healthy():
