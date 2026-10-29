@@ -331,6 +331,11 @@ archived) without anything happening in it since. The default is 14 days; the ch
 or GitHub has a merged pull request ending at the folder's last commit (squash merges; that removal keeps a recovery
 copy in `/data/dieter/recovery`). Unmerged work and running tasks are kept.
 
+The cards of a Dreamfall Implementation board follow the same retention from the moment they are started: nobody
+moves a picked card to Done, so a started card whose last activity is older than the retention loses its folder
+whatever lane it is in. A card that only produced a report, a chart or a mail has no commits and is removed; one with
+unmerged commits stays.
+
 ## Agent instructions
 
 Tools → Settings → **Agent instructions** edits the text Dieter puts at the start of every turn's

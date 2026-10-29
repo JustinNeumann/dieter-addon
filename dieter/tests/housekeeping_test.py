@@ -37,9 +37,10 @@ class Fake:
         raise AssertionError(args)
 
 
-def sweeper(fake, merged=False, days=14):
+def sweeper(fake, merged=False, days=14, boards=()):
     logs = []
-    s = hk.Sweeper(fake.run, lambda *a: logs.append(" ".join(map(str, a))), days=days, merged_head=lambda *a: merged, now=lambda: NOW)
+    s = hk.Sweeper(fake.run, lambda *a: logs.append(" ".join(map(str, a))), days=days, merged_head=lambda *a: merged, now=lambda: NOW,
+                   implementation_boards=lambda: boards)
     s.logs = logs
     return s
 
@@ -74,6 +75,27 @@ class Sweep(unittest.TestCase):
     def test_archived_card_in_any_lane(self):
         f = Fake({"c_a": card("review", archived=True, updatedAt=OLD)})
         self.assertEqual(sweeper(f).sweep(), {"c_a": "cleanup"})
+
+    def test_started_dreamfall_implementation_cards_count_in_any_lane(self):
+        cards = {"c_rev": card("review", boardId="b_impl"), "c_run": card("running", boardId="b_impl"), "c_todo": card("todo", boardId="b_impl"),
+                 "c_recent": card("review", RECENT, boardId="b_impl"), "c_busy": card("running", runtime="running", boardId="b_impl"),
+                 "c_other": card("review", boardId="b_other")}
+        f = Fake(cards)
+        self.assertEqual(sweeper(f, boards={"b_impl"}).sweep(), {"c_rev": "cleanup", "c_run": "cleanup"})
+        self.assertEqual(sweeper(Fake(cards)).sweep(), {})   # without the Dreamfall boards only Done and archived count
+
+    def test_unmerged_dreamfall_work_is_kept(self):
+        f = Fake({"c_a": card("review", boardId="b_impl")}, cleanup={"c_a": ("failed", "workspace branch is not merged into its base")})
+        self.assertEqual(sweeper(f, boards={"b_impl"}).sweep(), {})
+        self.assertEqual(f.calls, [("cleanup", "c_a")])
+
+    def test_dreamfall_lookup_failure_keeps_the_rest_working(self):
+        def boom():
+            raise RuntimeError("kv down")
+        f = Fake({"c_a": card(), "c_b": card("review", boardId="b_impl")})
+        s = sweeper(f)
+        s.implementation_boards = boom
+        self.assertEqual(s.sweep(), {"c_a": "cleanup"})
 
     def test_retention_days(self):
         f = Fake({"c_a": card(at=RECENT)})

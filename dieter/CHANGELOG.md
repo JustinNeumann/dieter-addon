@@ -9,6 +9,9 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
   folder 30 days after its task went to Done or was archived. It replaces the add-on option `worktree_retention_days`
   of 0.6.429.52 (an install that changed it falls back to the default of 14 days until set here). A change is
   applied at once, not at the next hourly sweep.
+- The same retention applies to the cards of a **Dreamfall Implementation board**: once started (any lane but Todo) and
+  untouched for that long, their work folder goes whatever lane they sit in (nobody moves picked cards to Done; they stay
+  in Review). Merged or commit-free work only, like every folder: a picked card with unmerged commits stays.
 
 ## 0.6.429.52 (2026-10-29)
 

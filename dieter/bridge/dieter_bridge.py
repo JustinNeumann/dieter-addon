@@ -844,10 +844,11 @@ def prune_harness_staged():
 
 
 def housekeeping_loop():
-    """Remove the work folders of worktree cards that were Done (or archived) and untouched for the retention set in
-    Settings (14 days; 0 keeps everything), once an hour and right after the setting changes. The daemon keeps every
+    """Remove the work folders of worktree cards that were Done (or archived; on a Dreamfall Implementation board: started)
+    and untouched for the retention set in Settings (14 days; 0 keeps everything), once an hour and right after the setting changes. The daemon keeps every
     folder until someone cleans it up; see bridge/housekeeping.py."""
-    sweeper = housekeeping.Sweeper(run, log, RETENTION_DEFAULT_DAYS)
+    sweeper = housekeeping.Sweeper(run, log, RETENTION_DEFAULT_DAYS, implementation_boards=lambda: {
+        s["board_id"] for p in dreamfall.list_pipelines() for s in p.get("stages") or [] if s.get("role") == "implementation" and s.get("board_id")})
     time.sleep(600)   # the daemon and the first board poll come first
     while True:
         sweeper.days = settings()["worktree_retention_days"]
