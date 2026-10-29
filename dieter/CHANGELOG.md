@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.46 (2026-10-29)
+
+- Dreamfall: a **weekday picker** below the times in New Dreamfall board and Settings, one check box per day, Monday to
+  Sunday, all selected by default. The two agents run only on the checked days (at least one is required); the stage
+  headers show them ("Mon Wed Fri 02:00" instead of "daily 02:00").
+
 ## 0.6.429.45 (2026-10-29)
 
 - Dreamfall: a fourth section in New Dreamfall board and Settings, **Implementation**: instructions for every card you

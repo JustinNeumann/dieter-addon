@@ -172,7 +172,7 @@ to rewrite. A fourth, optional section, **Implementation**, holds instructions f
 "when done, add a chart of the result and mail me a short report with it"; they are added to the picked card's brief)
 and the switch **Picked cards may mail me**, which creates picked cards with mail access so their agents can send you
 reports in Dieter Mail, where vega-lite and mermaid charts are drawn. Both apply to cards picked from then on. A topic
-line, the times, the agent and the stage boards are optional.
+line, the times, the weekdays (all checked by default), the agent and the stage boards are optional.
 
 - **Enumeration**: an agent writes new ideas every night (at least *n* per category, as Todo cards
   `[Category] Title`), after checking every idea the board ever had so it does not repeat one.
