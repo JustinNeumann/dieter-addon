@@ -78,6 +78,21 @@ class Settings(unittest.TestCase):
         self.assertEqual(df.cron_of("4:45"), "45 4 * * *")
         self.assertEqual(df.hhmm_of("45 4 * * *"), "04:45")
 
+    def test_weekdays(self):
+        self.assertEqual(df.cron_of("4:45", [1, 2, 3, 4, 5]), "45 4 * * 1,2,3,4,5")
+        self.assertEqual(df.cron_of("4:45", [0, 6, 1]), "45 4 * * 1,6,0")
+        self.assertEqual(df.cron_of("4:45", [0, 1, 2, 3, 4, 5, 6]), "45 4 * * *")
+        self.assertEqual(df.days_of("45 4 * * 1,6,0"), [1, 6, 0])
+        self.assertEqual(df.days_of("45 4 * * *"), [1, 2, 3, 4, 5, 6, 0])
+        self.assertEqual(df.hhmm_of("45 4 * * 1,6,0"), "04:45")
+        st = df.clean_settings({"name": "x", "categories": "a", "days": [1, 3]})
+        self.assertEqual((st["enumeration_cron"], st["navigation_cron"]), ("0 2 * * 1,3", "0 5 * * 1,3"))
+        pipe = {**PIPE, "stages": [{**s, "cron": "0 2 * * 1,3"} if s.get("role") == "enumeration" else s for s in PIPE["stages"]]}
+        self.assertEqual(df.clean_settings({"name": "y"}, pipe)["enumeration_cron"], "0 2 * * 1,3")
+        for bad in ([], [7], ["1"], "1", [True]):
+            with self.assertRaises(df.DfError, msg=bad):
+                df.clean_settings({"name": "x", "categories": "a", "days": bad})
+
     def test_refusals(self):
         for bad in ({"name": "", "categories": "a"}, {"name": "x"}, {"name": "x", "categories": "a", "timezone": "Not a zone!"},
                     {"name": "x", "categories_file": "../secret"}, {"name": "x", "categories": "a", "enumeration_time": "25:00"}):

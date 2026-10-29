@@ -495,6 +495,9 @@
   const dfRec = (id) => dfData().records?.[id] || null;
   const dfIsRun = (s, c) => { const t = (c.title || "").trim(); return !!t && !!s && (t === s.run_title || (s.old_run_titles || []).includes(t)); };
   function dfSplit(c) { const t = cardTitle(c); const m = t.match(/^\s*\[([^\]]{1,60})\]\s*(.*)$/); const cat = dfRec(c.id)?.category || (m ? m[1].trim() : ""); return [cat, m ? m[2].trim() || t : t]; }
+  const DF_DAYS = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [0, "Sun"]];
+  const dfDays = (cron) => { const w = String(cron || "").split(/\s+/)[4] || "*"; return /^[0-7](,[0-7])*$/.test(w) ? DF_DAYS.map((d) => d[0]).filter((d) => w.split(",").some((x) => Number(x) % 7 === d)) : DF_DAYS.map((d) => d[0]); };
+  const dfWhenLbl = (cron) => { const d = dfDays(cron); return d.length === 7 ? "daily" : DF_DAYS.filter((x) => d.includes(x[0])).map((x) => x[1]).join(" "); };
   const dfHHMM = (cron) => { const p = String(cron || "").split(/\s+/); return p.length > 1 && /^\d+$/.test(p[0]) && /^\d+$/.test(p[1]) ? `${p[1].padStart(2, "0")}:${p[0].padStart(2, "0")}` : ""; };
   const dfShort = (id) => String(id || "").slice(0, 10);
   const byTime = (k) => (a, b) => (Date.parse(b[k] || b.updated_at || 0) || 0) - (Date.parse(a[k] || a.updated_at || 0) || 0);
@@ -527,7 +530,7 @@
     if (st.human) return `${ico("person", 16)}<span>You decide · agents never create or move cards here</span>`;
     const t = dfHHMM(st.s.cron); const prev = (p.stages || [])[(p.stages || []).indexOf(st.s) - 1];
     const what = st.role === "enumeration" ? "writes new ideas" : `judges ${prev ? prev.name : "the queue"}`;
-    return `${ico("smart_toy", 16)}<span class="ellipsis">Agent · ${t ? "daily " + t : "on demand"}${p.enabled === false ? " (paused)" : ""} · ${esc(what)}</span>`;
+    return `${ico("smart_toy", 16)}<span class="ellipsis">Agent · ${t ? dfWhenLbl(st.s.cron) + " " + t : "on demand"}${p.enabled === false ? " (paused)" : ""} · ${esc(what)}</span>`;
   }
   function dfRunLine(st) {
     const rc = st.runCard; let r = st.lastRun;
@@ -623,7 +626,7 @@
         arrow = `<div class="df-arrow"><div class="in">${ico("arrow_forward", 18)}<span class="pct">${esc(label)}</span></div></div>`;
       }
       const run = st.human ? st.lane("running") : [], done = run.filter(dfFinished).length;
-      const sub = st.human ? `${ico("person", 13)}You · human gate${run.length > done ? ` · ${run.length - done} running` : ""}${done ? ` · ${done} finished` : ""}` : `${ico("smart_toy", 13)}Agent · ${dfHHMM(st.s.cron) ? "daily " + dfHHMM(st.s.cron) : "on demand"}${st.p.enabled === false ? " · paused" : ""}`;
+      const sub = st.human ? `${ico("person", 13)}You · human gate${run.length > done ? ` · ${run.length - done} running` : ""}${done ? ` · ${done} finished` : ""}` : `${ico("smart_toy", 13)}Agent · ${dfHHMM(st.s.cron) ? dfWhenLbl(st.s.cron) + " " + dfHHMM(st.s.cron) : "on demand"}${st.p.enabled === false ? " · paused" : ""}`;
       return `${arrow}<div class="df-stage-chip" style="--stage:${st.color}" data-act="df-stage" data-id="${st.p.id}" data-stage="${st.role}"><span class="num">${ico(st.icon, 20)}</span><div class="t"><div class="n">${esc(st.name)}</div><div class="s">${sub}</div></div><div class="big">${st.queue.length}</div></div>`;
     }).join("")}</div>`;
   }
@@ -807,13 +810,13 @@
     const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch (e) { return "UTC"; } })();
     const st = (role) => (p?.stages || []).find((s) => s.role === role);
     S.repo = p ? { kind: "dreamfall", edit: p.id, project_id: p.project_id, name: p.name, goal: p.goal || "", categories: (p.categories || []).join("\n"), categories_file: p.categories_file || "",
-      per_category: String(p.per_category || 3), navigation_logic: p.navigation_logic || dfData().defaults?.navigation_logic || "", implementation_instructions: p.implementation_instructions || "", implementation_mail: !!p.implementation_mail, enumeration_time: dfHHMM(st("enumeration")?.cron) || "02:00", navigation_time: dfHHMM(st("navigation")?.cron) || "05:00", timezone: p.timezone || tz,
+      per_category: String(p.per_category || 3), navigation_logic: p.navigation_logic || dfData().defaults?.navigation_logic || "", implementation_instructions: p.implementation_instructions || "", implementation_mail: !!p.implementation_mail, enumeration_time: dfHHMM(st("enumeration")?.cron) || "02:00", navigation_time: dfHHMM(st("navigation")?.cron) || "05:00", days: dfDays(st("enumeration")?.cron), timezone: p.timezone || tz,
       provider: p.agent?.provider || "", model: p.agent?.model || "", effort: p.agent?.effort || "", enabled: p.enabled !== false, mail: !!p.mail, boards: {} }
-      : { kind: "dreamfall", project_id: projectId, name: S.repo?.name?.trim() || "Dreamfall", goal: "", categories: "", categories_file: "", per_category: "3", navigation_logic: dfData().defaults?.navigation_logic || "", implementation_instructions: "", implementation_mail: false, enumeration_time: "02:00", navigation_time: "05:00", timezone: tz,
+      : { kind: "dreamfall", project_id: projectId, name: S.repo?.name?.trim() || "Dreamfall", goal: "", categories: "", categories_file: "", per_category: "3", navigation_logic: dfData().defaults?.navigation_logic || "", implementation_instructions: "", implementation_mail: false, enumeration_time: "02:00", navigation_time: "05:00", days: DF_DAYS.map((d) => d[0]), timezone: tz,
       provider: h?.id || "", model: h ? load("model-" + h.id, h.default_model || h.models?.[0]?.id || "") : "", effort: "", enabled: true, mail: false, boards: {} };
     S.modal = "repo"; render();
   }
-  const dfReady = (r) => !!(r.name.trim() && (r.categories.trim() || r.categories_file.trim()) && Number(r.per_category) >= 1 && Number(r.per_category) <= 10 && r.navigation_logic.trim());
+  const dfReady = (r) => !!(r.name.trim() && (r.categories.trim() || r.categories_file.trim()) && Number(r.per_category) >= 1 && Number(r.per_category) <= 10 && r.navigation_logic.trim() && r.days.length);
   function dfFormScreen() {
     const r = S.repo; const pj = project(r.project_id);
     const h = (S.data.harnesses || []).find((x) => x.id === r.provider); const m = h?.models.find((x) => x.id === r.model);
@@ -841,9 +844,10 @@
       ${sectionHeader("Schedule")}<div class="m16" style="display:flex;flex-direction:column;gap:12px">
         <div style="display:flex;gap:12px"><div class="outlined-field" style="flex:1"><label>Enumeration runs at</label><input data-field="enumeration_time" type="time"></div>
           <div class="outlined-field" style="flex:1"><label>Navigation runs at</label><input data-field="navigation_time" type="time"></div></div>
+        <div class="df-days">${DF_DAYS.map(([d, n]) => `<label><input type="checkbox" data-act="df-day" data-day="${d}" ${r.days.includes(d) ? "checked" : ""}>${n}</label>`).join("")}</div>
         <div class="outlined-field"><label>Time zone</label><input data-field="timezone" autocapitalize="off" spellcheck="false"></div></div>
       ${sectionHeader("Agents")}<div class="group">${pick("Agent", HARNESS_NAMES[r.provider] || h?.name || r.provider, "provider", "auto_awesome", "first")}${pick("Model", m?.name || r.model, "model", "memory", m?.efforts?.length ? "middle" : "last")}${m?.efforts?.length ? pick("Effort", r.effort ? r.effort[0].toUpperCase() + r.effort.slice(1) : "Default", "effort", "bolt", "last") : ""}</div>
-      <div class="group" style="margin-top:12px">${sw("Run on schedule", "Enumeration and Navigation run every night at the times above", "enabled", "first")}${sw("Mail me the result", "The Navigation agent mails what it promoted", "mail", "last")}</div>
+      <div class="group" style="margin-top:12px">${sw("Run on schedule", "Enumeration and Navigation run at the times and on the days above", "enabled", "first")}${sw("Mail me the result", "The Navigation agent mails what it promoted", "mail", "last")}</div>
       ${r.edit ? "" : `${sectionHeader("Stage boards")}<div class="group">${["enumeration", "navigation", "implementation"].map((role, i) => pick({ enumeration: "Enumeration", navigation: "Navigation", implementation: "Implementation" }[role], boardName(role), "board-" + role, { enumeration: "auto_awesome", navigation: "balance", implementation: "lock_person" }[role], pos(i, 3))).join("")}</div>
       ${sectionFooter("Each stage is an ordinary board of the project (new, or one of its boards with a Review lane). Agents write to Enumeration and Navigation; Implementation is yours: only your Pick puts cards there.")}`}
       <div class="m16" style="padding:16px 16px"><button class="btn filled large" style="width:100%" data-act="submit-repo" disabled>${S.busy ? `<span class="spin"></span>` : ""}${S.busy ? (r.edit ? "Saving…" : "Creating…") : r.edit ? "Save" : "Create Dreamfall board"}</button></div></div></div>`;
@@ -863,7 +867,7 @@
     const r = S.repo; if (!r || S.busy || !dfReady(r)) return;
     S.busy = true; render();
     const body = { name: r.name.trim(), goal: r.goal.trim(), categories: r.categories, categories_file: r.categories_file.trim(), per_category: Number(r.per_category) || 3, navigation_logic: r.navigation_logic, implementation_instructions: r.implementation_instructions, implementation_mail: r.implementation_mail,
-      enumeration_time: r.enumeration_time, navigation_time: r.navigation_time, timezone: r.timezone.trim(), enabled: r.enabled, mail: r.mail, agent: { provider: r.provider, model: r.model, effort: r.effort } };
+      enumeration_time: r.enumeration_time, navigation_time: r.navigation_time, days: r.days, timezone: r.timezone.trim(), enabled: r.enabled, mail: r.mail, agent: { provider: r.provider, model: r.model, effort: r.effort } };
     try {
       if (r.edit) { await api(`api/dreamfall/${r.edit}/update`, body); S.modal = null; S.repo = null; S.busy = false; await refreshState(); render(); snackbar("Dreamfall settings saved."); return; }
       const res = await api("api/dreamfall", { ...body, project: r.project_id, boards: r.boards });
@@ -2502,6 +2506,7 @@
       case "df-run": dfRun(id, el.dataset.stage); break;
       case "df-new": dfNewTask(el.dataset.board); break;
       case "df-form-pick": dfFormPick(el.dataset.key); break;
+      case "df-day": if (S.repo) { const d = Number(el.dataset.day); S.repo.days = el.checked ? [...new Set([...S.repo.days, d])] : S.repo.days.filter((x) => x !== d); render(); } break;
       case "df-form-toggle": if (S.repo) { S.repo[el.dataset.key] = !S.repo[el.dataset.key]; render(); } break;
       case "board-type": if (el.dataset.i === "1" && S.repo?.kind === "board") dfForm(S.repo.project_id); else if (el.dataset.i === "0" && S.repo?.kind === "dreamfall" && !S.repo.edit) { const nm = S.repo.name; newBoard(S.repo.project_id); if (S.repo && nm !== "Dreamfall") { S.repo.name = nm; render(); } } break;
       case "sort": { const k = el.dataset.board + ":" + el.dataset.lane; S.boardSort[k] = !(S.boardSort[k] ?? true); render(); break; }

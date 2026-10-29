@@ -327,11 +327,27 @@ def is_run_card(p, c):
     return bool(s and t and (t == s.get("run_title") or t in (s.get("old_run_titles") or [])))
 
 
-def cron_of(hhmm):
+ALL_DAYS = [1, 2, 3, 4, 5, 6, 0]   # cron weekdays, Monday first (0 = Sunday)
+
+
+def cron_of(hhmm, days=None):
     m = TIME_RE.match(str(hhmm or "").strip())
     if not m:
         raise DfError(f"time must be HH:MM, not {hhmm!r}")
-    return f"{int(m.group(2))} {int(m.group(1))} * * *"
+    on = [d for d in ALL_DAYS if d in set(days)] if days is not None else ALL_DAYS
+    if not on:
+        raise DfError("pick at least one weekday")
+    dow = "*" if len(on) == 7 else ",".join(str(d) for d in on)
+    return f"{int(m.group(2))} {int(m.group(1))} * * {dow}"
+
+
+def days_of(cron):
+    """The weekdays of a stage's cron (cron numbers, Monday first); every day if it has no weekday list."""
+    parts = str(cron or "").split()
+    if len(parts) < 5 or not re.match(r"^[0-7](,[0-7])*$", parts[4]):
+        return list(ALL_DAYS)
+    got = {int(d) % 7 for d in parts[4].split(",")}
+    return [d for d in ALL_DAYS if d in got]
 
 
 def hhmm_of(cron):
@@ -519,10 +535,17 @@ def clean_settings(b, cur=None):
     ca = cur.get("agent") or {}
     out["agent"] = {k: str(a.get(k, ca.get(k)) or "") for k in ("provider", "model", "effort")}
     times = {"enumeration": b.get("enumeration_time"), "navigation": b.get("navigation_time")}
+    days = b.get("days")
+    if days is not None:
+        if not isinstance(days, list) or not all(isinstance(d, int) and not isinstance(d, bool) and 0 <= d <= 6 for d in days):
+            raise DfError("days must be a list of weekdays (0 = Sunday … 6 = Saturday)")
+        if not days:
+            raise DfError("pick at least one weekday")
     for role, t in times.items():
+        old = (stage(cur, role) or {}).get("cron")
         if t in (None, ""):
-            t = hhmm_of((stage(cur, role) or {}).get("cron")) or ("02:00" if role == "enumeration" else "05:00")
-        out[role + "_cron"] = cron_of(t)
+            t = hhmm_of(old) or ("02:00" if role == "enumeration" else "05:00")
+        out[role + "_cron"] = cron_of(t, days if days is not None else days_of(old) if old else None)
     return out
 
 
