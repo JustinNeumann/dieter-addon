@@ -2,6 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.43 (2026-10-29)
+
+- **Dreamfall: Pick, Park, Back to the queue and Start answer in well under a second** (5-10 s before on a Pi). A pick
+  listed the Implementation board twice (`card list` takes ~1 s against the live daemon), then waited for all four lanes
+  of both stage boards and a full state poll before the page saw it. The transfer now scans the bridge's cached cards of
+  the destination board for an earlier copy, the action reports the cards' new lanes, and the bridge applies them to its
+  cache and state at once; the boards are re-read in the background. `python3 -m unittest discover -s dieter/tests -p
+  'dreamfall_test.py'` (24).
+
 ## 0.6.429.42 (2026-10-29)
 
 - **Dreamfall boards**: a funnel for ideas next to a project's Kanban boards (project ⋮ → New Dreamfall board…, or New

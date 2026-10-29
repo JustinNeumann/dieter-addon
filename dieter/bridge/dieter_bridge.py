@@ -2264,6 +2264,27 @@ def df_poll(pid=None, boards=None):
     t.join(30)
 
 
+def df_apply(res):
+    """A person's decision is shown from what act() reported, not after the boards are listed again: the new copy
+    is read once (`card show`, fast), the moved cards change lane in the Dreamfall cache and in the state; the
+    boards are re-read in the background. df_poll waited for ~8 `card list` calls and a full state poll (5-10 s
+    on a Pi) before the page saw a pick."""
+    lanes = res.pop("lanes", None) or {}
+    cards = []
+    if res.get("id"):
+        try:
+            cards.append(norm_card(unwrap(run(["card", "show", res["id"]], timeout=20), "card")))
+        except Exception as e:
+            log(f"dreamfall: card show {res['id']}: {e}")
+    DREAMFALL.apply_local({k: v for k, v in lanes.items() if k != res.get("id") or not cards}, cards)
+    for cid, lane in lanes.items():
+        if cid != res.get("id") or not cards:
+            STATE.patch(cid, lane=lane)
+    DREAMFALL.touch_boards()
+    STATE.refresh()
+    res.pop("boards", None)
+
+
 def df_sync(*keys):
     """Show records written here at once instead of when the kv watch delivers them."""
     for k in keys:
@@ -2300,9 +2321,9 @@ def dreamfall_post(path, body, user):
             df_poll(pid)
             return res
         if action == "act":
-            res = dreamfall.act(pid, body, user)
+            res = dreamfall.act(pid, body, user, known=DREAMFALL.cards_of)
             df_sync("c." + str(body.get("card") or ""), ("c." + res["id"]) if res.get("id") else "")
-            df_poll(pid, res.pop("boards", None))
+            df_apply(res)
             return res
         raise ValueError("not found")
     except dreamfall.DfError as e:
