@@ -2,6 +2,16 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.1 (2026-10-29)
+
+- **Dieter 0.6.431 from fork release v0.6.431-antigravity.6.** The bundled daemon now contains upstream Dieter through
+  v0.6.431 (Mail chart rendering, table layout and Android scrolling in the apps); upstream changed nothing in the
+  daemon, its CLI or the harness runtime in between, so the add-on needed no other change. The fork release is
+  also the first whose own CI is green (harness catalog test for the sixth harness, release-scoped caches for the
+  publishing job). The harness runtime archive and its sources are unchanged, so the bridge reuses the staged runtime
+  instead of downloading ~775 MB again. `SHA256SUMS` was verified with cosign against the fork's release workflow at
+  the tag. The version now starts at the bundled release again: 0.6.431.1 follows 0.6.429.57.
+
 ## 0.6.429.57 (2026-10-29)
 
 - **Dieter from fork release v0.6.429-antigravity.5: the board state rebuilds ~4× faster** (0.96 s → 0.22 s on a Pi 5
