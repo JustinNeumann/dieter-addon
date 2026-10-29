@@ -74,7 +74,8 @@ when the sign-in fails for lack of network, git keeps its plain credential store
   card's changes: *Manual* (the default) leaves pushing and pull requests to explicit actions or the task,
   *Pull request* publishes them as a pull request, *Push to base* pushes validated changes to the base
   branch. **New board** and a board's ⋮ menu → **Publishing…** set a board's mode (cards created afterwards
-  inherit it), New task → *New worktree* → **Publishing** overrides it for one card. The Access switches
+  inherit it), New task → *New worktree* → **Publishing** overrides it for one card. New task and New chat start
+  with *New worktree* and *Pull request* selected; choose *Board default* there to follow the board instead. The Access switches
   of New task (vault, mail) are now passed on as well.
 
 What the token can do, an agent can do, also one led astray by text it reads; agents and the bridge run as

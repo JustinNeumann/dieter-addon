@@ -2081,7 +2081,7 @@
     const projects = S.data?.projects || []; const first = projects.find((p) => p.id === S.creation?.project_id) || mruProject() || projects[0];
     const harness = (S.data?.harnesses || []).find((h) => h.id === "claude-code") || S.data?.harnesses?.[0];
     S.creation = { chat, title: "", prompt: "", runNow: true, project_id: first?.id || "", board_id: (S.data?.boards || []).find((b) => b.project_id === first?.id)?.id || "",
-      checkout_id: first?.checkouts?.[0]?.id || "", provider: load("provider", harness?.id || "claude-code"), model: "", effort: "", workspace: "project", branch: "", base: "", publish: "", vault: false, mail: false };
+      checkout_id: first?.checkouts?.[0]?.id || "", provider: load("provider", harness?.id || "claude-code"), model: "", effort: "", workspace: "worktree", branch: "", base: "", publish: "pull_request", vault: false, mail: false };
     const h = (S.data?.harnesses || []).find((x) => x.id === S.creation.provider); S.creation.model = load("model-" + S.creation.provider, h?.default_model || h?.models?.[0]?.id || "");
     S.modal = "creation"; render(); setTimeout(() => $("#c-prompt")?.focus(), 50);
   }

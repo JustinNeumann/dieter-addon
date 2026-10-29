@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.51 (2026-10-29)
+
+- New task and New chat now start with **New worktree** and **Publishing → Pull request** selected (before: Project
+  directory and the board's default). Switch back to Project directory, or pick Board default / Manual / Push to base
+  under Publishing, for a single card.
+
 ## 0.6.429.50 (2026-10-29)
 
 - **Start (and Add) in New task and New chat answer in about 0.1 s** instead of several seconds. The bridge created the
