@@ -20,8 +20,17 @@ val uiSources =
     tasks.register<Sync>("prepareUiSources") {
         from(apps.resolve("ui/src/commonMain/kotlin"))
         into(layout.buildDirectory.dir("ui-src"))
+        inputs.property("patches", 2) // bump when the filters below change (Gradle cannot see into them)
         filesMatching("**/design/MobileTheme.kt") {
-            filter { line -> line.replace("fontFamily = FontFamily.Monospace", "fontFamily = platformMonospace()") }
+            filter { line ->
+                line.replace("fontFamily = FontFamily.Monospace", "fontFamily = platformMonospace()")
+                    // the entry point gives the loader the colour Compose draws (no flash on the next load)
+                    .replace("private fun materialScheme(", "internal fun materialScheme(")
+            }
+        }
+        // "Dynamic color" follows Home Assistant's theme on the web, not a wallpaper
+        filesMatching("**/settings/SettingsScreen.kt") {
+            filter { line -> line.replace("\"Use colors from your wallpaper\"", "\"Use Home Assistant's theme colors\"") }
         }
     }
 
@@ -57,6 +66,11 @@ kotlin {
                 implementation(compose.components.resources)
                 implementation(libs.compose.material.icons.core)
             }
+        }
+        wasmJsMain.dependencies {
+            // Material colour utilities (HCT, tonal-spot schemes) without Compose dependencies: the
+            // seeded scheme for "Dynamic color" from Home Assistant's primary colour.
+            implementation("com.materialkolor:material-color-utilities:5.0.1")
         }
     }
 }
