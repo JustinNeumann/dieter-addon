@@ -52,6 +52,7 @@ kotlin {
         }
         commonMain {
             kotlin.srcDir(apps.resolve("core/runtime/src/commonMain/kotlin"))
+            kotlin.srcDir(rootDir.resolve("addon/src/commonMain/kotlin")) // the add-on core's rules (AddonRules)
             kotlin.srcDir(uiSources)
             dependencies {
                 implementation(libs.wire.runtime)

@@ -32,6 +32,11 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
             publish(Slice.SLICE_MAIL, mail.scope)
             return Result(mail = extras.mail())
         }
+        command.open_conversation_request?.let { open ->
+            val target =
+                if (data.hasCard(open.card_id)) NotificationTarget(card_id = open.card_id) else NotificationTarget(inbox = Step())
+            return Result(notification_target = target)
+        }
         command.files?.let { files ->
             extras.filesCommand(files)
             publish(Slice.SLICE_FILES, files.scope)

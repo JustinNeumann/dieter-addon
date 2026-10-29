@@ -2,79 +2,31 @@ package com.getdieter.webhost
 
 import com.getdieter.client.v1.Command
 import com.getdieter.client.v1.CompleteSignIn
-import com.getdieter.client.v1.Done
-import com.getdieter.client.v1.Failure
-import com.getdieter.client.v1.Result
-import com.getdieter.client.v1.SignInStarted
-import com.getdieter.core.CoreRuntime
 import com.getdieter.core.client.ClientApi
-import com.getdieter.core.client.ClientFailure
-import com.getdieter.core.identity.Gateway
-import com.getdieter.core.identity.SignIn
 import java.net.URI
 
 /**
- * GitHub sign-in for a core that lives on a server. The gateway sends the browser back to an exact,
- * registered address (DIETER_NATIVE_REDIRECT_URIS); for the web host that is an address of Home
- * Assistant that reaches this add-on's page, which differs by how the person reaches HA (Nabu Casa,
- * LAN, own domain). So each sign-in starts with the address the page is on (or the add-on's pinned
- * one), and the callback's code reaches the core under the host's fixed internal callback: the core
- * only checks the callback's prefix locally and exchanges code + PKCE verifier with the gateway.
+ * GitHub sign-in for a core that lives on a server. The core chooses where the gateway sends the browser
+ * back for each attempt: the address the page is on (BeginSignIn.redirect_uri, which the page fills in),
+ * or the add-on's pinned one (RuntimeConfig). The gateway accepts only addresses it lists
+ * (DIETER_NATIVE_REDIRECT_URIS). The bridge relays that request to this host, which hands it to the core
+ * under its configured callback address, the way an app hands over the URL its system delivered.
  *
  * The session then belongs to the add-on, not to a browser: signing in once (e.g. from a desktop
  * browser) signs in every device that opens the page, the Companion app included.
  */
-internal class SignInRelay(
-    private val runtime: CoreRuntime,
-    private val api: ClientApi,
-    val pinned: String?,
-) {
-    suspend fun begin(gatewayUrl: String, pageCallback: String?): Result {
-        if (isCallback(gatewayUrl)) {
-            // The address the browser landed on, pasted into the gateway field: complete with it.
-            complete(gatewayUrl.substringAfter('?', ""))
-            return Result(done = Done())
-        }
-        val callback =
-            pinned
-                ?: pageCallback?.takeIf(::isUsableCallback)
-                ?: throw ClientFailure(
-                    Failure(
-                        Failure.Kind.KIND_INVALID,
-                        "Open Dieter through Home Assistant to sign in: this page could not tell its own address.",
-                    )
-                )
-        val gateway =
-            Gateway.parse(gatewayUrl.trim(), "Custom")
-                ?: throw ClientFailure(Failure(Failure.Kind.KIND_INVALID, "That is not a valid gateway address."))
-        val url =
-            try {
-                runtime.onCore {
-                    SignIn(runtime.storage, runtime.platform.http, runtime.credentials, callback, runtime.platform.clock)
-                        .begin(gateway)
-                }
-            } catch (error: ClientFailure) {
-                throw error
-            } catch (error: Exception) {
-                throw ClientFailure(Failure(Failure.Kind.KIND_PERMANENT, error.message ?: "Sign-in could not start."))
-            }
-        Log.line("sign-in to ${gateway.origin} started; callback $callback")
-        return Result(sign_in_started = SignInStarted(url))
-    }
-
+internal class SignInRelay(private val api: ClientApi, private val callback: String) {
     /** Completes the attempt with the callback's query (code, state). Throws [ClientFailure]. */
     suspend fun complete(query: String) {
-        api.dispatch(Command(complete_sign_in = CompleteSignIn("$INTERNAL_CALLBACK?$query")))
+        api.dispatch(Command(complete_sign_in = CompleteSignIn("$callback?$query")))
         Log.line("signed in")
     }
 
     companion object {
-        /** The core's own (never registered) callback: only its prefix is checked, locally. */
+        /** The callback address of a core whose attempts name their own return address. */
         const val INTERNAL_CALLBACK = "dieter-web://oauth/callback"
 
-        fun isCallback(url: String): Boolean =
-            url.trim().let { it.startsWith("http") && it.substringBefore('?').endsWith("/next/signin") && "code=" in it }
-
+        /** Whether the add-on's pinned address can be one: http(s), ending in next/signin, no query. */
         fun isUsableCallback(url: String): Boolean =
             runCatching {
                     val uri = URI(url)

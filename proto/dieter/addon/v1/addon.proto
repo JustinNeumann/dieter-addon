@@ -1,0 +1,276 @@
+syntax = "proto3";
+
+// The add-on's own features: its enrollment with a Dieter gateway, its SSH key, the Claude Code
+// login of its harness, its settings, agent questions and adding repositories. These are the commands
+// and slices of the add-on core (addon/ in this repository), which runs in the web host next to
+// Dieter's core and talks to the add-on's bridge. The browser sends commands and draws slices; every
+// rule, label and state change is decided here, as Dieter's clients do with Dieter's core.
+package dieter.addon.v1;
+
+option java_package = "com.getdieter.addon.v1";
+
+message Command {
+  oneof command {
+    EnrollGateway enroll_gateway = 1;
+    // Stops a running enrollment, or puts a finished one away.
+    Step close_enrollment = 2;
+    // Drops the enrollment so the add-on can enroll again (a new daemon ID).
+    Step unenroll_gateway = 3;
+    TestSsh test_ssh = 4;
+    Step begin_claude_sign_in = 5;
+    SubmitClaudeCode submit_claude_code = 6;
+    // Stops a running sign-in, or puts a finished one away.
+    Step close_claude_sign_in = 7;
+    Step sign_out_of_claude = 8;
+    SettingChange change_setting = 9;
+    AnswerQuestion answer_question = 10;
+    AddRepository add_repository = 11;
+    // Reads what the bridge does not push (gateway, SSH key, settings) again.
+    Step refresh = 12;
+  }
+}
+
+message Step {}
+
+message EnrollGateway { string gateway_url = 1; }
+
+message TestSsh { string target = 1; }
+
+message SubmitClaudeCode { string code = 1; }
+
+message SettingChange {
+  oneof setting {
+    string title_model = 1;
+    int32 worktree_retention_days = 2;
+  }
+}
+
+message AnswerQuestion {
+  string question_id = 1;
+  // By question item ID; ignored with decline.
+  map<string, Answer> answers = 2;
+  bool decline = 3;
+}
+
+message Answer {
+  repeated string option_ids = 1;
+  string freeform = 2;
+}
+
+message AddRepository {
+  // A Git URL to clone (https://, ssh:// or git@host:path); empty for a new empty repository.
+  string git_url = 1;
+  // The folder and project name; with a Git URL empty means the repository's own name.
+  string name = 2;
+  string branch = 3;
+}
+
+message Reply {
+  oneof reply {
+    Result result = 1;
+    Failure failure = 2;
+  }
+}
+
+message Result {
+  // A confirmation to show briefly, e.g. "Finished work folders are removed after 30 days."
+  string message = 1;
+}
+
+message Failure {
+  enum Kind {
+    // The input cannot work; the message says what to change.
+    KIND_INVALID = 0;
+    // The add-on tried and could not.
+    KIND_FAILED = 1;
+    // The add-on's bridge did not answer; trying again may work.
+    KIND_UNREACHABLE = 2;
+  }
+  Kind kind = 1;
+  string message = 2;
+}
+
+enum Slice {
+  SLICE_UNSPECIFIED = 0;
+  SLICE_GATEWAY = 1;
+  SLICE_SSH = 2;
+  SLICE_CLAUDE = 3;
+  SLICE_SETTINGS = 4;
+  // Scope: a conversation's ID for its questions, empty for all.
+  SLICE_QUESTIONS = 5;
+}
+
+message Update {
+  Slice slice = 1;
+  string scope = 2;
+  // Counts the updates of one observation; the first (1) is a snapshot.
+  uint64 sequence = 3;
+  oneof value {
+    GatewaySlice gateway = 4;
+    SshSlice ssh = 5;
+    ClaudeSlice claude = 6;
+    SettingsSlice settings = 7;
+    QuestionsSlice questions = 8;
+  }
+}
+
+enum Tone {
+  TONE_NEUTRAL = 0;
+  TONE_ACTIVE = 1;
+  TONE_SUCCESS = 2;
+  TONE_WARNING = 3;
+  TONE_DANGER = 4;
+}
+
+// The add-on's enrollment with a Dieter gateway: how the apps see it as a machine.
+message GatewaySlice {
+  bool loading = 1;
+  // Why the state could not be read.
+  string error = 2;
+  bool enrolled = 3;
+  // Enrolled: the machine's row, e.g. "home-assistant" and "https://gateway… · connected".
+  string title = 4;
+  string detail = 5;
+  Tone tone = 6;
+  enum Action {
+    ACTION_NONE = 0;
+    // The account lists the machine: its devices page.
+    ACTION_DEVICES = 1;
+    // The account removed or replaced the machine: drop the enrollment and enroll again.
+    ACTION_REENROLL = 2;
+  }
+  Action action = 7;
+  // Not enrolled: the name the machine gets, and the gateway address to start from. The add-on's
+  // options can fix the address (locked).
+  string machine_name = 8;
+  string gateway_url = 9;
+  bool gateway_url_locked = 10;
+  Enrollment enrollment = 11;
+}
+
+message Enrollment {
+  enum Phase {
+    PHASE_NONE = 0;
+    PHASE_STARTING = 1;
+    // Open sign_in_url and authorize the daemon; the gateway may ask for code.
+    PHASE_WAITING = 2;
+    PHASE_DONE = 3;
+    PHASE_FAILED = 4;
+  }
+  Phase phase = 1;
+  string sign_in_url = 2;
+  string code = 3;
+  // Done: what happened and what is next; failed: why.
+  string message = 4;
+}
+
+message SshSlice {
+  bool loading = 1;
+  string error = 2;
+  // Empty until the add-on has made its key (at its next start).
+  string public_key = 3;
+  string fingerprint = 4;
+  SshTest test = 5;
+}
+
+// The last connection test with the add-on's key.
+message SshTest {
+  string target = 1;
+  bool running = 2;
+  bool ok = 3;
+  // "Connected: <host>" or "Failed: <why>".
+  string message = 4;
+}
+
+// The Claude Code login of the add-on's harness.
+message ClaudeSlice {
+  bool loading = 1;
+  string error = 2;
+  bool signed_in = 3;
+  // e.g. "Signed in (max)", "Setup-token from the add-on options", "Not signed in".
+  string title = 4;
+  string detail = 5;
+  Tone tone = 6;
+  enum Action {
+    ACTION_NONE = 0;
+    ACTION_SIGN_IN = 1;
+    ACTION_SIGN_OUT = 2;
+  }
+  Action action = 7;
+  ClaudeSignIn sign_in = 8;
+}
+
+message ClaudeSignIn {
+  enum Phase {
+    PHASE_NONE = 0;
+    PHASE_STARTING = 1;
+    // Open sign_in_url, allow Claude Code, paste the code it shows.
+    PHASE_CODE = 2;
+    PHASE_SUBMITTING = 3;
+    PHASE_DONE = 4;
+    // The attempt ended; starting again is a new attempt.
+    PHASE_FAILED = 5;
+  }
+  Phase phase = 1;
+  string sign_in_url = 2;
+  // Done: what happens next; failed: why.
+  string message = 3;
+}
+
+message SettingsSlice {
+  bool loading = 1;
+  string error = 2;
+  Choice title_model = 3;
+  Choice worktree_retention = 4;
+}
+
+// A setting with fixed options.
+message Choice {
+  // The chosen option's id and label.
+  string selected = 1;
+  string selected_label = 2;
+  repeated Option options = 3;
+  // Why the chosen value does not work right now; empty when it does.
+  string warning = 4;
+}
+
+message Option {
+  string id = 1;
+  string label = 2;
+}
+
+message QuestionsSlice {
+  bool loading = 1;
+  // Oldest first.
+  repeated Question questions = 2;
+}
+
+// An agent's question (Claude Code's AskUserQuestion), relayed by the add-on's harness worker.
+message Question {
+  string id = 1;
+  // The conversation that asks.
+  string card_id = 2;
+  repeated QuestionItem items = 3;
+  // The agent takes answers to only some of the items.
+  bool allow_partial = 4;
+  // For lists: the first item's question.
+  string summary = 5;
+  string created_at = 6;
+}
+
+message QuestionItem {
+  string id = 1;
+  // A short label for the item, e.g. "Colour".
+  string chip = 2;
+  string question = 3;
+  repeated QuestionOption options = 4;
+  bool multiple = 5;
+  // Own text allowed (always when there are no options).
+  bool free_form = 6;
+}
+
+message QuestionOption {
+  string id = 1;
+  string label = 2;
+  string description = 3;
+}

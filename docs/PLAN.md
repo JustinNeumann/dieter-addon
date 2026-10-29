@@ -20,13 +20,14 @@ features over one group at a time.
 | Part | State | Where |
 |---|---|---|
 | Phase 1: bundle served at `next/` behind Ingress | live in add-on 0.6.431.2; checked through HA's frontend over LAN (first frame 1.3 s) and Nabu Casa (4.6 s); Companion app still to check by a person | add-on `dieter_bridge.py` (`serve_web`), `web/`, `tools/package.sh`, release v0.1.0 |
-| Phase 2: selection, find, accessibility | released in v0.3.0: selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
+| Phase 2: selection, find, accessibility | released in v0.3.0: selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open. Known limit: Compose 1.12 keeps a closed popup's nodes in the accessibility tree until the next popup (fixed in Compose 1.13) | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
 | Phase 3: theme from HA | live; the real HA frontend hands light and dark with its colours to the page | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
 | 4.0 web host + `RemoteCore` | built; verified against Dieter's isolated fixture gateway (real boards, conversations, sending runs a turn) and in the add-on e2e | `host/`, `proto/dieter/web/v1/host.proto`, `web/…/RemoteCore.kt`, add-on `run.sh` + bridge relay |
-| 4.0 sign-in | live: signed in with GitHub and paired as "Home Assistant (web)" on 2026-10-29; the page shows the real workspace inside HA | `SignInRelay.kt`, add-on DOCS "Signing in the new page" |
-| 4.A deep links | `<HA>/app/<slug>/next/card/<id>` and `…/next/tab/<name>` open the card or tab (release v0.2.1, add-on e2e) | `Main.kt` (`openRoute`), add-on `app.js` |
-| 4.A–J parity rest, extension points, Dreamfall, switch to `/` | not started; Mail, Tools, Inbox, boards and conversations already show real data from the fixture gateway | |
-| Upstream proposal | drafted | `docs/proposals/web-client.md` |
+| 4.0 sign-in | live: signed in with GitHub and paired as "Home Assistant (web)" on 2026-10-29. Since ADR 0005 the core chooses the return address per attempt (`BeginSignIn.redirect_uri`, `RuntimeConfig.oauthRedirectPerAttempt`); the "paste the callback URL" fallback is gone | `SignInRelay.kt`, fork `identity/SignIn.kt`, add-on DOCS "Signing in the new page" |
+| 4.A deep links | `<HA>/app/<slug>/next/card/<id>` and `…/next/tab/<name>` open the card or tab; a card link asks the core (`OpenConversationRequest` → `NotificationTarget`), unknown or archived cards open the Inbox | `Main.kt` (`openRoute`), fork `client/MailCommands.kt`, add-on `app.js` |
+| Extension points + add-on core ([ADR 0005](https://github.com/JustinNeumann/dieter/blob/web-addon/docs/adr/0005-web-client.md)) | built: `MobileExtensions` in the fork; the add-on core runs in the web host (`dieter.addon.v1`, rules in `AddonRules`); screens for gateway enrollment, SSH key, Claude sign-in, title model and work-folder retention, agent questions (Inbox + conversation), Clone repository / New empty repository; add-on e2e `next-addon.spec.mjs` | `addon/`, `proto/dieter/addon/v1/addon.proto`, `web/…/addon/`, fork `apps/kotlin/ui/…/extensions/` |
+| 4.A–J parity rest, Dreamfall, switch to `/` | not started; Mail, Tools, Inbox, boards and conversations already show real data from the fixture gateway | |
+| Upstream proposal | drafted; per-attempt redirect, extension points and deep links through the core are implemented in the fork | `docs/proposals/web-client.md` |
 
 **Deviations from the plan, and why:**
 
@@ -338,6 +339,12 @@ narrow extension API keeps this out of upstream's screens:
   `conversationWidgets` (agent questions), and an `AddonApi` client for the bridge endpoints.
 - Propose the extension points upstream once two features use them (questions + Dreamfall).
 
+Built as [ADR 0005](https://github.com/JustinNeumann/dieter/blob/web-addon/docs/adr/0005-web-client.md) decided: the
+fork's `MobileExtensions` (pages, tool-page sections, Inbox sections, conversation widgets, Projects actions, a board
+renderer) and, instead of an `AddonApi` client in the UI, an **add-on core** in the web host (`addon/`). The screens
+keep drafts and draw slices; the core owns the bridge calls, the enrollment and sign-in processes, the messages and
+the rules (`AddonRules`, also compiled into the page for button readiness).
+
 ### Parity table
 
 Legend: **Compose** = what the shared UI already has. ✅ exists in the apps (needs only real data and,
@@ -359,15 +366,15 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Feature today | Compose | Work | Test |
 |---|---|---|---|
 | Sections (needs you, running, review/recent), filters, search, pins | ✅ | none | `the Inbox lists the finished task and opens it` |
-| "Waiting for your answer" (agent questions) | ❌ | see F: questions | part of `a question from the agent…` |
+| "Waiting for your answer" (agent questions) | ✅ add-on core (`questions` slice), Inbox section | see F: questions | part of `a question from the agent…` |
 
 #### C. Projects and boards
 
 | Feature today | Compose | Work | Test |
 |---|---|---|---|
 | Project and board lists, project page, ⋮ menus | ✅ | none | |
-| **Add repository** (Git URL, name, base branch → clone into `/data/projects`) | 🟡/❌ | Compose has project creation (`AdminCreateProject`); cloning is the bridge's. Extension action calling the bridge | `a repository can be added… (chunked POST through Ingress)` |
-| **New folder** (empty Git repo, registered) | ❌ | same | `a new folder becomes a project…` |
+| **Add repository** (Git URL, name, base branch → clone into `/data/projects`) | ✅ add-on core (`AddRepository`), Projects → Add → Clone repository | Compose has project creation (`AdminCreateProject`); cloning is the bridge's. Extension action calling the bridge | `a repository can be added… (chunked POST through Ingress)` |
+| **New folder** (empty Git repo, registered) | ✅ add-on core, Projects → Add → New empty repository | same | `a new folder becomes a project…` |
 | **New board** (Review lane switch, Publishing mode) | ✅/🟡 | `AdminCreateBoard` exists; verify the Review/Publishing fields | `a new board is added next to Main…` |
 | Board order by drag (kept for all devices) | 🟡 | Compose orders projects (`SetProjectOrder`); board order is the bridge's → extension or upstream | `boards are reordered by drag and drop…` |
 | Publishing per board (Manual / Pull request / Push to base) | ✅ | verify | |
@@ -401,7 +408,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Changes / diff, Files pane, subagents, processes | ✅ | none | |
 | Attachments in messages, image previews | 🟡 | attachment actual (E); viewer | `an image attached in the chat reaches the conversation…` |
 | **Images from the agent**: tool-result images; `![](path)` from the checkout | 🟡 | verify what the apps render; the checkout-relative Markdown images are the add-on's → extension resolving through the bridge (`/api/{card,chat}/ID/image`) | |
-| **Agent questions** (Claude's AskUserQuestion relayed by the fork's worker, options + free text, decline, expiry) | ❌ | `conversationWidgets` extension + bridge `questions` endpoints; Inbox section | `a question from the agent is shown on the card…` |
+| **Agent questions** (Claude's AskUserQuestion relayed by the fork's worker, options + free text, decline, expiry) | ✅ add-on core (`questions` slice, `AnswerQuestion`), conversation widget | `conversationWidgets` extension + bridge `questions` endpoints; Inbox section | `a question from the agent is shown on the card…` |
 | Full-screen image viewer | 🟡 | verify | |
 
 #### G. Mail
@@ -418,16 +425,16 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Page | Feature today | Compose | Work | Test |
 |---|---|---|---|---|
 | Machines | machine info, CPU/GPU | ✅ | none | `Tools pages: Machines, Usage and Changes render…` |
-| Machines | **Gateway enroll / re-enroll** of the add-on's daemon | ❌ | extension page calling the bridge's `gateway` endpoints. Note: needed *before* the Compose UI can work (D2), so it also stays on the old page | `Gateway: the Machines page offers enrollment…` |
-| Machines | **SSH key** of the add-on, copy, connection test | ❌ | extension section + bridge `ssh` endpoints | `Machines shows the add-on's own SSH key…` |
+| Machines | **Gateway enroll / re-enroll** of the add-on's daemon | ✅ add-on core (`gateway` slice, `EnrollGateway`, `CloseEnrollment`, `UnenrollGateway`) | extension page calling the bridge's `gateway` endpoints. Note: needed *before* the Compose UI can work (D2), so it also stays on the old page | `Gateway: the Machines page offers enrollment…` |
+| Machines | **SSH key** of the add-on, copy, connection test | ✅ add-on core (`ssh` slice, `TestSsh`) | extension section + bridge `ssh` endpoints | `Machines shows the add-on's own SSH key…` |
 | Files | browse, dotfiles, text/images, download | ✅/🟡 | download needs a web actual (Blob + `<a download>`) | `Files browses the project's checkout…` |
 | Schedules | list, create (presets, preview), run, pause, history, delete | ✅ | verify presets and next-run preview | `Schedules: create with the mock agent…` |
 | Usage | quotas (Claude, Codex, Antigravity groups) | ✅/🟡 | verify Antigravity's grouped windows from the fork | |
-| Usage | **Claude sign-in** (`claude auth login`, paste code, cancel, logout) | ❌ | extension section + bridge `claude` endpoints | `Usage offers the Claude sign-in…` |
+| Usage | **Claude sign-in** (`claude auth login`, paste code, cancel, logout) | ✅ add-on core (`claude` slice, sign-in/code/cancel/sign-out commands) | extension section + bridge `claude` endpoints | `Usage offers the Claude sign-in…` |
 | Changes | project changes | ✅ | none | |
 | Devices | trust state, approve code, remove | ✅ | none (refusal message when not enrolled) | `Devices shows the daemon's trust state…` |
 | Settings | **Agent instructions** (prompt templates, reset) | ✅/🟡 | verify editor parity (variables, validation) | `Settings: agent instructions…` |
-| Settings | **Title model**, **Keep finished work folders** | ❌ | extension settings section + bridge `settings` | |
+| Settings | **Title model**, **Keep finished work folders** | ✅ add-on core (`settings` slice, `ChangeSetting`) | extension settings section + bridge `settings` | |
 | Settings | show reasoning, appearance, palette | ✅ | Phase 3 adds "follow HA" | |
 | Terminals / Screens | (not on today's page) | ✅ in apps | web actuals: xterm.js island; screens later or hidden on web | |
 

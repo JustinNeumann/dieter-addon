@@ -1,5 +1,8 @@
 package com.getdieter.webhost
 
+import com.getdieter.addon.core.AddonCore
+import com.getdieter.addon.core.AddonFailure
+import com.getdieter.addon.core.AddonSubscription
 import com.getdieter.client.v1.Command
 import com.getdieter.client.v1.Failure
 import com.getdieter.client.v1.Reply
@@ -9,6 +12,8 @@ import com.getdieter.core.CoreRuntime
 import com.getdieter.core.client.ClientApi
 import com.getdieter.core.client.ClientFailure
 import com.getdieter.core.client.ClientSubscription
+import com.getdieter.web.v1.AddonReplied
+import com.getdieter.web.v1.AddonUpdated
 import com.getdieter.web.v1.ClientFrame
 import com.getdieter.web.v1.Hello
 import com.getdieter.web.v1.HostFrame
@@ -22,21 +27,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
- * One browser tab: decodes [ClientFrame]s and runs them on the shared core, the way the Apple byte
- * bridge does (failures travel inside the reply). Commands keep running when the tab goes away (a
- * half-sent message must not be cut off); observations end with the connection.
+ * One browser tab: decodes [ClientFrame]s and runs them on the shared cores (Dieter's and the add-on's),
+ * the way the Apple byte bridge does (failures travel inside the reply). Commands keep running when the
+ * tab goes away (a half-sent message must not be cut off); observations end with the connection.
  */
 internal class CoreConnection(
     private val api: ClientApi,
     private val runtime: CoreRuntime,
+    private val addon: AddonCore,
     private val commands: CoroutineScope,
     private val ws: WebSocket,
     private val hello: Hello,
-    private val signIn: SignInRelay,
     private val foreground: Foreground,
 ) {
     private val subscriptions = ConcurrentHashMap<Long, ClientSubscription>()
-    @Volatile private var pageCallback: String? = null
+    private val addonSubscriptions = ConcurrentHashMap<Long, AddonSubscription>()
 
     fun run() {
         send(HostFrame(hello = hello))
@@ -50,29 +55,63 @@ internal class CoreConnection(
                         Log.line("unreadable frame (${bytes.size} bytes): $error")
                         continue
                     }
-                frame.context?.let { pageCallback = it.sign_in_callback.ifBlank { null } }
                 frame.dispatch?.let { dispatch(it.id, it.command ?: Command()) }
                 frame.observe?.let { observe(it.id, it.slice, it.scope) }
-                frame.unobserve?.let { subscriptions.remove(it.id)?.let(::closeOnCore) }
+                frame.unobserve?.let {
+                    subscriptions.remove(it.id)?.let(::closeOnCore)
+                    addonSubscriptions.remove(it.id)?.close()
+                }
                 frame.ping?.let { send(HostFrame(pong = Pong(it.id))) }
+                frame.addon_dispatch?.let { addonDispatch(it.id, it.command ?: com.getdieter.addon.v1.Command()) }
+                frame.addon_observe?.let { addonObserve(it.id, it.slice, it.scope) }
             }
         } finally {
             foreground.set(this, false)
             subscriptions.values.forEach(::closeOnCore)
             subscriptions.clear()
+            addonSubscriptions.values.forEach { it.close() }
+            addonSubscriptions.clear()
         }
+    }
+
+    private fun addonDispatch(id: Long, command: com.getdieter.addon.v1.Command) {
+        commands.launch {
+            val reply =
+                try {
+                    com.getdieter.addon.v1.Reply(result = addon.dispatch(command, hello.user_name))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: AddonFailure) {
+                    com.getdieter.addon.v1.Reply(failure = failure.failure)
+                } catch (error: Throwable) {
+                    Log.line("add-on command failed: $error")
+                    com.getdieter.addon.v1.Reply(
+                        failure = com.getdieter.addon.v1.Failure(com.getdieter.addon.v1.Failure.Kind.KIND_FAILED, "The add-on could not do that.")
+                    )
+                }
+            send(HostFrame(addon_replied = AddonReplied(id, reply)))
+        }
+    }
+
+    private fun addonObserve(id: Long, slice: com.getdieter.addon.v1.Slice, scope: String) {
+        val subscription =
+            try {
+                addon.observe(slice, scope) { update -> send(HostFrame(addon_updated = AddonUpdated(id, update))) }
+            } catch (failure: AddonFailure) {
+                Log.line("add-on slice $slice: ${failure.message}")
+                return
+            }
+        addonSubscriptions.put(id, subscription)?.close()
     }
 
     private fun dispatch(id: Long, command: Command) {
         commands.launch {
             val reply =
                 try {
-                    val begin = command.begin_sign_in
                     val shown = command.set_foreground
                     Reply(
                         result =
                             when {
-                                begin != null -> signIn.begin(begin.gateway_url, pageCallback)
                                 // many tabs share this core: the host runs it while any of them is shown
                                 shown != null -> foreground.set(this@CoreConnection, shown.foreground).let { com.getdieter.client.v1.Result(done = com.getdieter.client.v1.Done()) }
                                 else -> api.dispatch(command)

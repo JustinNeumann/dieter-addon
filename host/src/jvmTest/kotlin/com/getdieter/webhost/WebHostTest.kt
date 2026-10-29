@@ -1,11 +1,19 @@
 package com.getdieter.webhost
 
+import com.getdieter.addon.v1.Answer
+import com.getdieter.addon.v1.AnswerQuestion
+import com.getdieter.addon.v1.Command as AddonCommand
+import com.getdieter.addon.v1.Slice as AddonSlice
+import com.getdieter.addon.v1.TestSsh
+import com.getdieter.web.v1.AddonDispatch
+import com.getdieter.web.v1.AddonObserve
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
 import com.getdieter.client.v1.BeginSignIn
 import com.getdieter.client.v1.Command
 import com.getdieter.client.v1.SetShowReasoning
 import com.getdieter.client.v1.Slice
 import com.getdieter.web.v1.ClientFrame
-import com.getdieter.web.v1.Context
 import com.getdieter.web.v1.Dispatch
 import com.getdieter.web.v1.HostFrame
 import com.getdieter.web.v1.Observe
@@ -36,16 +44,76 @@ class WebHostTest {
     private var port = 0
     private val http = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
 
+    /** A stand-in for the add-on's bridge: settings, one agent question on the event stream, answers. */
+    private val answers = LinkedBlockingQueue<String>()
+    private val bridge =
+        HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+            createContext("/api/") { exchange ->
+                val path = exchange.requestURI.path.removePrefix("/api/")
+                fun reply(body: String, events: Boolean = false) {
+                    exchange.responseHeaders.add("Content-Type", if (events) "text/event-stream" else "application/json")
+                    exchange.sendResponseHeaders(200, if (events) 0 else body.toByteArray().size.toLong())
+                    exchange.responseBody.write(body.toByteArray())
+                    exchange.responseBody.flush()
+                    if (!events) exchange.close()
+                }
+                when (path) {
+                    "settings" ->
+                        reply("""{"title_model":"openai","worktree_retention_days":7,"title_models":[{"id":"openai","name":"OpenAI","available":true}]}""")
+                    "events" -> {
+                        val question = """{"id":"q-1","session":"c_x","input":{"questions":[{"id":"a","question":"Go?","options":[{"id":"y","label":"Yes"}]}]}}"""
+                        reply("event: state\ndata: {\"questions\":[$question],\"claude_auth\":null}\n\n", events = true)
+                        Thread.sleep(60_000)
+                        exchange.close()
+                    }
+                    "questions/q-1/answer" -> {
+                        answers += exchange.requestBody.readBytes().decodeToString()
+                        reply("""{"ok":true}""")
+                    }
+                    else -> {
+                        exchange.sendResponseHeaders(404, -1)
+                        exchange.close()
+                    }
+                }
+            }
+            executor = java.util.concurrent.Executors.newCachedThreadPool()
+        }
+
     @BeforeTest
     fun start() {
+        bridge.start()
         val state = Files.createTempDirectory("web-host").toFile()
-        host = WebHostServer(state, emptyMap(), secret, "127.0.0.1", 0)
+        val env = mapOf("DIETER_WEB_BRIDGE_URL" to "http://127.0.0.1:${bridge.address.port}/api/")
+        host = WebHostServer(state, env, secret, "127.0.0.1", 0)
         port = host.start()
     }
 
     @AfterTest
     fun stop() {
         host.stop()
+        bridge.stop(0)
+    }
+
+    @Test
+    fun theAddonCoreServesItsSlicesAndCommandsOverTheSameSocket() {
+        val client = connect()
+        client.next { it.hello != null }
+        client.send(ClientFrame(addon_observe = AddonObserve(id = 7, slice = AddonSlice.SLICE_SETTINGS)))
+        val settings = client.next { it.addon_updated?.update?.settings?.loading == false }.addon_updated!!
+        assertEquals(7L, settings.id)
+        assertEquals("7 days", settings.update!!.settings!!.worktree_retention!!.selected_label)
+        client.send(ClientFrame(addon_observe = AddonObserve(id = 8, slice = AddonSlice.SLICE_QUESTIONS, scope = "c_x")))
+        val asked = client.next { it.addon_updated?.update?.questions?.questions?.isNotEmpty() == true }.addon_updated!!
+        assertEquals("Go?", asked.update!!.questions!!.questions.single().summary)
+        val answer = AnswerQuestion("q-1", mapOf("a" to Answer(listOf("y"))))
+        client.send(ClientFrame(addon_dispatch = AddonDispatch(id = 9, command = AddonCommand(answer_question = answer))))
+        assertEquals("Answer sent.", client.next { it.addon_replied?.id == 9L }.addon_replied!!.reply!!.result?.message)
+        assertEquals("""{"action":"answered","answers":{"a":{"optionIds":["y"]}}}""", answers.poll(10, TimeUnit.SECONDS))
+        // an invalid command fails with the add-on core's reason, without reaching the bridge
+        client.send(ClientFrame(addon_dispatch = AddonDispatch(id = 10, command = AddonCommand(test_ssh = TestSsh("")))))
+        val refused = client.next { it.addon_replied?.id == 10L }.addon_replied!!.reply!!
+        assertEquals(com.getdieter.addon.v1.Failure.Kind.KIND_INVALID, refused.failure?.kind)
+        client.socket.close(1000, null)
     }
 
     private class Client(val frames: LinkedBlockingQueue<HostFrame>, val failures: LinkedBlockingQueue<Response?>) {
@@ -157,8 +225,7 @@ class WebHostTest {
         val client = connect()
         client.next { it.hello != null }
         val callback = "https://ha.example/app/0000_dieter/next/signin"
-        client.send(ClientFrame(context = Context(sign_in_callback = callback)))
-        client.send(ClientFrame(dispatch = Dispatch(id = 1, command = Command(begin_sign_in = BeginSignIn("https://gateway.example")))))
+        client.send(ClientFrame(dispatch = Dispatch(id = 1, command = Command(begin_sign_in = BeginSignIn("https://gateway.example", callback)))))
         val reply = client.next { it.replied?.id == 1L }.replied!!.reply!!
         val url = assertNotNull(reply.result?.sign_in_started?.authorize_url, "reply: $reply")
         assertTrue(url.startsWith("https://gateway.example/auth/github/start?"), url)
@@ -176,11 +243,13 @@ class WebHostTest {
     fun signInWithoutAnAddressFailsClearly() {
         val client = connect()
         client.next { it.hello != null }
-        client.send(ClientFrame(context = Context(sign_in_callback = "https://ha.example/somewhere?x=1")))
         client.send(ClientFrame(dispatch = Dispatch(id = 1, command = Command(begin_sign_in = BeginSignIn("https://gateway.example")))))
         val reply = client.next { it.replied?.id == 1L }.replied!!.reply!!
-        assertEquals(com.getdieter.client.v1.Failure.Kind.KIND_INVALID, reply.failure?.kind)
-        assertTrue(reply.failure!!.message.contains("through Home Assistant"), reply.failure!!.message)
+        assertTrue(assertNotNull(reply.failure).message.contains("address to come back to"), reply.toString())
+        val query = BeginSignIn("https://gateway.example", "https://ha.example/somewhere?x=1")
+        client.send(ClientFrame(dispatch = Dispatch(id = 2, command = Command(begin_sign_in = query))))
+        val refused = client.next { it.replied?.id == 2L }.replied!!.reply!!
+        assertTrue(assertNotNull(refused.failure).message.contains("cannot be used"), refused.toString())
         client.socket.close(1000, null)
     }
 

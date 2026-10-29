@@ -44,6 +44,7 @@ kotlin {
         }
         commonMain {
             kotlin.srcDir(apps.resolve("core/runtime/src/commonMain/kotlin"))
+            kotlin.srcDir(rootDir.resolve("addon/src/commonMain/kotlin"))
             dependencies {
                 implementation(libs.wire.runtime)
                 implementation(libs.wire.grpc.client)
@@ -57,10 +58,19 @@ kotlin {
             kotlin.srcDir(buildInfo)
             dependencies { implementation(libs.okhttp) }
         }
-        jvmTest.dependencies {
-            implementation(kotlin("test"))
-            implementation(libs.okhttp)
-            implementation(libs.kotlinx.coroutines.test)
+        jvmTest {
+            // The core's own tests of what the web host relies on (sign-in, opening conversations): the
+            // submodule's Gradle build needs the Android SDK, so they run here.
+            kotlin.srcDir(apps.resolve("core/testing/src/commonMain/kotlin"))
+            kotlin.srcDir(rootDir.resolve("addon/src/commonTest/kotlin"))
+            for (area in listOf("identity", "navigation", "notifications"))
+                kotlin.srcDir(apps.resolve("core/runtime/src/commonTest/kotlin/com/getdieter/core/$area"))
+            dependencies {
+                implementation(kotlin("test"))
+                implementation(libs.okhttp)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.okio.fakefilesystem)
+            }
         }
     }
 }

@@ -1,5 +1,8 @@
 package com.getdieter.web
 
+import com.getdieter.addon.AddonClient
+import com.getdieter.addon.core.AddonFailure
+import com.getdieter.addon.core.AddonSubscription
 import com.getdieter.client.v1.Command
 import com.getdieter.client.v1.Failure
 import com.getdieter.client.v1.Reply
@@ -11,8 +14,9 @@ import com.getdieter.client.v1.Update
 import com.getdieter.core.client.ClientFailure
 import com.getdieter.core.client.ClientSubscription
 import com.getdieter.mobile.store.MobileCore
+import com.getdieter.web.v1.AddonDispatch
+import com.getdieter.web.v1.AddonObserve
 import com.getdieter.web.v1.ClientFrame
-import com.getdieter.web.v1.Context
 import com.getdieter.web.v1.Dispatch
 import com.getdieter.web.v1.Hello
 import com.getdieter.web.v1.HostFrame
@@ -32,9 +36,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The UI's core, running in the add-on's web host and reached over one WebSocket
- * (proto/dieter/web/v1/host.proto). The browser keeps no account state of its own: sign-in,
- * device key and caches live in the host, so every browser and the Companion app see the same
- * session.
+ * (proto/dieter/web/v1/host.proto), and on the same socket the add-on core ([AddonClient]) for the
+ * add-on's own features. The browser keeps no account state of its own: sign-in, device key and
+ * caches live in the host, so every browser and the Companion app see the same session.
  *
  * Reconnects with backoff (and at once when the page becomes visible again), observes every live
  * slice again after a reconnect (the host answers with a fresh snapshot), and while the socket is
@@ -43,16 +47,24 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * Wasm runs on one thread: socket callbacks and coroutines share the event loop, no locking.
  */
-class RemoteCore(private val url: String, private val scope: CoroutineScope) : MobileCore {
+class RemoteCore(private val url: String, private val scope: CoroutineScope) : MobileCore, AddonClient {
     private class Observer(val slice: Slice, val scope: String, val receive: (Update) -> Unit) {
         var session: SessionSlice? = null
     }
+
+    private class AddonObserver(
+        val slice: com.getdieter.addon.v1.Slice,
+        val scope: String,
+        val receive: (com.getdieter.addon.v1.Update) -> Unit,
+    )
 
     private var socket: JsAny? = null
     private var open = false
     private var nextId = 1L
     private val pending = mutableMapOf<Long, CompletableDeferred<Reply>>()
     private val observers = mutableMapOf<Long, Observer>()
+    private val addonPending = mutableMapOf<Long, CompletableDeferred<com.getdieter.addon.v1.Reply>>()
+    private val addonObservers = mutableMapOf<Long, AddonObserver>()
     private val connected = MutableStateFlow(false)
     private val mutableHello = MutableStateFlow<Hello?>(null)
     private var failures = 0
@@ -92,9 +104,11 @@ class RemoteCore(private val url: String, private val scope: CoroutineScope) : M
         val id = nextId++
         val reply = CompletableDeferred<Reply>()
         pending[id] = reply
+        // where the gateway sends this browser back after GitHub sign-in: the page's own address (the core decides)
+        val sent = command.begin_sign_in?.let { command.copy(begin_sign_in = it.copy(redirect_uri = hostSignInCallback())) } ?: command
         val answer =
             try {
-                send(ClientFrame(dispatch = Dispatch(id, command)))
+                send(ClientFrame(dispatch = Dispatch(id, sent)))
                 reply.await()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -115,6 +129,36 @@ class RemoteCore(private val url: String, private val scope: CoroutineScope) : M
         }
     }
 
+    override suspend fun dispatch(command: com.getdieter.addon.v1.Command): com.getdieter.addon.v1.Result {
+        if (!open && withTimeoutOrNull(CONNECT_WAIT_MS) { connected.first { it } } == null)
+            throw AddonFailure(addonUnreachable("Not connected to the Dieter add-on. Dieter keeps trying."))
+        val id = nextId++
+        val reply = CompletableDeferred<com.getdieter.addon.v1.Reply>()
+        addonPending[id] = reply
+        val answer =
+            try {
+                send(ClientFrame(addon_dispatch = AddonDispatch(id, command)))
+                reply.await()
+            } finally {
+                addonPending.remove(id)
+            }
+        answer.failure?.let { throw AddonFailure(it) }
+        return answer.result ?: com.getdieter.addon.v1.Result()
+    }
+
+    override fun observe(
+        slice: com.getdieter.addon.v1.Slice,
+        scope: String,
+        receive: (com.getdieter.addon.v1.Update) -> Unit,
+    ): AddonSubscription {
+        val id = nextId++
+        addonObservers[id] = AddonObserver(slice, scope, receive)
+        if (open) send(ClientFrame(addon_observe = AddonObserve(id, slice, scope)))
+        return AddonSubscription {
+            if (addonObservers.remove(id) != null && open) send(ClientFrame(unobserve = Unobserve(id)))
+        }
+    }
+
     private fun connect() {
         retry = null
         socket = wsOpen(url, ::opened, ::received, ::closed)
@@ -129,9 +173,9 @@ class RemoteCore(private val url: String, private val scope: CoroutineScope) : M
         open = true
         failures = 0
         lastPong = nowMs()
-        send(ClientFrame(context = Context(sign_in_callback = hostSignInCallback())))
         foreground?.let { send(ClientFrame(dispatch = Dispatch(nextId++, it))) }   // reply ignored
         observers.forEach { (id, o) -> send(ClientFrame(observe = Observe(id, o.slice, o.scope))) }
+        addonObservers.forEach { (id, o) -> send(ClientFrame(addon_observe = AddonObserve(id, o.slice, o.scope))) }
         connected.value = true
     }
 
@@ -151,6 +195,13 @@ class RemoteCore(private val url: String, private val scope: CoroutineScope) : M
             update.session?.let { observer.session = it }
             observer.receive(update)
         }
+        frame.addon_replied?.let { replied ->
+            addonPending.remove(replied.id)?.complete(replied.reply ?: com.getdieter.addon.v1.Reply())
+        }
+        frame.addon_updated?.let { updated ->
+            val update = updated.update ?: return@let
+            addonObservers[updated.id]?.receive?.invoke(update)
+        }
         if (frame.pong != null) lastPong = nowMs()
     }
 
@@ -163,6 +214,9 @@ class RemoteCore(private val url: String, private val scope: CoroutineScope) : M
         val dropped = Reply(failure = Failure(Failure.Kind.KIND_TRANSIENT, DROPPED))
         pending.values.toList().forEach { it.complete(dropped) }
         pending.clear()
+        val addonDropped = com.getdieter.addon.v1.Reply(failure = addonUnreachable(DROPPED))
+        addonPending.values.toList().forEach { it.complete(addonDropped) }
+        addonPending.clear()
         if (wasOpen || failures == 0) observers.keys.toList().forEach(::synthesizeSession)
         failures++
         val wait = minOf(MAX_BACKOFF_MS, 500L shl minOf(failures - 1, 5))
@@ -189,6 +243,9 @@ class RemoteCore(private val url: String, private val scope: CoroutineScope) : M
             )
         observer.receive(Update(slice = Slice.SLICE_SESSION, session = shown))
     }
+
+    private fun addonUnreachable(message: String) =
+        com.getdieter.addon.v1.Failure(com.getdieter.addon.v1.Failure.Kind.KIND_UNREACHABLE, message)
 
     private fun send(frame: ClientFrame) {
         val ws = socket ?: return

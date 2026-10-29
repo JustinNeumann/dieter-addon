@@ -12,9 +12,10 @@ The plan and its progress: [docs/PLAN.md](docs/PLAN.md).
 | Path | What |
 |---|---|
 | `dieter/` | Git submodule: [JustinNeumann/dieter](https://github.com/JustinNeumann/dieter) (upstream + the add-on's harness changes), pinned to the commit the add-on runs. The UI, the core and the Wire models are compiled from here, not copied |
-| `web/` | The browser build (`wasmJs`): the browser actuals of the UI's platform hooks, the loader page, the entry point and `RemoteCore` (the UI's core over a WebSocket) |
-| `host/` | The web host (JVM): Dieter's Kotlin core (`ClientApi`) with the JVM platform, serving it to browsers over one WebSocket; sign-in relay; `host/build/libs/dieter-web-host-<version>.jar` |
-| `proto/` | `dieter/web/v1/host.proto`: the browser ↔ web host protocol (dispatch/observe of `dieter.client.v1`, as the iOS byte bridge) |
+| `web/` | The browser build (`wasmJs`): the browser actuals of the UI's platform hooks, the loader page, the entry point, `RemoteCore` (the UI's core and the add-on core over a WebSocket) and the add-on's screens (`com.getdieter.addon`, plugged into the fork's `MobileExtensions`) |
+| `host/` | The web host (JVM): Dieter's Kotlin core (`ClientApi`) with the JVM platform and the add-on core, serving both to browsers over one WebSocket; sign-in relay; `host/build/libs/dieter-web-host-<version>.jar` |
+| `addon/` | The add-on core: the add-on's own features (gateway enrollment, SSH key, Claude sign-in, settings, agent questions, repositories) as commands and slices over the add-on's bridge, and their rules (`AddonRules`, also compiled into the page). Runs in the web host; the page only draws its slices ([ADR 0005](https://github.com/JustinNeumann/dieter/blob/web-addon/docs/adr/0005-web-client.md)) |
+| `proto/` | `dieter/web/v1/host.proto`: the browser ↔ web host protocol (dispatch/observe of `dieter.client.v1`, as the iOS byte bridge, plus `addon_dispatch`/`addon_observe`); `dieter/addon/v1/addon.proto`: the add-on core's commands and slices |
 | `tests/` | Browser tests (Playwright) of the packaged bundle: selection, find, HTML islands, keyboard; `npm run measure` writes the accessibility checklist of docs/PLAN.md Phase 2 |
 | `tools/package.sh` | Packs the production build into `dieter-web-<version>.tar.gz` (hashed file names, `.wasm.gz` for the loader, `.br`/`.gz` copies) |
 | `.github/workflows/web.yml` | Builds and tests every push; a tag `vX.Y.Z` publishes the tarball, the host jar and `SHA256SUMS` as a release |
@@ -29,7 +30,7 @@ git clone --recurse-submodules https://github.com/JustinNeumann/dieter-addon-kot
 cd dieter-addon-kotlin
 ./gradlew :web:wasmJsBrowserDistribution          # production build, ~3 min the first time
 tools/package.sh 0.0.0-local                       # -> build/package/dieter-web-0.0.0-local.tar.gz
-./gradlew :host:jvmTest :host:fatJar               # web host tests and host/build/libs/dieter-web-host-*.jar
+./gradlew :host:jvmTest :host:fatJar               # web host + add-on core tests, host/build/libs/dieter-web-host-*.jar
 ./gradlew :web:wasmJsBrowserDevelopmentRun -t      # dev server with rebuilds on change (open with ?demo)
 ```
 

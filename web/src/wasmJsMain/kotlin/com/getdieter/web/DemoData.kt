@@ -123,6 +123,8 @@ class DemoData {
     private var boundBoard = ""
     private val extraTurns = mutableMapOf<String, MutableList<TimelineItem>>()
 
+    fun hasCard(id: String): Boolean = cards.any { it.id == id && !it.archived }
+
     fun bindBoard(id: String) {
         boundBoard = id
     }

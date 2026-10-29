@@ -12,7 +12,13 @@ import androidx.compose.ui.SystemTheme
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.window.ComposeViewport
+import com.getdieter.addon.AddonClient
+import com.getdieter.addon.LocalAddon
+import com.getdieter.addon.addonExtensions
+import com.getdieter.client.v1.Command
+import com.getdieter.client.v1.OpenConversationRequest
 import com.getdieter.mobile.app.MobileApp
+import com.getdieter.mobile.extensions.LocalMobileExtensions
 import com.getdieter.mobile.design.FindRequests
 import com.getdieter.mobile.design.isDark
 import com.getdieter.mobile.design.materialScheme
@@ -26,21 +32,20 @@ import com.getdieter.mobile.store.MobileStore
 import com.getdieter.mobile.store.runDebugScript
 import com.getdieter.mobile.navigation.MobileTab
 import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 
 /**
  * The real Dieter Compose UI in the browser. Its core runs in the add-on's web host and is reached
- * over a WebSocket at `core` next to this page ([RemoteCore]); `?demo` uses [DemoCore] instead (no
- * account, nothing leaves the page). `?script=tab projects; board Main` replays the debug navigation
+ * over a WebSocket at `core` next to this page ([RemoteCore]), and so is the add-on core for the
+ * add-on's own features. `?demo` uses [DemoCore] for Dieter's data instead (no account); the add-on's
+ * features still come from the web host. `?script=tab projects; board Main` replays the debug navigation
  * script used for screenshots.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
     WebHost.start()
-    val core: MobileCore =
-        if (queryParameter("demo") != null) DemoCore() else RemoteCore("core", MainScope()).also { it.start() }
+    val remote = RemoteCore("core", MainScope()).also { it.start() }
+    val core: MobileCore = if (queryParameter("demo") != null) DemoCore() else remote
     val store =
         MobileStore(
             core,
@@ -63,12 +68,13 @@ fun main() {
                     FontFamily(Font("JetBrains Mono", Res.readBytes("files/jetbrains_mono_regular.ttf")))
                 }
                 .getOrNull()
-        show(store, script, route)
+        show(store, remote, script, route)
     }
 }
 
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
-private fun show(store: MobileStore, script: String, route: String) {
+private fun show(store: MobileStore, addon: AddonClient, script: String, route: String) {
+    val extensions = addonExtensions()
     ComposeViewport(viewportContainerId = "dieter") {
         val host by WebHost.theme.collectAsState()
         // Appearance "System" means the host's mode: Home Assistant's dark mode behind Ingress (it can
@@ -80,7 +86,9 @@ private fun show(store: MobileStore, script: String, route: String) {
                 if (script.isNotBlank()) store.runDebugScript(script)
             }
             ChromeColor(store)
-            MobileApp(store, openUrl = ::openInNewTab)
+            CompositionLocalProvider(LocalMobileExtensions provides extensions, LocalAddon provides addon) {
+                MobileApp(store, openUrl = ::openInNewTab)
+            }
         }
     }
 }
@@ -96,15 +104,22 @@ private fun ChromeColor(store: MobileStore) {
 }
 
 /**
- * Deep links: `?route=card/<id>` opens that card's conversation, `?route=tab/<name>` a tab. The classic page
- * turns `<HA>/app/<slug>/next/<route>` into this (Home Assistant always opens the add-on at its root).
+ * Deep links: `?route=card/<id>` opens that conversation where the core says it belongs (or the Inbox
+ * once it is gone), `?route=tab/<name>` a tab. The classic page turns `<HA>/app/<slug>/next/<route>`
+ * into this (Home Assistant always opens the add-on at its root).
  */
 private suspend fun openRoute(store: MobileStore, route: String) {
     val parts = route.trim('/').split('/')
     when (parts.firstOrNull()) {
         "card", "chat" -> parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { id ->
-            withTimeoutOrNull(30_000) { store.workspace.slice.first { it.loaded } }
-            store.openConversation(id)
+            val target =
+                runCatching { store.core.dispatch(Command(open_conversation_request = OpenConversationRequest(id))) }
+                    .getOrNull()
+                    ?.notification_target
+            when {
+                target?.card_id?.isNotEmpty() == true -> store.openConversation(target.card_id!!)
+                target?.inbox != null -> store.selectTab(MobileTab.INBOX)
+            }
         }
         "tab" -> parts.getOrNull(1)?.let { name ->
             MobileTab.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let(store::selectTab)

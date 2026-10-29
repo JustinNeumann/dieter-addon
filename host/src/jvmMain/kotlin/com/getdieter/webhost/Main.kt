@@ -1,5 +1,6 @@
 package com.getdieter.webhost
 
+import com.getdieter.addon.core.AddonCore
 import com.getdieter.core.CoreRuntime
 import com.getdieter.core.RuntimeConfig
 import com.getdieter.core.client.ClientApi
@@ -24,6 +25,7 @@ import okio.Path.Companion.toOkioPath
  *   DIETER_WEB_HOST_BIND     default 127.0.0.1;  DIETER_WEB_HOST_PORT  default 8097
  *   DIETER_WEB_HOST_SECRET_FILE  file with the per-boot secret the bridge presents, "-" for stdin (unset: no check, tests only)
  *   DIETER_WEB_SIGN_IN_CALLBACK  pins the sign-in callback (https://<HA>/app/<slug>/next/signin); else the page tells it
+ *   DIETER_WEB_BRIDGE_URL        the add-on's bridge API for the add-on core, default http://127.0.0.1:8099/api/
  *   DIETER_WEB_DEVICE_NAME       how this device appears in the account's device list
  *   DIETER_WEB_HOST_VERBOSE=1    core debug logs
  */
@@ -42,7 +44,7 @@ fun main() {
         .start()
 }
 
-/** The core plus the WebSocket server in front of it. */
+/** Dieter's core and the add-on core, plus the WebSocket server in front of them. */
 class WebHostServer(
     state: File,
     env: Map<String, String>,
@@ -52,6 +54,7 @@ class WebHostServer(
 ) {
     val runtime: CoreRuntime
     private val api: ClientApi
+    val addon: AddonCore
     private val commands = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val server: WebSocketServer
     private val signIn: SignInRelay
@@ -67,6 +70,11 @@ class WebHostServer(
                 deviceName = env["DIETER_WEB_DEVICE_NAME"] ?: "Home Assistant (web)",
             )
         val transport = OkHttpRpcTransport(deviceKeys)
+        val pinned = env["DIETER_WEB_SIGN_IN_CALLBACK"]?.trim()?.takeIf { it.isNotEmpty() }
+        if (pinned != null && !SignInRelay.isUsableCallback(pinned))
+            Log.line("ignoring DIETER_WEB_SIGN_IN_CALLBACK=$pinned: expected http(s)://…/next/signin without query")
+        // where the gateway sends the browser back: the add-on's pinned address, else each page's own
+        val callback = pinned?.takeIf(SignInRelay::isUsableCallback)
         runtime =
             CoreRuntime(
                 Platform(
@@ -83,22 +91,21 @@ class WebHostServer(
                 ),
                 RuntimeConfig(
                     clientVersion = BuildInfo.DIETER_RELEASE,
-                    oauthRedirectUri = SignInRelay.INTERNAL_CALLBACK,
+                    oauthRedirectUri = callback ?: SignInRelay.INTERNAL_CALLBACK,
+                    oauthRedirectPerAttempt = callback == null,
                     includeLoopbackRoutes = true,
                     clientIdPrefix = "web",
                 ),
             )
         api = ClientApi(runtime)
-        val pinned = env["DIETER_WEB_SIGN_IN_CALLBACK"]?.trim()?.takeIf { it.isNotEmpty() }
-        if (pinned != null && !SignInRelay.isUsableCallback(pinned))
-            Log.line("ignoring DIETER_WEB_SIGN_IN_CALLBACK=$pinned: expected http(s)://…/next/signin without query")
-        signIn = SignInRelay(runtime, api, pinned?.takeIf(SignInRelay::isUsableCallback))
+        signIn = SignInRelay(api, callback ?: SignInRelay.INTERNAL_CALLBACK)
+        addon = AddonCore(OkHttpBridge(env["DIETER_WEB_BRIDGE_URL"] ?: "http://127.0.0.1:8099/api/"), commands)
         foreground = Foreground(api, commands, env["DIETER_WEB_HOST_IDLE_MS"]?.toLongOrNull() ?: 120_000)
         server =
             WebSocketServer(bind, port, secret, onHttp = ::http) { ws ->
                 val user = ws.headers["x-remote-user-display-name"] ?: ws.headers["x-remote-user-name"].orEmpty()
-                val hello = Hello(BuildInfo.DIETER_RELEASE, BuildInfo.VERSION, user, signIn.pinned.orEmpty())
-                CoreConnection(api, runtime, commands, ws, hello, signIn, foreground).run()
+                val hello = Hello(BuildInfo.DIETER_RELEASE, BuildInfo.VERSION, user)
+                CoreConnection(api, runtime, addon, commands, ws, hello, foreground).run()
             }
         Log.line("Dieter core ${BuildInfo.DIETER_RELEASE}, web host ${BuildInfo.VERSION}, state $state")
     }
@@ -122,11 +129,13 @@ class WebHostServer(
     /** Starts the core and the server; returns the bound port. */
     fun start(): Int {
         runtime.start()
+        addon.start()
         return server.start()
     }
 
     fun stop() {
         server.stop()
+        addon.stop()
         commands.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         kotlinx.coroutines.runBlocking { runtime.shutdown() }
     }
