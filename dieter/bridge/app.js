@@ -271,7 +271,12 @@
     const c = e.currentTarget, bar = c.parentElement.querySelector(".appbar");
     if (!bar) return;
     bar.classList.toggle("scrolled", c.scrollTop > 2);
-    if (bar.classList.contains("large")) bar.classList.toggle("collapsed", c.scrollTop > 34);
+    if (bar.classList.contains("large")) {
+      // Collapsing hides the big title and so makes the list taller. When it overflows by less than that, the scroll range
+      // vanishes, the browser resets scrollTop to 0 and the bar expands again: the list jumps back up and its end is out of reach.
+      const big = bar.classList.contains("collapsed") ? 0 : bar.querySelector(".big")?.offsetHeight || 0;
+      bar.classList.toggle("collapsed", c.scrollTop > 34 && c.scrollHeight - c.clientHeight - big > 34);
+    }
   }
   function tabBadges() {
     const items = activityItems(); const attention = items.filter((i) => i.needsYou).length;

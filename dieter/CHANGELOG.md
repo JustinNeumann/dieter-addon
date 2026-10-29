@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.429.56 (2026-10-29)
+
+- Fixed: scrolling down the Tools tab (and other pages with a large title) in a tall window, e.g. the full-page kiosk view,
+  threw you back to the top, so the end of the list was out of reach. Collapsing the big title made the list taller; when it
+  overflowed by less than the title's height, the scroll range vanished and the page reset to the top. The title now
+  collapses only when the list still scrolls afterwards.
+
 ## 0.6.429.55 (2026-10-29)
 
 - Dreamfall: a **weekday picker** below the times in New Dreamfall board and Settings, one check box per day, Monday to
