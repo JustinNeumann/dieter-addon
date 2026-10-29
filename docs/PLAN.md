@@ -19,11 +19,11 @@ features over one group at a time.
 
 | Part | State | Where |
 |---|---|---|
-| Phase 1: bundle served at `next/` behind Ingress | built, e2e green; add-on 0.6.431.2 waits for the PR merge, then LAN/Nabu Casa/Companion checks | add-on `dieter_bridge.py` (`serve_web`), `web/`, `tools/package.sh`, release v0.1.0 |
-| Phase 2: selection, find, accessibility | built on branch `phase2` (not merged): selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
-| Phase 3: theme from HA | built, e2e green with a stand-in HA frontend; real HA check after deploy | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
+| Phase 1: bundle served at `next/` behind Ingress | live in add-on 0.6.431.2; checked through HA's frontend over LAN (first frame 1.3 s) and Nabu Casa (4.6 s); Companion app still to check by a person | add-on `dieter_bridge.py` (`serve_web`), `web/`, `tools/package.sh`, release v0.1.0 |
+| Phase 2: selection, find, accessibility | released in v0.3.0: selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
+| Phase 3: theme from HA | live; the real HA frontend hands light and dark with its colours to the page | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
 | 4.0 web host + `RemoteCore` | built; verified against Dieter's isolated fixture gateway (real boards, conversations, sending runs a turn) and in the add-on e2e | `host/`, `proto/dieter/web/v1/host.proto`, `web/…/RemoteCore.kt`, add-on `run.sh` + bridge relay |
-| 4.0 sign-in | built; needs the gateway to list the return address (your `DIETER_NATIVE_REDIRECT_URIS`) | `SignInRelay.kt`, add-on DOCS "Signing in the new page" |
+| 4.0 sign-in | live; the gateway lists the LAN and Nabu Casa return addresses and forwards to GitHub; the first real sign-in and pairing need a person | `SignInRelay.kt`, add-on DOCS "Signing in the new page" |
 | 4.A deep links | `<HA>/app/<slug>/next/card/<id>` and `…/next/tab/<name>` open the card or tab (release v0.2.1, add-on e2e) | `Main.kt` (`openRoute`), add-on `app.js` |
 | 4.A–J parity rest, extension points, Dreamfall, switch to `/` | not started; Mail, Tools, Inbox, boards and conversations already show real data from the fixture gateway | |
 | Upstream proposal | drafted | `docs/proposals/web-client.md` |
