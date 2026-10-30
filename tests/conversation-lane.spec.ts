@@ -11,7 +11,6 @@ test("the header names the card's lane and follows a move from the composer", as
   await expect.poll(() => aria(page)).toContain("dieter-addon · Add-on · Review");
 });
 
-
 test("a chat's header has no lane", async ({ page }) => {
   await open(page, "card Kotlin/Wasm vs Node inside an add-on");
   await expect.poll(() => aria(page)).toContain("Kotlin/Wasm vs Node inside an add-on");

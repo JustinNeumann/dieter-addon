@@ -3,6 +3,8 @@ package com.getdieter.operator
 import java.io.File
 import java.net.InetSocketAddress
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -131,6 +133,14 @@ fun routes(
     uploads: Uploads? = null,
 ): Routes {
     val prompts = Prompts(dieter)
+    val dreamfall = Dreamfall(dieter)
+    // the page's Dreamfall actions; like the bridge, every refusal and CLI failure is a 400 with its message
+    fun dreamfall(handle: () -> JsonElement): JsonElement =
+        try {
+            handle()
+        } catch (e: DreamfallError) {
+            throw BadRequest(e.message ?: "refused")
+        }
     val ok = buildJsonObject { put("ok", true) }
     fun Request.text(key: String) = (body[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
     val routes = Routes()
@@ -146,13 +156,27 @@ fun routes(
         .post("questions") { questions.register(it.body) }
         .get("questions/{id}") { questions.poll(it.params.getValue("id")) ?: throw NotFound("no such question") }
         .post("questions/{id}/answer") { questions.answer(it.params.getValue("id"), it.body) }
+        .post("dreamfall") { r -> dreamfall { dreamfall.create(r.body, r.user).let { p -> buildJsonObject { put("ok", true); put("id", p.field("id")); put("pipeline", p) } } } }
+        .post("dreamfall/{pid}/update") { r -> dreamfall { buildJsonObject { put("ok", true); put("pipeline", dreamfall.update(r.params.getValue("pid"), r.body)) } } }
+        .post("dreamfall/{pid}/delete") { r -> dreamfall { dreamfall.delete(r.params.getValue("pid")) } }
+        .post("dreamfall/{pid}/run") { r -> dreamfall { dreamfall.runNow(r.params.getValue("pid"), r.text("stage")) } }
+        .post("dreamfall/{pid}/act") { r ->
+            // known_copies (the bridge's live view): board id -> source card id -> its copy, so a pick lists no boards
+            val known = r.body.obj("known_copies")?.let { copies -> { board: String -> copies.obj(board)?.mapValues { (_, v) -> (v as? JsonPrimitive)?.content.orEmpty() } } }
+            dreamfall { dreamfall.act(r.params.getValue("pid"), r.body, r.user, known) }
+        }
+        .post("dreamfall/{pid}/record") { r ->
+            // a card the bridge created on a stage board for the person: {card, board, title}
+            dreamfall {
+                val p = dreamfall.loadPipeline(r.params.getValue("pid"))
+                val record = dreamfall.recordCreated(p, r.text("card"), r.text("board"), r.text("title"), "human", r.user)
+                buildJsonObject { put("ok", true); put("record", record ?: JsonNull) }
+            }
+        }
         .post("upload") {
             val store = uploads ?: throw BadRequest("uploads are kept in the add-on only")
             store.store(java.net.URLDecoder.decode(it.headers["x-filename"] ?: "file", Charsets.UTF_8), it.raw)
-
-
         }
-
         .post("daemon/restart") {
             // after a Claude sign-in or a gateway enrollment (the bridge): the daemon starts again with them
             val restarted = (daemon ?: throw BadRequest("the daemon is supervised in the add-on only")).restart()
@@ -173,4 +197,3 @@ fun routes(
         .post("gateway/enroll/cancel") { enrollment.cancel(); ok }
         .post("gateway/unenroll") { enrollment.unenroll() }
 }
-

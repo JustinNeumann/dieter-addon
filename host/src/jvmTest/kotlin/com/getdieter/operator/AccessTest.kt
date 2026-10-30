@@ -61,7 +61,6 @@ class AccessTest {
             assertEquals(home.path, env["HOME"])
             if (cmd.any { it.endsWith("@pi.local") }) Command(0, "pi\n", "")
             else Command(255, "", "debug\nssh: connect to host 127.0.0.1 port 1: Connection refused\n")
-
         }
         assertEquals("target must be user@host or host (optionally :port)", ssh.test("rm -rf /").text("error"))
         assertEquals("pi", ssh.test(" hassio@pi.local ").text("output"))

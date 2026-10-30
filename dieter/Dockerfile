@@ -164,9 +164,11 @@ RUN set -eu; \
 # the fork release this image carries: the operator stages its harness runtime (harness-staged/<version>)
 ENV DIETER_VERSION=${DIETER_VERSION}
 COPY bridge/ /opt/bridge/
-# dreamfall: the command of the Dreamfall stage agents (bridge/dreamfall.py; they run it from their run cards)
-RUN printf '#!/bin/sh\nexec python3 /opt/bridge/dreamfall.py "$@"\n' > /usr/local/bin/dreamfall && chmod 755 /usr/local/bin/dreamfall \
-    && dreamfall --help >/dev/null
+# dreamfall: the command of the Dreamfall stage agents, a mode of the operator's jar (DreamfallCommand; they run it
+# from their run cards). Small and short-lived like the operator; checked when the image carries the jar.
+RUN printf '#!/bin/sh\nexec java -XX:+UseSerialGC -Xms8m -Xmx64m -XX:TieredStopAtLevel=1 -Xshare:auto -cp /opt/web-host/dieter-web-host.jar com.getdieter.operator.DreamfallCommand "$@"\n' \
+      > /usr/local/bin/dreamfall && chmod 755 /usr/local/bin/dreamfall \
+    && if [ -f /opt/web-host/dieter-web-host.jar ]; then dreamfall --help >/dev/null; fi
 COPY run.sh /run.sh
 RUN chmod 755 /run.sh
 
