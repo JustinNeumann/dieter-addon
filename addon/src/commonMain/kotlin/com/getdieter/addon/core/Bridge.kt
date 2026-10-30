@@ -10,8 +10,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * The add-on's bridge (dieter/bridge/dieter_bridge.py in the add-on): its JSON API under `api/`. The web
- * host reaches it on loopback, which the bridge trusts as it trusts Home Assistant's Ingress.
+ * The add-on's JSON API under `api/`, answered by its operator (host/…/operator; the Python bridge until
+ * 0.6.431.21, hence the name). The web host reaches it on loopback, which it trusts as it trusts Home Assistant's Ingress.
  */
 interface Bridge {
     /**

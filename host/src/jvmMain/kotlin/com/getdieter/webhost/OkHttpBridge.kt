@@ -30,8 +30,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 
 /**
- * The add-on core's way to the bridge: plain HTTP on loopback, which the bridge trusts as it trusts Home
- * Assistant's Ingress (the browser reaches this host only through the bridge's relay, with its secret).
+ * The add-on core's way to the add-on's API: the operator's, plain HTTP on loopback (DIETER_WEB_BRIDGE_URL; the
+ * name Bridge stays from when the Python bridge answered it).
  */
 internal class OkHttpBridge(base: String) : Bridge {
     private val base = base.trimEnd('/') + "/"
@@ -40,7 +40,7 @@ internal class OkHttpBridge(base: String) : Bridge {
 
     override suspend fun request(method: String, path: String, body: JsonObject?, user: String, timeout: Duration): BridgeResponse {
         val headers = Headers.Builder().add("Accept", "application/json")
-        // the bridge records some actions under the Home Assistant user's name, as Ingress forwards it
+        // the operator records some actions under the Home Assistant user's name, as Ingress forwards it
         if (user.isNotBlank()) headers.addUnsafeNonAscii("X-Remote-User-Display-Name", user.take(60))
         val request =
             Request.Builder()
@@ -65,7 +65,7 @@ internal class OkHttpBridge(base: String) : Bridge {
             while (true) {
                 val call =
                     client.newBuilder()
-                        .readTimeout(45, TimeUnit.SECONDS) // the bridge pings every 14 s
+                        .readTimeout(45, TimeUnit.SECONDS) // the operator pings every 14 s
                         .build()
                         .newCall(Request.Builder().url(base + "events?fields=" + fields.joinToString(",")).build())
                 val cancel = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }

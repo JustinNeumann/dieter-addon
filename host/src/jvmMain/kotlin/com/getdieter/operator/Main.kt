@@ -26,7 +26,7 @@ import kotlinx.serialization.json.put
  *   SUPERVISOR_TOKEN       Home Assistant through the Supervisor (set inside the add-on)
  *   DIETER_VERSION         the fork release in the image, whose harness runtime is staged (the Dockerfile sets it)
  *   DIETER_RUNTIME_SRC     the runtime sources of that build, default /opt/dieter-runtime
- *   DIETER_DAEMON_ADDR     the daemon's API, default 127.0.0.1:4242; BRIDGE_PORT  the bridge's port, default 8099
+ *   DIETER_DAEMON_ADDR     the daemon's API, default 127.0.0.1:4242
  * In the add-on it also starts the daemon and keeps it running, after staging the harness runtime and writing what
  * the options configure (Setup), owns the add-on's SSH key, its Claude sign-in and the gateway enrollment, and
  * removes the work folders of finished worktree cards (Housekeeping).
@@ -161,13 +161,13 @@ class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
     companion object {
         /**
          * What the daemon gets on top of the operator's environment: harness workers relay the agents' questions to
-         * the bridge, and Home Assistant for the agents (hass-cli takes HASS_SERVER/HASS_TOKEN: core's REST API
+         * the operator, and Home Assistant for the agents (hass-cli takes HASS_SERVER/HASS_TOKEN: core's REST API
          * through the Supervisor's proxy; the token reaches only core, hassio_api is off). The daemon forwards only
          * whitelisted variables to its workers, DIETER_HARNESS_ENV names the extra ones. The env file's variables go
          * into the daemon's own environment too, so harness processes inherit the tokens either way.
          */
         fun daemonEnvironment(env: Map<String, String>, runtimeDir: File?, envFile: Map<String, String>): Map<String, String> {
-            val out = linkedMapOf("DIETER_QUESTIONS_URL" to "http://127.0.0.1:${env["BRIDGE_PORT"] ?: "8099"}/api/questions")
+            val out = linkedMapOf("DIETER_QUESTIONS_URL" to "http://${env["DIETER_OPERATOR_ADDR"] ?: "127.0.0.1:8096"}/api/questions")
             val token = env["SUPERVISOR_TOKEN"].orEmpty()
             if (token.isNotEmpty()) {
                 out["HASS_SERVER"] = "http://supervisor/core"

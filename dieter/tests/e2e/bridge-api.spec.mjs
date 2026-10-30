@@ -1,7 +1,7 @@
 // The add-on's HTTP API as Home Assistant and the scripts use it (homeassistant/: sensor.dieter from api/ha, the
 // rest_commands dieter_create_task / dieter_send_message / dieter_move_card / dieter_focus, dieter_task.py), against the
 // image with Dieter's mock harness (DIETER_ENABLE_MOCK_HARNESS=1) behind the Ingress stand-in. Started by tests/run.sh.
-// Whatever serves these paths (the bridge now, the web host later) must keep these answers.
+// Whatever serves these paths (the web host's front door, the operator behind it) must keep these answers.
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 
@@ -101,7 +101,7 @@ test("dieter_focus: the card a push opens is kept for the next page load, once",
 
 test("sensor.dieter: the HA summary names the projects and the last finished task", async ({ request }) => {
   let ha;
-  for (let i = 0; i < 15; i++) { // the bridge polls the daemon every 8 s
+  for (let i = 0; i < 15; i++) { // the operator polls the daemon every 8 s
     const r = await request.get("api/ha");
     expect(r.ok()).toBeTruthy();
     ha = await r.json();
@@ -192,7 +192,7 @@ test("the operator supervises the daemon: a restart on request, and an operator 
   const replaced = (old, ms) => until(async () => { const d = daemons(); return d.length === 1 && d[0] !== old && healthy() ? d[0] : null; }, ms);
   const first = daemons();
   expect(first.length, first.join(" ")).toBe(1);
-  // what the bridge asks for after a Claude sign-in or a gateway enrollment
+  // what the operator does after a Claude sign-in or a gateway enrollment
   expect(JSON.parse(sh("curl -s -X POST -d '{}' http://127.0.0.1:8096/api/daemon/restart"))).toEqual({ ok: true, restarted: true });
   const second = await replaced(first[0], 60_000);
   expect(second, "one new daemon, healthy").toBeTruthy();

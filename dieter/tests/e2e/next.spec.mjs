@@ -130,7 +130,7 @@ test("next/ follows Home Assistant's theme without a reload: dark mode, and the 
   await context.close();
 });
 
-// ---- the web host (the page's core on the JVM, user dieter-web, loopback, per-boot secret)
+// ---- the web host (the page's core on the JVM, user dieter-web, the add-on's front door)
 
 test("next/ reaches the web host over next/core through Ingress and gets its hello", async ({ page }) => {
   const socket = page.waitForEvent("websocket", (ws) => /\/next\/core$/.test(ws.url()));
@@ -175,17 +175,16 @@ test("other deep links <HA>/app/<slug>/next/<route> become the page's ?route=", 
   expect(frame().url()).toMatch(/\/t0ken\/next\/$/);
 });
 
-test("agents cannot use the web host: private state, no answer without the secret", async () => {
-  const sh = (cmd) => execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
-  expect(sh("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8097/next/signin?code=a")).toBe("403");
+test("agents cannot use the web host: private state, another user's process, its core not on loopback", async () => {
+  const sh = (cmd, user = "dieter") => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
   expect(sh("ls /data/web-host >/dev/null 2>&1 && echo readable || echo denied")).toBe("denied");
   expect(sh("stat -c '%U %a' /data/web-host")).toBe("dieter-web 700");
-  // the bridge holds the secret only in memory: not in its environment, not on an open descriptor
-  expect(sh("for p in /proc/[0-9]*; do tr '\\0' '\\n' < $p/environ 2>/dev/null; done | grep -c '^DIETER_WEB_HOST_SECRET=' || true")).toBe("0");
-  expect(sh("ls -l /proc/[0-9]*/fd 2>/dev/null | grep -c 'secret' || true")).toBe("0");
-  const bridge = sh("pgrep -o -f dieter_bridge.py");
-  expect(sh(`cat /proc/${bridge}/environ >/dev/null 2>&1 && echo readable || echo denied`)).toBe("denied");
-  expect(sh(`head -c1 /proc/${bridge}/mem >/dev/null 2>&1 && echo readable || echo denied`)).toBe("denied");
-  const host = execFileSync("docker", ["exec", "dieter-e2e", "sh", "-c", "ps -o user:20=,rss=,args= -C java"]).toString();
+  const host = sh("ps -o user:20=,rss=,args= -C java", "root");
   expect(host).toMatch(/^dieter-web\s+\d+\s+java .*dieter-web-host\.jar/m);
+  const pid = sh("pgrep -u dieter-web -f dieter-web-host.jar", "root");
+  expect(sh(`cat /proc/${pid}/environ >/dev/null 2>&1 && echo readable || echo denied`)).toBe("denied");
+  expect(sh(`head -c1 /proc/${pid}/mem >/dev/null 2>&1 && echo readable || echo denied`)).toBe("denied");
+  // it serves the Ingress port itself (bridge-api.spec: the core refuses loopback); no Python front door any more
+  expect(sh("pgrep -f '[d]ieter_bridge.py' || echo none", "root")).toBe("none");   // [d]: not this shell's own line
+  expect(sh("test -e /opt/bridge && echo there || echo gone", "root")).toBe("gone");
 });

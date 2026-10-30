@@ -3,7 +3,7 @@
 // host tools of the Dieter turn that runs this agy process (present_content, the background process
 // tools) and forwards each call to the harness runtime (antigravity-runtime.mjs), which serves them
 // at DIETER_AGY_TOOLS_URL (Bearer DIETER_AGY_TOOLS_TOKEN) in agy's environment. Registered once by
-// the add-on's bridge: `agy mcp add dieter /usr/local/bin/node /opt/dieter-runtime/antigravity-host-tools.mjs`.
+// the add-on's operator: `agy mcp add dieter /usr/local/bin/node /opt/dieter-runtime/antigravity-host-tools.mjs`.
 // Started by agy outside a Dieter turn (no URL in the environment) it offers no tools.
 import readline from "node:readline";
 

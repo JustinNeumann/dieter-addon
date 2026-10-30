@@ -23,16 +23,15 @@ add-on page's URL (`/hassio/addon/<slug>`) and is needed for the package below. 
 
 ## What runs in the container
 
-The bridge, the daemon and every agent run as the unprivileged user `dieter` (uid 1000); `/data` is
+The operator, the daemon and every agent run as the unprivileged user `dieter` (uid 1000); `/data` is
 handed to that user at start. Claude Code refuses its allow-all mode under root, and agents should
 not be root anyway.
 
 | Piece | Where |
 |---|---|
 | `dieter daemon start --addr 127.0.0.1:4242` | store `/data/dieter`, started and restarted by the operator (again after a Claude sign-in or a gateway enrollment) |
-| bridge `/opt/bridge/dieter_bridge.py` | `0.0.0.0:8099` (Ingress port): serves the page, relays it to the web host and forwards `/api/` (the web host's and Home Assistant's requests: `/api/ha`, the rest_commands) to the operator |
-| operator (same jar, `com.getdieter.operator`) | `127.0.0.1:8096`, user `dieter`: the add-on's API in Kotlin: the daemon and what the options configure (provider tokens, git and gh, Claude Code's note), the board's state and events stream, cards and Home Assistant's side, Dreamfall, Agent instructions, settings, repositories, sign-ins, questions, housekeeping and titles |
-| web host `/opt/web-host/dieter-web-host.jar` (Java 21) | loopback, user `dieter-web`: Dieter's core for the page (signed in to your gateway) and the add-on's own features; state in `/data/web-host` |
+| web host `/opt/web-host/dieter-web-host.jar` (Java 21) | `0.0.0.0:8099` (Ingress port), user `dieter-web`: the add-on's front door. It serves the page (`next/`) and Dieter's core for it (`next/core`, signed in to your gateway, Ingress only) with the add-on's own features, and passes `/api/` (Home Assistant's `/api/ha` and rest_commands, the add-on's features) to the operator; state in `/data/web-host` |
+| operator (same jar, `com.getdieter.operator`) | `127.0.0.1:8096`, user `dieter`: the add-on's API: the daemon and what the options configure (provider tokens, git and gh, Claude Code's note), the board's state and events stream, cards and Home Assistant's side, Dreamfall, Agent instructions, settings, repositories, sign-ins, questions, housekeeping and titles |
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the operator on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR`; staged runtimes of earlier versions are removed, and the Bun it carries is installed as the daemon's managed Bun (`/data/dieter/runtime/tools/bun/<bun version>`), which Oh My Pi's model discovery would otherwise download the whole archive for |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |
 | `hass-cli` 1.0.0 (HA core REST API), `ha-logs` (HA logs) | `/usr/local/bin`; authenticated with the add-on's token, see below |
@@ -40,7 +39,7 @@ not be root anyway.
 | runtime sources of the same build (`/opt/dieter-runtime`, from the fork tag, checksum-verified) | `runner.mjs` + adapters, laid over the archive's `node_modules`; the **Antigravity** adapter is the add-on's own copy (`patches/antigravity-runtime.mjs`, laid over the fork's at image build by `patches/patch_runtime.py`) |
 | project checkouts | `/data/projects/<name>` |
 
-Reads and writes to the bridge are accepted only from the Supervisor network (Ingress forwards
+Reads and writes on port 8099 are accepted only from the Supervisor network (Ingress forwards
 logged-in HA users; HA core calls `http://<slug with - instead of _>:8099/api/ha` and the
 rest_commands). The container runs under an AppArmor profile (`apparmor.txt`): Docker's default
 capability set, no mounts, no writes to kernel interfaces; file access is unrestricted because the
@@ -55,14 +54,14 @@ agents run arbitrary tooling under `/data`.
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
 | `gateway_url`, `gateway_host_ip`, `machine_name` | enroll the add-on's daemon with your Dieter gateway so the apps see it (see Gateway below); `gateway_host_ip` adds a hosts entry for the gateway's name |
 | `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **Add** → *Clone repository* (Git URL, optional name and base branch) or *New empty repository* (an empty Git repository `/data/projects/<name>` without a remote, registered; an existing folder there is adopted). Boards are listed in the order you choose: drag a board row (touch: long press first) in Projects; the add-on keeps the order for every device. Projects lists the most recently used project first and opens it when the Projects tab is tapped |
-| `log_level` | bridge log level |
+| `log_level` | `debug` adds the web host's core debug lines to the log |
 
 Agents work in `/data/projects/*` on branches; publishing means push branch + pull request. The
 add-on has no access to `/config`.
 
 ## GitHub: pull requests and Actions
 
-The image has the GitHub CLI (`gh`). At start the bridge signs it in with `github_token` and switches git to
+The image has the GitHub CLI (`gh`). At start the add-on signs it in with `github_token` and switches git to
 gh's credential helper, so one token serves clones, pushes, the daemon and the agents (without a token, or
 when the sign-in fails for lack of network, git keeps its plain credential store). What this enables:
 
@@ -83,7 +82,7 @@ when the sign-in fails for lack of network, git keeps its plain credential store
   with *New worktree* and *Pull request* selected; choose *Board default* there to follow the board instead. The Access switches
   of New task (vault, mail) are now passed on as well.
 
-What the token can do, an agent can do, also one led astray by text it reads; agents and the bridge run as
+What the token can do, an agent can do, also one led astray by text it reads; agents and the operator run as
 the same user and can read the token. Keep the token's permissions to the list above and protect the base
 branch on GitHub (a ruleset on `main`: pull request required, no direct pushes, no bypass for
 administrators), then a pull request with your review is the only way into `main`.
@@ -132,7 +131,7 @@ The harnesses run inside the container, so they need their own credentials:
   cat "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
   ```
 
-  The bridge installs it in the add-on's own home so `agy` finds it there. The Antigravity harness runs one headless
+  The add-on installs it in its own home so `agy` finds it there. The Antigravity harness runs one headless
   `agy` per turn with `--dangerously-skip-permissions` (Dieter's allow-all mode), continued with
   `--conversation`. Default model Gemini 3.8 Flash (High); Gemini 4 Argon, Claude Opus/Sonnet 5.5 and
   GPT-OSS are selectable. Dieter's host tools (present_content, the background process tools) reach `agy`
@@ -322,7 +321,7 @@ The agents can drive Home Assistant core with `hass-cli` (REST API through the S
 `HASS_SERVER=http://supervisor/core`, `HASS_TOKEN` = the add-on's token, `homeassistant_api: true`).
 Examples: `hass-cli state list`, `hass-cli state get sensor.x`, `hass-cli service call light.turn_on
 --arguments entity_id=light.x`, `hass-cli raw get /api/config`; WebSocket commands work too
-(`hass-cli raw ws <type>`). The bridge forwards the two variables to the harness workers
+(`hass-cli raw ws <type>`). The add-on forwards the two variables to the harness workers
 (`DIETER_HARNESS_ENV`), so every agent inherits them; Claude Code additionally gets a note in
 `/data/.claude/CLAUDE.md` (replaced only while it is the add-on's own text; edit or empty it as you like).
 The token reaches every service of HA core, so word your tasks accordingly. The Supervisor API is off
@@ -387,9 +386,8 @@ of using the one you opened Home Assistant with.
 
 **What the web host holds:** this install's device key and the gateway session, in `/data/web-host` (part of
 the add-on's backups). It runs as its own user, so the agents (user `dieter`) can neither read that directory
-nor talk to it: it answers only the bridge, which proves itself with a secret created at every start and kept
-only in the bridge's memory (the bridge is non-dumpable, so processes of the agents' user cannot read it), and the
-bridge relays only requests that come through Home Assistant's Ingress, never the agents' own on loopback. The
+nor reach the session: the page's core (`next/core`) and the sign-in return (`next/signin`) answer only Home
+Assistant's Ingress (the Supervisor's network), never loopback, where the agents are. The
 session gives full access to every machine of your Dieter account, like any signed-in app. Sign out in the
 page's Settings, or revoke the device in the Dieter app.
 

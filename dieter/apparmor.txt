@@ -3,7 +3,7 @@
 # AppArmor profile of the Dieter add-on. The Supervisor loads it under the add-on's slug
 # (the name below is replaced), so no rule may reference the profile by name.
 #
-# The container runs s6/bashio, the bridge (python3), the Dieter daemon, tmux, git and the
+# The container runs s6/bashio, the operator and the web host (java), the Dieter daemon, tmux, git and the
 # agent CLIs (claude, codex, agy), and the agents themselves run whatever a task needs
 # (shells, node, npm, pip, …) under /data. File access is therefore unrestricted, like
 # Docker's default profile; what the profile pins down is the capability set (Docker's
@@ -32,7 +32,7 @@ profile dieter flags=(attach_disconnected,mediate_deleted) {
   file,
   umount,
 
-  # the bridge supervises the daemon, tmux and the agents' processes
+  # the operator supervises the daemon, tmux and the agents' processes
   signal (send,receive),
   # the Supervisor/Docker stop the container
   signal (receive) peer=unconfined,

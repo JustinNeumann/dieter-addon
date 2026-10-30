@@ -19,12 +19,11 @@ add-on's Documentation tab (`dieter/DOCS.md`).
 |---|---|
 | `repository.yaml` | add-on repository metadata |
 | `dieter/` | the add-on: `config.yaml` (Ingress on 8099, options, `image:`), `Dockerfile` (HA Debian base, the fork's daemon release sha256-pinned and cosign-verified, `claude`, `codex`, `agy`, `gh`, Java 21 for the web host), `run.sh`, `apparmor.txt`, `DOCS.md` (Documentation tab), `CHANGELOG.md` (Changelog tab), `patches/` (the add-on's Antigravity adapter) |
-| `dieter/bridge/` | the bridge (`dieter_bridge.py`), the add-on's front door: serves Ingress on 8099 (the root forwards to the page at `next/`), relays the page to the web host and forwards `/api/` (Home Assistant's side and the page's) to the operator. The last step of `docs/PLAN.md` (Step 2) moves it into the operator too |
 | `dieter/operator/` | the operator's helper scripts in the image (`/opt/operator`) |
 | `dieter/tests/` | the add-on's end-to-end suite (Playwright against the image, below) and the unit tests of its Antigravity adapter (`unit.sh`) |
 | `fork/` | Git submodule: [JustinNeumann/dieter](https://github.com/JustinNeumann/dieter) (upstream + the add-on's changes). The UI, the core and the Wire models are compiled from here, not copied |
 | `web/` | the browser build (`wasmJs`): the browser actuals of the UI's platform hooks, the loader page, the entry point, `RemoteCore` (the UI's core and the add-on core over a WebSocket) and the add-on's screens (`com.getdieter.addon`, plugged into the fork's `MobileExtensions`) |
-| `host/` | the web host (JVM, user `dieter-web`): Dieter's Kotlin core (`ClientApi`) with the JVM platform and the add-on core, serving both to browsers over one WebSocket; sign-in relay. The same jar holds the *operator* (`com.getdieter.operator`, user `dieter`, 127.0.0.1:8096): the add-on's API (the daemon, the board's state and events stream, cards, Dreamfall, settings, sign-ins), and the agents' `dreamfall` command (`DreamfallCommand`) |
+| `host/` | the web host (JVM, user `dieter-web`), the add-on's front door on 8099: the page's files, Dieter's Kotlin core (`ClientApi`) with the JVM platform and the add-on core, served to browsers over one WebSocket (Ingress only), sign-in return, and `/api/` passed to the operator. The same jar holds the *operator* (`com.getdieter.operator`, user `dieter`, 127.0.0.1:8096): the add-on's API (the daemon, the board's state and events stream, cards, Dreamfall, settings, sign-ins), and the agents' `dreamfall` command (`DreamfallCommand`) |
 | `addon/` | the add-on core: the add-on's own features (gateway enrollment, SSH key, Claude sign-in, settings, agent questions, repositories, Dreamfall boards) as commands and slices, and their rules (`AddonRules`, also compiled into the page). Runs in the web host; the page only draws its slices ([ADR 0005](https://github.com/JustinNeumann/dieter/blob/web-addon/docs/adr/0005-web-client.md)) |
 | `proto/` | `dieter/web/v1/host.proto` (browser ↔ web host: dispatch/observe of `dieter.client.v1` plus `addon_dispatch`/`addon_observe`) and `dieter/addon/v1/addon.proto` (the add-on core's commands and slices) |
 | `tests/` | browser tests (Playwright) of the packed page: selection, find, HTML islands, keyboard, the add-on's screens; `npm run measure` writes the accessibility checklist of `docs/PLAN.md` Phase 2 |
@@ -73,7 +72,7 @@ cd dieter/tests && npm install && npx playwright install chromium   # once
 ./run.sh -g "Dreamfall"   # a subset; --trace on for traces (npx playwright show-trace …)
 ```
 
-The container uses the host network (bridge :18099, daemon :4342, proxy :18100) and keeps its `/data` in
+The container uses the host network (Ingress port :18099, daemon :4342, proxy :18100) and keeps its `/data` in
 `~/.cache/dieter-addon-e2e/data` (`E2E_DATA` for another one). The suite covers the page behind Ingress (loading,
 deep links, sign-in relay, the add-on's screens, Dreamfall) and the contract Home Assistant and the agents rely on
 (`/api/ha`, the rest_commands' endpoints, `api/focus`, the `dreamfall` command).
