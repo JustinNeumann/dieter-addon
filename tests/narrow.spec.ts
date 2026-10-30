@@ -26,7 +26,8 @@ test.describe("a 360 dp phone", () => {
     }
     await settle(page, 800);
     const settings = (await page.getByRole("button", { name: "Settings", exact: true }).boundingBox())!;
-    const nav = (await page.getByRole("tab", { name: "Inbox", exact: true }).boundingBox())!;
+    const inbox = { name: "Inbox", exact: true }; // a tab from Compose 1.13, a button before
+    const nav = (await page.getByRole("tab", inbox).or(page.getByRole("button", inbox)).first().boundingBox())!;
     expect(settings.y + settings.height).toBeLessThanOrEqual(nav.y);
     expect(await page.evaluate(() => [scrollX, scrollY, visualViewport!.scale])).toEqual([0, 0, 1]);
     expect(await page.evaluate(() => getComputedStyle(document.getElementById("dieter")!).touchAction)).toBe("pinch-zoom");

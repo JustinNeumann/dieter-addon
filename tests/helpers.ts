@@ -1,4 +1,11 @@
 import { expect, type Page, type Locator } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+/** The page builds with the fork's Compose 1.12 unless gradle.properties names its own release (composeWebVersion). */
+export const COMPOSE_112 = !/^composeWebVersion=/m.test(readFileSync(path.join(__dirname, "..", "gradle.properties"), "utf8"));
+/** Compose 1.12 keeps a closed popup's entries in the accessibility tree, and nothing else, until a reload. */
+export const STALE_POPUPS = "Compose 1.12 keeps a closed popup's entries in the accessibility tree until a reload";
 
 /** Opens the demo page (?demo), replays a debug navigation script and waits until the UI settles. */
 export async function open(page: Page, script = "", query = ""): Promise<void> {

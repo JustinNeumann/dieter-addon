@@ -1,7 +1,9 @@
 // Screen readers read the accessibility DOM Compose for Web keeps next to its canvas. Compose 1.12 kept a closed
 // popup's entries there (and nothing else) until the next reload; from 1.13 the screen's entries come back.
 import { test, expect, type Page } from "@playwright/test";
-import { open, aria, settle, tap } from "./helpers";
+import { open, aria, settle, tap, COMPOSE_112, STALE_POPUPS } from "./helpers";
+
+test.fail(COMPOSE_112, STALE_POPUPS); // the screen readers' gap while the page builds with 1.12
 
 const TASK = "card Compose web UI behind Ingress";
 

@@ -20,7 +20,7 @@ features over one group at a time.
 | Part | State | Where |
 |---|---|---|
 | Phase 1: bundle served at `next/` behind Ingress | live in add-on 0.6.431.2; checked through HA's frontend over LAN (first frame 1.3 s) and Nabu Casa (4.6 s); Companion app still to check by a person | add-on `dieter_bridge.py` (`serve_web`), `web/`, `tools/package.sh`, release v0.1.0 |
-| Phase 2: selection, find, accessibility | released in v0.3.0: selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open. Known limit until v0.4.4: Compose 1.12 kept a closed popup's nodes in the accessibility tree (the page builds with Compose 1.13 since) | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
+| Phase 2: selection, find, accessibility | released in v0.3.0: selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open. Known limit: Compose 1.12 keeps a closed popup's nodes in the accessibility tree (v0.4.4 built with 1.13.0-beta01, whose text input loses keys; v0.4.5 is back on 1.12, see the open issues) | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
 | Phase 3: theme from HA | live; the real HA frontend hands light and dark with its colours to the page | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
 | 4.0 web host + `RemoteCore` | built; verified against Dieter's isolated fixture gateway (real boards, conversations, sending runs a turn) and in the add-on e2e | `host/`, `proto/dieter/web/v1/host.proto`, `web/…/RemoteCore.kt`, add-on `run.sh` + bridge relay |
 | 4.0 sign-in | live: signed in with GitHub and paired as "Home Assistant (web)" on 2026-10-29. Since ADR 0005 the core chooses the return address per attempt (`BeginSignIn.redirect_uri`, `RuntimeConfig.oauthRedirectPerAttempt`); the "paste the callback URL" fallback is gone | `SignInRelay.kt`, fork `identity/SignIn.kt`, add-on DOCS "Signing in the new page" |
@@ -239,12 +239,18 @@ bundle.
 
 **Open issues**
 
-- ~~**Compose for Web keeps a closed popup in the accessibility tree.**~~ Fixed in v0.4.4: Compose 1.12's
-  `ComposeWebSemanticsListener` kept only the last added `SemanticsOwner`, so after a menu, dialog or sheet
-  closed `#cmp_a11y_root` held the popup's nodes until the page reloaded. Compose 1.13 keeps every open
-  layer's owner; the page builds with 1.13.0-beta01 (`composeWebVersion` in `gradle.properties`, the fork's
-  apps stay on 1.12) until 1.13.0 is out. 1.13 also exposes the navigation items as tabs and narrows the
-  canvas' `touch-action`. Test: `tests/popups.spec.ts`.
+- **Compose for Web keeps a closed popup in the accessibility tree.** Compose 1.12's
+  `ComposeWebSemanticsListener` keeps only the last added `SemanticsOwner`, so after a menu, dialog or sheet
+  closed `#cmp_a11y_root` holds the popup's nodes until the page reloads. Compose 1.13 keeps every open
+  layer's owner, and v0.4.4 built the page with 1.13.0-beta01 (`composeWebVersion` in `gradle.properties`).
+  That beta's text input is new, though: a `contenteditable` instead of a `textarea`, with its own offset
+  arithmetic. With a keyboard, a field that changed (an error appeared) and is tapped again loses the keys
+  typed next (the backing input goes away while the field keeps Compose's focus), and fast typing can arrive
+  out of order ("https//127.0.0.1:19:"). A probe on the add-on's Gateway address field lost the second entry
+  in 3 of 5 tries at 120 ms between keys; 1.12 typed all 20. A paste (one input event) is fine. Not reported
+  upstream yet. v0.4.5 builds with the fork's 1.12 again; set `composeWebVersion` once a 1.13 build types
+  reliably. While the page is on 1.12, `tests/popups.spec.ts` is expected to fail and `tests/archive.spec.ts`
+  (it reads the tree after a dialog) is skipped.
 - **DOM focus does not follow Compose focus** (except into text fields). Tab moves Compose's focus, but a
   screen reader's focus and the browser's focus ring stay on the canvas.
 - **Escape inside a text field** goes to the field's input element, not to the back handlers, so New task
@@ -414,7 +420,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Attachments in messages, image previews | ✅ | picker ✅; an attached image shows as the picture in the chat (Compose's `decodeToImageBitmap` of the part's data or base64 data URL, the core's `Attachments.bytes`), other files and images it cannot draw (SVG) as file tiles; a tap opens the viewer (row below), other types open in a new tab or download (Blob URL) | `an attached image and a tool's screenshot show as pictures…` (`tests/images.spec.ts`) |
 | **Images from the agent**: tool-result images; `![](path)` from the checkout | ✅ tool results / `![](path)` stays a link (decided) | the core's `ToolImages` flags a tool step whose output preview holds an image (the bridge's rule) and finds the images in its output (Claude Code's Read, MCP screenshots, data URLs; at most 4); the timeline loads such a step's output and shows its images under the row; the tool sheet shows them above the output, whose base64 becomes "‹image/png · 12 KB›" | `a tool's output shows its images above the text…` |
 | **Agent questions** (Claude's AskUserQuestion relayed by the fork's worker, options + free text, decline, expiry) | ✅ add-on core (`questions` slice, `AnswerQuestion`), conversation widget | `conversationWidgets` extension + bridge `questions` endpoints; Inbox section | `a question from the agent is shown on the card…` |
-| Full-screen image viewer | ✅ | web actual of `rememberAttachmentViewer`: a popup over the whole window (dark backdrop, the image fitted and never enlarged; a tap, ✕ or Escape closes it; "Open in a new tab" for the browser's zoom). Like every popup, its nodes stay in Compose for Web's accessibility tree after it closes (see the accessibility notes); the test judges the close by pixels | `…open full screen; Escape closes` |
+| Full-screen image viewer | ✅ | web actual of `rememberAttachmentViewer`: a popup over the whole window (dark backdrop, the image fitted and never enlarged; a tap, ✕ or Escape closes it; "Open in a new tab" for the browser's zoom). On Compose 1.12 its nodes stay in the accessibility tree after it closes, like every popup's (see the open issues); the test judges the close by pixels | `…open full screen; Escape closes` |
 
 #### G. Mail
 
