@@ -97,6 +97,7 @@ class DreamfallTest {
         val board = list.dreamfalls.single()
         assertEquals("Nightly", board.name)
         assertEquals("Dieter · 3 ideas", board.detail)
+        assertEquals(3, board.ideas, "Projects' row counts each idea once")
         assertEquals(1, board.waiting, "the idea Navigation holds for the person")
         assertEquals(listOf("b-e", "b-n", "b-i"), board.board_ids)
     }

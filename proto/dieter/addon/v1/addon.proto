@@ -508,6 +508,8 @@ message DreamfallSummary {
   string project_id = 5;
   // Its stage boards, which open as the Dreamfall board.
   repeated string board_ids = 6;
+  // Every idea once (the card it started as); copies on later stages don't count.
+  int32 ideas = 7;
 }
 
 message DreamfallSlice {

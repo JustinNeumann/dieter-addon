@@ -118,7 +118,7 @@ test.describe("@measure Phase 2 checklist", () => {
       record(s.name, { tab, space });
 
       // Escape closes the screen's menu (or the screen, when it is a modal one). Menus are judged by
-      // their pixels: Compose for Web keeps a closed popup in the accessibility tree (recorded too).
+      // their pixels; whether the closed menu stays in the accessibility tree is recorded too (Compose 1.12 kept it).
       await open(page, s.script);
       let escape = "n/a";
       let staleTree: boolean | undefined;
@@ -138,7 +138,7 @@ test.describe("@measure Phase 2 checklist", () => {
         const snap = await aria(page);
         const menu = (s.menus || []).find((m) => snap.includes(`button "${m}"`));
         if (menu) {
-          // While a popup is open the tree holds only the popup: measure the button once.
+          // Measure the button once, before the popup covers it.
           const button = (await page.getByRole("button", { name: menu, exact: true }).last().boundingBox())!;
           const before = await belowButton(page, button);
           await page.mouse.click(button.x + button.width / 2, button.y + button.height / 2);

@@ -17,7 +17,11 @@ pluginManagement {
         id("org.jetbrains.kotlin.jvm") version v("kotlin")
         id("org.jetbrains.kotlin.plugin.compose") version v("kotlin")
         id("org.jetbrains.kotlin.plugin.serialization") version v("kotlin")
-        id("org.jetbrains.compose") version v("compose-multiplatform")
+        // gradle.properties' composeWebVersion (the page's own Compose release), else the fork's
+        val composeWeb =
+            settingsDir.resolve("gradle.properties").readLines()
+                .firstNotNullOfOrNull { Regex("""^composeWebVersion=(\S+)""").find(it)?.groupValues?.get(1) }
+        id("org.jetbrains.compose") version (composeWeb ?: v("compose-multiplatform"))
         id("com.squareup.wire") version v("wire")
     }
 }

@@ -17,7 +17,10 @@ import com.getdieter.api.v1.ToolOutput
 import com.getdieter.api.v1.UiMessage
 import com.getdieter.api.v1.WorkspaceSummary
 import com.getdieter.client.v1.*
+import com.getdieter.core.admin.BoardRetirement
 import com.getdieter.core.board.Lanes
+import com.getdieter.core.runtime.CoreException
+import com.getdieter.core.runtime.FailureKind
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import okio.ByteString.Companion.encodeUtf8
@@ -136,6 +139,16 @@ class DemoData {
         boundBoard = id
     }
 
+    private val retired = mutableSetOf<String>()
+
+    /** Archives (retires) or restores a board; like the daemon, only an empty one. */
+    fun setRetired(id: String, value: Boolean) {
+        val kept = cards.firstOrNull { it.board_id == id }
+        if (value && kept != null)
+            throw CoreException(FailureKind.PERMANENT, BoardRetirement.refusal("board has surviving card ${kept.id}")!!)
+        if (value) retired += id else retired -= id
+    }
+
     fun move(id: String, lane: String) {
         val index = cards.indexOfFirst { it.id == id }
         if (index >= 0) cards[index] = cards[index].copy(lane = lane, updated_at = at(0))
@@ -170,7 +183,8 @@ class DemoData {
     private fun workspace() =
         WorkspaceSlice(
             projects = projects,
-            boards = boards,
+            boards = boards.filter { it.id !in retired },
+            retired_boards = boards.filter { it.id in retired }.map { it.copy(retired = true) },
             cards = allCards,
             loaded = true,
             board_attention = mapOf("b-addon" to 1, "b-home" to 0, "b-dieter" to 1),

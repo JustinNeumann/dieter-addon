@@ -13,6 +13,7 @@ import com.getdieter.addon.v1.Slice
 import com.getdieter.core.quotas.Quotas
 import com.getdieter.mobile.app.*
 import com.getdieter.mobile.design.*
+import com.getdieter.mobile.extensions.UsageBar
 import com.getdieter.mobile.store.MobileStore
 import kotlin.time.Clock
 import kotlinx.coroutines.delay
@@ -21,6 +22,13 @@ import kotlinx.coroutines.delay
  * Antigravity's quota groups, which the add-on reads with agy (the daemon reports no Antigravity usage): one card
  * per group, drawn like the provider accounts above it. Hidden while the add-on has no Antigravity credentials.
  */
+/** The Inbox's usage strip: one Antigravity bar at its tightest group, once agy has reported. */
+@Composable
+internal fun antigravityBars(): List<UsageBar> {
+    val groups = rememberAddonSlice(Slice.SLICE_ANTIGRAVITY)?.antigravity?.groups.orEmpty()
+    return remember(groups) { groups.minOfOrNull { it.remaining }?.let { listOf(UsageBar("Antigravity", it)) }.orEmpty() }
+}
+
 @Composable
 internal fun AntigravitySection(store: MobileStore) {
     val slice = rememberAddonSlice(Slice.SLICE_ANTIGRAVITY)?.antigravity ?: return

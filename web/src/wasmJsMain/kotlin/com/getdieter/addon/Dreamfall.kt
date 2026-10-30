@@ -40,6 +40,7 @@ import com.getdieter.addon.v1.TrailEvent
 import com.getdieter.addon.v1.Verdict
 import com.getdieter.mobile.app.*
 import com.getdieter.mobile.design.*
+import com.getdieter.mobile.extensions.BoardGroup
 import com.getdieter.mobile.extensions.BoardRenderer
 import com.getdieter.mobile.navigation.MobileRoute
 import com.getdieter.mobile.store.MobileStore
@@ -91,6 +92,32 @@ internal fun openIdea(store: MobileStore, card: String) = store.push(MobileRoute
 internal fun dreamfallWaiting(): String? =
     rememberDreamfalls()?.dreamfalls?.sumOf { it.waiting }?.takeIf { it > 0 }?.let { "$it waiting" }
 
+/** Projects lists a Dreamfall board's stage boards as one row: its ideas, and a badge for those waiting for the person. */
+@Composable
+internal fun dreamfallGroups(): List<BoardGroup> {
+    val list = rememberDreamfalls()?.dreamfalls ?: return emptyList()
+    return remember(list) {
+        list.filter { it.board_ids.isNotEmpty() }.map { d ->
+            BoardGroup(
+                boardIds = d.board_ids,
+                title = d.name,
+                subtitle =
+                    listOfNotNull(
+                            "Dreamfall",
+                            "${d.ideas} ${if (d.ideas == 1) "idea" else "ideas"}",
+                            if (d.waiting > 0) "${d.waiting} waiting for you" else null,
+                        )
+                        .joinToString(" · "),
+                glyph = Glyph.WATERFALL,
+                tint = DREAMFALL_TINT,
+                value = "${d.ideas}",
+                attention = d.waiting,
+                route = MobileRoute.Board(d.board_ids.first()),
+            )
+        }
+    }
+}
+
 // ---- Tools → Dreamfall
 
 @Composable
@@ -106,7 +133,7 @@ internal fun DreamfallListScreen(store: MobileStore) {
                     list == null || list.loading || list.error.isNotEmpty() -> StatusRow(list?.error.orEmpty(), "Dreamfall", actions::refresh)
                     list.dreamfalls.isEmpty() ->
                         EmptyState(
-                            Glyph.SPARKLES,
+                            Glyph.WATERFALL,
                             "No Dreamfall boards",
                             "A Dreamfall board finds ideas for a project every night and lets you pick what gets built.",
                             Modifier.padding(top = 48.dp),
@@ -121,7 +148,7 @@ internal fun DreamfallListScreen(store: MobileStore) {
                                 position = position,
                                 subtitle = d.detail,
                                 value = if (d.waiting > 0) "${d.waiting} waiting" else null,
-                                glyph = Glyph.SPARKLES,
+                                glyph = Glyph.WATERFALL,
                                 tile = Color(DREAMFALL_TINT),
                                 accessory = Accessory.CHEVRON,
                                 onClick = { store.push(MobileRoute.Extension("dreamfall", d.id)) },
@@ -189,7 +216,7 @@ internal fun DreamfallBoardScreen(store: MobileStore, scope: String) {
             when {
                 board == null || board.loading ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner(Modifier.size(28.dp)) }
-                board.missing -> EmptyState(Glyph.SPARKLES, "Not available", board.error, Modifier.padding(top = 48.dp))
+                board.missing -> EmptyState(Glyph.WATERFALL, "Not available", board.error, Modifier.padding(top = 48.dp))
                 else ->
                     BoxWithConstraints(Modifier.fillMaxSize()) {
                         val wide = maxWidth >= 900.dp

@@ -44,6 +44,11 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
             publish(Slice.SLICE_CREATION, "")
         }
         command.load_tool_output?.let { return Result(tool_output = data.toolOutput(it)) }
+        command.admin?.set_board_retired?.let { retire ->
+            data.setRetired(retire.board_id, retire.retired)
+            observers.keys.filter { it.first == Slice.SLICE_BOARD_VIEW || it.first == Slice.SLICE_WORKSPACE }
+                .forEach { publish(it.first, it.second) }
+        }
         command.files?.let { files ->
             extras.filesCommand(files)
             publish(Slice.SLICE_FILES, files.scope)

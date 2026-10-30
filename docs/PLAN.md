@@ -20,7 +20,7 @@ features over one group at a time.
 | Part | State | Where |
 |---|---|---|
 | Phase 1: bundle served at `next/` behind Ingress | live in add-on 0.6.431.2; checked through HA's frontend over LAN (first frame 1.3 s) and Nabu Casa (4.6 s); Companion app still to check by a person | add-on `dieter_bridge.py` (`serve_web`), `web/`, `tools/package.sh`, release v0.1.0 |
-| Phase 2: selection, find, accessibility | released in v0.3.0: selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open. Known limit: Compose 1.12 keeps a closed popup's nodes in the accessibility tree until the next popup (fixed in Compose 1.13) | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
+| Phase 2: selection, find, accessibility | released in v0.3.0: selection areas, Ctrl/⌘+F find, semantics fixes, HTML islands for mail and Markdown files, offline diagrams; Playwright suite + CI job; screen-reader runs by a person still open. Known limit until v0.4.4: Compose 1.12 kept a closed popup's nodes in the accessibility tree (the page builds with Compose 1.13 since) | `tests/`, `web/…/platform/Islands.kt`, `MarkdownHtml.kt`, submodule branch `web-phase2` (`design/Find.kt`) |
 | Phase 3: theme from HA | live; the real HA frontend hands light and dark with its colours to the page | `index.html` (`dieterHost`), `WebHost.kt`, `Platform.wasmJs.kt` |
 | 4.0 web host + `RemoteCore` | built; verified against Dieter's isolated fixture gateway (real boards, conversations, sending runs a turn) and in the add-on e2e | `host/`, `proto/dieter/web/v1/host.proto`, `web/…/RemoteCore.kt`, add-on `run.sh` + bridge relay |
 | 4.0 sign-in | live: signed in with GitHub and paired as "Home Assistant (web)" on 2026-10-29. Since ADR 0005 the core chooses the return address per attempt (`BeginSignIn.redirect_uri`, `RuntimeConfig.oauthRedirectPerAttempt`); the "paste the callback URL" fallback is gone | `SignInRelay.kt`, fork `identity/SignIn.kt`, add-on DOCS "Signing in the new page" |
@@ -239,10 +239,12 @@ bundle.
 
 **Open issues**
 
-- **Compose for Web keeps a closed popup in the accessibility tree.** After any menu, dialog or sheet closes,
-  `#cmp_a11y_root` keeps the popup's nodes until the page reloads ("closed menu left in tree": yes on Board,
-  Conversation, Mail, Files). `ComposeWebSemanticsListener` keeps only the last added `SemanticsOwner`.
-  Screen readers then read stale content. To report upstream (no issue found yet); no workaround in `:ui`.
+- ~~**Compose for Web keeps a closed popup in the accessibility tree.**~~ Fixed in v0.4.4: Compose 1.12's
+  `ComposeWebSemanticsListener` kept only the last added `SemanticsOwner`, so after a menu, dialog or sheet
+  closed `#cmp_a11y_root` held the popup's nodes until the page reloaded. Compose 1.13 keeps every open
+  layer's owner; the page builds with 1.13.0-beta01 (`composeWebVersion` in `gradle.properties`, the fork's
+  apps stay on 1.12) until 1.13.0 is out. 1.13 also exposes the navigation items as tabs and narrows the
+  canvas' `touch-action`. Test: `tests/popups.spec.ts`.
 - **DOM focus does not follow Compose focus** (except into text fields). Tab moves Compose's focus, but a
   screen reader's focus and the browser's focus ring stay on the canvas.
 - **Escape inside a text field** goes to the field's input element, not to the back handlers, so New task
@@ -378,6 +380,8 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | **New folder** (empty Git repo, registered) | ✅ add-on core, Projects → Add → New empty repository | same | `a new folder becomes a project…` |
 | **New board** (Review lane switch, Publishing mode) | ✅ | the shared New Board sheet has the Review lane switch and a Publish picker (Manual, Push base, Pull request; `publish_mode` on `AdminCreateBoard`), the same modes as the board settings | `a new board is added next to Main…` |
 | Board order by drag (kept for all devices) | ✅ | the bridge keeps one order for both pages (`board_order`): the add-on core reads it into `SettingsSlice.board_order` and `OrderBoards` saves a drop; the fork's `MobileExtensions.boardOrder` sorts a project's boards by it in Projects and the project screen, and a board row is dragged after a long press (as cards are) | `Projects: a board dragged after a long press keeps its place…` (add-on e2e) |
+| Dreamfall board as one row in Projects | ✅ | as on the classic page: a Dreamfall board's stage boards are one purple row (waterfall glyph, its ideas, a badge for ideas waiting for the person; "Dreamfall · N ideas · M waiting for you" on the project's page) in the place of its first stage board, dragged as one; the fork's `MobileExtensions.boardGroups`, filled from `DreamfallSummary` (new `ideas`) | `Projects lists the Dreamfall board as one row…` (add-on e2e) |
+| Archive board (new, not on the classic page) | ✅ | Dieter's retirement (`SetBoardRetired`): the board menu's "Archive board…" retires an empty board, its project's page lists it under "Archived boards", and the board offers Restore. The daemon keeps any board with cards (archived ones included, and Dieter can neither delete cards nor move them to another board) or schedules; the core says so in the person's words (`BoardRetirement.refusal`) | `tests/archive.spec.ts`, `aBoardTheDaemonKeepsSaysWhy` |
 | Publishing per board (Manual / Pull request / Push to base) | ✅ | verify | |
 
 #### D. Board
@@ -431,7 +435,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Machines | **SSH key** of the add-on, copy, connection test | ✅ add-on core (`ssh` slice, `TestSsh`) | extension section + bridge `ssh` endpoints | `Machines shows the add-on's own SSH key…` |
 | Files | browse, dotfiles, text/images, download | ✅ | "Open preview" goes through the attachment viewer: a new tab, or a download for types a browser does not show | `Files browses the project's checkout…` |
 | Schedules | list, create (presets, preview), run, pause, history, delete | ✅ | verify presets and next-run preview | `Schedules: create with the mock agent…` |
-| Usage | quotas (Claude, Codex, Antigravity groups) | ✅ | checked live (OpenAI, Claude accounts and windows, the add-on's Claude sign-in). The daemon reports no Antigravity usage (the classic page asks `agy --print=/quota` through the bridge): the add-on core streams the bridge's `quota` and `backends` into `SLICE_ANTIGRAVITY` and Usage gets an Antigravity section while the add-on has its credentials (one card per group, its tightest window, reset times through the core's `Quotas.resetText`); checked live with the add-on's Antigravity account (3 groups, add-on 0.6.431.7) and with a stand-in `agy` in the e2e container, the mapping in `AddonCoreTest`. Reset times show as raw ISO stamps ("resets 2026-10-30T01:29:59…") in upstream's shared Usage screen, in every app: the core's `QuotaRows.window` passes `resets_at` through (its test expects that) while the widget uses `Quotas.resetText`. Upstream fix, see `docs/proposals/web-client.md` | `antigravitysQuotaGroupsComeFromTheBridge` |
+| Usage | quotas (Claude, Codex, Antigravity groups) | ✅ | checked live (OpenAI, Claude accounts and windows, the add-on's Claude sign-in). The daemon reports no Antigravity usage (the classic page asks `agy --print=/quota` through the bridge): the add-on core streams the bridge's `quota` and `backends` into `SLICE_ANTIGRAVITY` and Usage gets an Antigravity section while the add-on has its credentials (one card per group, its tightest window, reset times through the core's `Quotas.resetText`); checked live with the add-on's Antigravity account (3 groups, add-on 0.6.431.7) and with a stand-in `agy` in the e2e container, the mapping in `AddonCoreTest`. The Inbox's usage strip shows Antigravity as a third bar (its tightest group) through the fork's `MobileExtensions.usageBars`. Reset times show as raw ISO stamps ("resets 2026-10-30T01:29:59…") in upstream's shared Usage screen, in every app: the core's `QuotaRows.window` passes `resets_at` through (its test expects that) while the widget uses `Quotas.resetText`. Upstream fix, see `docs/proposals/web-client.md` | `antigravitysQuotaGroupsComeFromTheBridge` |
 | Usage | **Claude sign-in** (`claude auth login`, paste code, cancel, logout) | ✅ add-on core (`claude` slice, sign-in/code/cancel/sign-out commands) | extension section + bridge `claude` endpoints | `Usage offers the Claude sign-in…` |
 | Changes | project changes | ✅ | none | |
 | Devices | trust state, approve code, remove | ✅ | none (refusal message when not enrolled) | `Devices shows the daemon's trust state…` |

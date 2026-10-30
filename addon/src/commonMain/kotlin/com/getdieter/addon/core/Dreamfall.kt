@@ -320,6 +320,7 @@ internal class Dreamfall(
                         waiting = waiting(p),
                         project_id = p.str("project_id"),
                         board_ids = p.objects("stages").map { it.str("board_id") },
+                        ideas = ideaTotal(p),
                     )
                 },
         )
