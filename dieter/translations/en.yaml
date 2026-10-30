@@ -20,6 +20,9 @@ configuration:
   web_sign_in_callback:
     name: New page sign-in address
     description: "Optional. Where your Dieter gateway sends the browser back after GitHub sign-in on the new page, e.g. https://<your Home Assistant address>/app/<this add-on's slug>/next/signin. Empty: the address you opened Home Assistant with. The gateway must list it in DIETER_NATIVE_REDIRECT_URIS."
+  api_key:
+    name: API key
+    description: "Optional. Lets a caller other than Home Assistant itself use the add-on's Home Assistant routes (sensor, new card, follow-up, move, focus) with the header Authorization: Bearer <key>, e.g. dieter_task.py from the SSH add-on. Empty: only Home Assistant (and its Ingress) can call the add-on."
   projects:
     name: Projects
     description: "Repositories to clone into /data/projects and register with Dieter: name, git_url, branch (optional)."

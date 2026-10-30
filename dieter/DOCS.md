@@ -39,9 +39,20 @@ not be root anyway.
 | runtime sources of the same build (`/opt/dieter-runtime`, from the fork tag, checksum-verified) | `runner.mjs` + adapters, laid over the archive's `node_modules`; the **Antigravity** adapter is the add-on's own copy (`patches/antigravity-runtime.mjs`, laid over the fork's at image build by `patches/patch_runtime.py`) |
 | project checkouts | `/data/projects/<name>` |
 
-Reads and writes on port 8099 are accepted only from the Supervisor network (Ingress forwards
-logged-in HA users; HA core calls `http://<slug with - instead of _>:8099/api/ha` and the
-rest_commands). The container runs under an AppArmor profile (`apparmor.txt`): Docker's default
+Port 8099 answers, as Home Assistant's add-on rules ask, the Supervisor only, plus Home Assistant's own calls:
+
+- **Ingress** (the Supervisor, `172.30.32.2`), i.e. a person signed in to Home Assistant: the page, its core and the
+  whole API.
+- **Home Assistant itself** (`172.30.32.1`: its REST sensor `http://<slug with - instead of _>:8099/api/ha`, the
+  rest_commands and scripts), or any caller with the **API key** option as `Authorization: Bearer <key>`: only
+  Home Assistant's routes, `GET /api/ha`, `GET /api/state`, `POST /api/card`, `POST /api/<kind>/<id>/send`,
+  `POST /api/card/<id>/move` and `POST /api/focus`. Add-ons with host networking reach the add-on from the same
+  address as Home Assistant, so they get these routes too.
+- **Nobody else**: not other add-ons (`172.30.33.x`), not the agents on loopback. Only Ingress names a Home
+  Assistant user to the add-on.
+
+The API key reaches the web host only; the operator and the agents get a copy of the options without it. The
+container runs under an AppArmor profile (`apparmor.txt`): Docker's default
 capability set, no mounts, no writes to kernel interfaces; file access is unrestricted because the
 agents run arbitrary tooling under `/data`.
 
@@ -53,6 +64,7 @@ agents run arbitrary tooling under `/data`.
 | `github_token` | token for github.com, used for every clone and push and for pull requests and Actions through the GitHub CLI (see GitHub below). Fine-grained, for *All repositories* or the repos you want: Contents read/write, Pull requests read/write, Actions read, Checks read, Commit statuses read, Metadata read; Workflows read/write only if agents may change `.github/workflows`; no Administration, Secrets or Actions write. Or classic `repo` (and `workflow`). Stored in `/data/.config/gh/hosts.yml` (gh's sign-in; git takes it from there) |
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
 | `gateway_url`, `gateway_host_ip`, `machine_name` | enroll the add-on's daemon with your Dieter gateway so the apps see it (see Gateway below); `gateway_host_ip` adds a hosts entry for the gateway's name |
+| `api_key` | optional; lets a caller other than Home Assistant (e.g. `dieter_task.py` in the SSH add-on) use Home Assistant's routes with `Authorization: Bearer <key>` (see *What runs in the container*) |
 | `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **Add** → *Clone repository* (Git URL, optional name and base branch) or *New empty repository* (an empty Git repository `/data/projects/<name>` without a remote, registered; an existing folder there is adopted). Boards are listed in the order you choose: drag a board row (touch: long press first) in Projects; the add-on keeps the order for every device. Projects lists the most recently used project first and opens it when the Projects tab is tapped |
 | `log_level` | `debug` adds the web host's core debug lines to the log |
 

@@ -21,8 +21,9 @@ import kotlinx.serialization.json.put
  *   DIETER_BIN             the Dieter CLI, default /usr/local/bin/dieter (DIETER_HOME and the daemon address
  *                          come from the environment, as for the bridge)
  *   BRIDGE_SETTINGS_FILE   the add-on's settings, default /data/bridge_settings.json
- *   DIETER_OPTIONS_FILE    the add-on's options as the Supervisor writes them, default /data/options.json (missing:
- *                          not an add-on); DIETER_PROJECTS_DIR  where repositories go, default /data/projects
+ *   DIETER_OPTIONS_FILE    the add-on's options, default /data/options.json (missing: not an add-on); run.sh passes
+ *                          a copy without api_key, which only the web host gets
+ *   DIETER_PROJECTS_DIR    where repositories go, default /data/projects
  *   SUPERVISOR_TOKEN       Home Assistant through the Supervisor (set inside the add-on)
  *   DIETER_VERSION         the fork release in the image, whose harness runtime is staged (the Dockerfile sets it)
  *   DIETER_RUNTIME_SRC     the runtime sources of that build, default /opt/dieter-runtime

@@ -69,7 +69,7 @@ RUN set -eu; \
     claude --version && codex --version && agy --version
 
 # GitHub CLI: the daemon's pull-request operations (create_pr, refresh_pr, merge_pr) need `gh` on the host, and
-# the agents read checks, Actions runs and pull requests with it. The bridge signs it in with the github_token
+# the agents read checks, Actions runs and pull requests with it. The operator signs it in with the github_token
 # option (HOME=/data) and lets git take the token from it. Release tarball, sha256 from the release's checksums.
 ARG GH_VERSION=2.103.3
 RUN set -eu; \

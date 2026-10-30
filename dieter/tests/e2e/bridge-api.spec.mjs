@@ -121,15 +121,40 @@ test("hass-cli is in the image, the Supervisor CLI is not", async () => {
   expect(hass).toContain("1.0.0");
 });
 
-test("the page's core (next/core, next/signin) answers Home Assistant's Ingress, not the agents on loopback", async ({ request }) => {
+test("port 8099: Ingress gets everything, Home Assistant its routes, the agents on loopback nothing", async ({ request }) => {
   const port = process.env.BRIDGE_PORT || "18099";
   const upgrade = "-H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13'";
-  const status = (path) => execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "sh", "-c",
-    `curl -s -o /dev/null -w '%{http_code}' --max-time 5 ${upgrade} http://127.0.0.1:${port}/${path}`], { stdio: "pipe" }).toString().trim();
-  expect(status("next/core")).toBe("403");
-  expect(status("next/signin?code=x&state=y")).toBe("403");
-  expect(status("api/state")).toBe("200");                             // the API stays theirs, as the dieter CLI is
+  // run.sh treats 127.0.0.3 as Home Assistant core (BRIDGE_CORE_NETS), as 172.30.32.1 is in the add-on
+  const status = (path, { from = "", method = "GET" } = {}) => execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "sh", "-c",
+    `curl -s -o /dev/null -w '%{http_code}' --max-time 5 ${from && `--interface ${from}`} -X ${method} ${method === "POST" ? "-H 'Content-Type: application/json' -d '{}'" : upgrade} http://127.0.0.1:${port}/${path}`],
+    { stdio: "pipe" }).toString().trim();
+  for (const path of ["next/core", "next/signin?code=x&state=y", "next/", "api/state", "api/questions"]) expect(status(path), path).toBe("403");
+  expect(status("api/gateway/unenroll", { method: "POST" })).toBe("403");
+  expect(status("api/ha", { from: "127.0.0.3" })).toBe("200");
+  expect(status("api/state", { from: "127.0.0.3" })).toBe("200");
+  for (const path of ["next/core", "next/", "api/questions", "api/settings"]) expect(status(path, { from: "127.0.0.3" }), path).toBe("403");
+  expect(status("api/gateway/unenroll", { from: "127.0.0.3", method: "POST" })).toBe("403");
   expect((await request.get("next/")).status()).toBe(200);               // through Ingress the page and its core work
+  expect((await request.get("api/questions")).status()).toBe(200);
+});
+
+test("the API key reaches the web host only: options.json is root's, the operator reads a copy without it", async () => {
+  const sh = (cmd, user) => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
+  expect(sh("stat -c '%U %a' /data/options.json", "root")).toBe("root 600");
+  expect(sh("cat /data/options.json >/dev/null 2>&1 && echo read || echo denied", "dieter")).toBe("denied");
+  expect(sh("stat -c '%U %a' /data/.operator-options.json", "root")).toBe("dieter 600");
+  expect(sh("jq 'has(\"api_key\")' /data/.operator-options.json", "dieter")).toBe("false");
+  expect(sh("jq -r .git_user /data/.operator-options.json", "dieter")).toBe("E2E");
+  expect(sh("for p in $(pgrep -u dieter); do tr '\\0' '\\n' < /proc/$p/environ 2>/dev/null; done | grep -c '^BRIDGE_API_KEY=' || true", "root")).toBe("0");
+  // tests/run.sh's options set an api_key: with it, any address gets Home Assistant's routes, and only those
+  const key = sh("jq -r '.api_key // \"\"' /data/options.json", "root");
+  test.skip(!key, "options.json without api_key (a data directory from before 0.6.431.24)");
+  const port = process.env.BRIDGE_PORT || "18099";
+  const status = (path, auth, method = "GET") => sh(`curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X ${method} ${auth ? `-H 'Authorization: Bearer ${auth}'` : ""} http://127.0.0.1:${port}/${path}`, "dieter");
+  expect(status("api/ha", key)).toBe("200");
+  expect(status("api/ha", key + "x")).toBe("403");
+  expect(status("api/questions", key)).toBe("403");
+  expect(status("api/gateway/unenroll", key, "POST")).toBe("403");
 });
 
 test("Agent instructions (api/prompts): the daemon's templates, refusals with the daemon's reason, set and reset", async ({ request }) => {

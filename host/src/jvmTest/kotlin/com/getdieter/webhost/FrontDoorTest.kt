@@ -60,10 +60,10 @@ class FrontDoorTest {
         start()
     }
 
-    @Volatile private var allowed = true
-    @Volatile private var ingress = false
+    @Volatile private var ingress = true
+    @Volatile private var core = false
     private val door = FrontDoor(
-        "127.0.0.1", 0, web, java.net.URI.create("http://127.0.0.1:${operator.address.port}/"), { allowed }, { ingress },
+        "127.0.0.1", 0, web, java.net.URI.create("http://127.0.0.1:${operator.address.port}/"), { ingress }, { core }, "k3y",
         onSignIn = { query -> HttpReply(200, "text/html; charset=utf-8", "signed in with $query") },
     ) { ws -> ws.send("core".toByteArray()) }
     private val port = door.start()
@@ -76,8 +76,13 @@ class FrontDoorTest {
         secretFile.delete()
     }
 
-    private fun get(path: String, vararg headers: Pair<String, String>): Response =
-        http.newCall(Request.Builder().url("http://127.0.0.1:$port$path").apply { headers.forEach { (k, v) -> header(k, v) } }.build()).execute()
+    private fun get(path: String, vararg headers: Pair<String, String>): Response = call("GET", path, *headers)
+
+    private fun call(method: String, path: String, vararg headers: Pair<String, String>): Response =
+        http.newCall(Request.Builder().url("http://127.0.0.1:$port$path").apply {
+            headers.forEach { (k, v) -> header(k, v) }
+            if (method == "POST") post("{}".toRequestBody("application/json".toMediaType()))
+        }.build()).execute()
 
     @Test
     fun thePagesFiles() {
@@ -108,11 +113,12 @@ class FrontDoorTest {
     }
 
     @Test
-    fun accessAndThePagesCoreFromIngressOnly() {
-        allowed = false
+    fun onlyIngressIsThePerson() {
+        // anyone else: another add-on, an agent on loopback
+        ingress = false
         get("/api/state").use { assertEquals(403, it.code) }
-        allowed = true
-        get("/next/signin?code=a").use { assertEquals(403, it.code) }   // e.g. an agent on loopback
+        get("/next/").use { assertEquals(403, it.code) }
+        get("/next/signin?code=a").use { assertEquals(403, it.code) }
         val frames = LinkedBlockingQueue<String>()
         fun core() = http.newWebSocket(Request.Builder().url("ws://127.0.0.1:$port/next/core").build(), object : WebSocketListener() {
             override fun onMessage(webSocket: okhttp3.WebSocket, bytes: ByteString) { frames += bytes.utf8() }
@@ -127,6 +133,29 @@ class FrontDoorTest {
             assertEquals("signed in with code=a&state=b", it.body.string())
             assertEquals("no-store", it.header("Cache-Control"))
         }
+    }
+
+    @Test
+    fun homeAssistantAndTheApiKeyReachHomeAssistantsRoutesOnly() {
+        ingress = false
+        core = true
+        val routes = listOf("GET" to "/api/ha", "GET" to "/api/state?fields=projects", "POST" to "/api/card", "POST" to "/api/card/c_1/send",
+            "POST" to "/api/chat/c_1/send", "POST" to "/api/card/c_1/move", "POST" to "/api/focus")
+        for ((method, path) in routes) call(method, path).use { assertEquals(200, it.code, "$method $path") }
+        val others = listOf("GET" to "/api/questions", "POST" to "/api/questions/q1/answer", "POST" to "/api/gateway/unenroll",
+            "POST" to "/api/card/c_1/archive", "GET" to "/next/", "GET" to "/", "GET" to "/next/signin?code=a")
+        for ((method, path) in others) call(method, path).use { assertEquals(403, it.code, "$method $path") }
+        assertEquals("HTTP/1.1 403 Forbidden", raw("POST /api/x/../send HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"))
+        // only Ingress names a Home Assistant user
+        seen.clear()
+        get("/api/ha", "X-Remote-User-Display-Name" to "Ada").use { assertEquals(200, it.code) }
+        assertEquals("GET /api/ha user=null file=null type=null body=", seen.poll(5, TimeUnit.SECONDS))
+        // the API key, from any address, for the same routes
+        core = false
+        get("/api/ha").use { assertEquals(403, it.code) }
+        get("/api/ha", "Authorization" to "Bearer k3y").use { assertEquals(200, it.code) }
+        get("/api/ha", "Authorization" to "Bearer k3y-not").use { assertEquals(403, it.code) }
+        call("POST", "/api/gateway/unenroll", "Authorization" to "Bearer k3y").use { assertEquals(403, it.code) }
     }
 
     @Test
