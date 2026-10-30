@@ -52,10 +52,11 @@ import kotlinx.serialization.json.putJsonObject
 
 /**
  * Dreamfall boards, the add-on's idea funnel: an Enumeration agent writes ideas every night, a
- * Navigation agent judges them, and the person picks what gets built on Implementation. The bridge
- * (bridge/dreamfall.py of the add-on) keeps the records and carries out the actions; it streams the
- * records and the cards of the stage boards. This part of [AddonCore] decides what a board, an idea
- * and the settings form show, and runs the person's decisions. It is called on the core's dispatcher.
+ * Navigation agent judges them, and the person picks what gets built on Implementation. The
+ * add-on's operator (operator/Dreamfall.kt) keeps the records and carries out the actions; the
+ * bridge streams the records and the cards of the stage boards. This part of [AddonCore] decides
+ * what a board, an idea and the settings form show, and runs the person's decisions. It is called
+ * on the core's dispatcher.
  */
 internal class Dreamfall(
     private val bridge: Bridge,

@@ -2,6 +2,18 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.19 (2026-10-30)
+
+- **The bridge into Kotlin, step 7 of 10:** Dreamfall boards belong to the operator now: creating a board, its
+  settings, *Run now*, removing it, and your decisions on an idea (promote, release, pick, park, restore, start). So
+  does the `dreamfall` command the stage agents run from their run cards (same subcommands, output and exit codes).
+  The page shows a decision as quickly as before, and a pick still reuses a copy made earlier instead of listing the
+  board. The records stay in Dieter's key-value store, so existing boards, ideas and their trails carry over as they
+  are.
+- Tools → Schedules: *Run history* in a schedule's menu showed the runs after the last schedule, below the screen, so
+  the click seemed to do nothing. The runs now open right under their schedule, which moves to the top, and the same
+  menu item hides them again. A run's time reads *1d ago* instead of a raw timestamp.
+
 ## 0.6.431.18 (2026-10-30)
 
 - **The bridge into Kotlin, step 6 of 10:** the questions agents ask you (*Waiting for your answer* in the Inbox) and
@@ -11,13 +23,11 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
 
 ## 0.6.431.17 (2026-10-30)
 
-
 - A conversation's header names the card's lane as well, e.g. *sem2_ha · Home Assistant Ideas · Navigation · Done*.
   Moving a card from the conversation (⋯ → Move to, or *Move to Review* above the message field) worked, but nothing
   on that screen changed, so it looked as if the move had failed. Now the lane changes the moment you tap.
 
 ## 0.6.431.16 (2026-10-30)
-
 
 - **The bridge into Kotlin, step 5 of 10:** the Claude sign-in (Tools → Usage), the gateway enrollment and the
   add-on's SSH key with its connection test (Tools → Machines) belong to the operator now. The page, its buttons and
@@ -37,7 +47,6 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
   the page but no longer pulls down the Antigravity bar in the summary.
 
 ## 0.6.431.14 (2026-10-30)
-
 
 - A mouse wheel or trackpad that scrolls a list back past its top no longer leaves the round refresh arrow hanging
   there (Chrome on a PC); pulling down by touch still syncs again.

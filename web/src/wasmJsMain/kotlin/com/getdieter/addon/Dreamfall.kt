@@ -77,7 +77,6 @@ internal fun dreamfallBoards() =
         wide = true,
     )
 
-
 /** Opens a stage board as the ordinary Kanban board. */
 private fun openKanban(store: MobileStore, boardId: String) {
     if (store.routes.value.top == MobileRoute.Board(boardId)) store.push(MobileRoute.Extension("dreamfall-kanban", boardId))

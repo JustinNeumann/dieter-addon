@@ -1,14 +1,14 @@
-"""Unit tests of bridge/dreamfall.py that need no daemon: records, titles, settings, prompts and the bridge's cache.
-Run: python3 -m unittest discover -s dieter/tests -p 'dreamfall_test.py'   (the flows against a daemon are in e2e/dreamfall.spec.mjs)"""
+"""Unit tests of bridge/dreamfall_view.py, the bridge's live view of Dreamfall boards: decoding the kv watch, the cache
+of stage cards, the state's "dreamfall" block and the trail. Dreamfall itself is tested in host/…/DreamfallTest.kt.
+Run: python3 -m unittest discover -s dieter/tests -p 'dreamfall_view_test.py'   (against a daemon: e2e/dreamfall-api.spec.mjs)"""
 import base64
 import json
 import os
 import sys
 import unittest
-from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bridge"))
-import dreamfall as df  # noqa: E402
+import dreamfall_view as df  # noqa: E402
 
 
 def entry(key, *values, deleted=False):
@@ -24,23 +24,6 @@ PIPE = {"id": "df_0123456789", "name": "Dreamfall", "project_id": "p_1", "goal":
                    {"role": "implementation", "name": "Implementation", "board_id": "b_i", "actor": "human"}]}
 
 
-class Titles(unittest.TestCase):
-    def test_category_prefix(self):
-        self.assertEqual(df.split_category("[Heating] Shutters as night insulation"), ("Heating", "Shutters as night insulation"))
-        self.assertEqual(df.split_category("No category"), ("", "No category"))
-
-    def test_duplicate_key_ignores_category_case_punctuation(self):
-        self.assertEqual(df.title_key("[Heating] Shutters as night insulation"), df.title_key("shutters as NIGHT insulation!"))
-        self.assertNotEqual(df.title_key("Shutters at night"), df.title_key("Shutters as night insulation"))
-
-    def test_run_cards(self):
-        self.assertTrue(df.is_run_card(PIPE, {"board_id": "b_e", "title": "Dreamfall · Enumeration run"}))
-        self.assertFalse(df.is_run_card(PIPE, {"board_id": "b_n", "title": "Dreamfall · Enumeration run"}))
-        p = json.loads(json.dumps(PIPE))
-        p["stages"][0]["old_run_titles"] = ["Ideas · Enumeration run"]
-        self.assertTrue(df.is_run_card(p, {"board_id": "b_e", "title": "Ideas · Enumeration run"}))
-
-
 class Records(unittest.TestCase):
     def test_siblings_merge_events_and_newest_verdict(self):
         a = {"card": "c_1", "events": [{"id": "1", "kind": "created", "at": "2026-10-28T01:00:00Z"}],
@@ -54,151 +37,6 @@ class Records(unittest.TestCase):
 
     def test_deleted_entry(self):
         self.assertEqual(df.decode_entry(entry("p.x", {"id": "x"}, deleted=True))[0], None)
-
-    def test_rerun_events_are_not_duplicated(self):
-        rec = {"events": []}
-        df.add_events(rec, df.event("transferred", "agent", "Navigation agent", to="c_2"))
-        df.add_events(rec, df.event("transferred", "agent", "Navigation agent", to="c_2"))
-        df.add_events(rec, df.event("restored", "human", "you"))
-        df.add_events(rec, df.event("restored", "human", "you"))
-        self.assertEqual([e["kind"] for e in rec["events"]], ["transferred", "restored", "restored"])
-
-    def test_event_text_is_clipped(self):
-        e = df.event("judged", "agent", "x", rationale="word " * 400, score=None)
-        self.assertLessEqual(len(e["rationale"]), df.MAX_TEXT)
-        self.assertNotIn("score", e)
-
-
-class Settings(unittest.TestCase):
-    def test_defaults_and_cron(self):
-        st = df.clean_settings({"name": "Ideas", "goal": "g", "categories": "- Energy\n\n* Heating\n"})
-        self.assertEqual(st["categories"], ["Energy", "Heating"])
-        self.assertEqual(st["enumeration_cron"], "0 2 * * *")
-        self.assertEqual(st["navigation_cron"], "0 5 * * *")
-        self.assertEqual(df.cron_of("4:45"), "45 4 * * *")
-        self.assertEqual(df.hhmm_of("45 4 * * *"), "04:45")
-
-    def test_weekdays(self):
-        self.assertEqual(df.cron_of("4:45", [1, 2, 3, 4, 5]), "45 4 * * 1,2,3,4,5")
-        self.assertEqual(df.cron_of("4:45", [0, 6, 1]), "45 4 * * 1,6,0")
-        self.assertEqual(df.cron_of("4:45", [0, 1, 2, 3, 4, 5, 6]), "45 4 * * *")
-        self.assertEqual(df.days_of("45 4 * * 1,6,0"), [1, 6, 0])
-        self.assertEqual(df.days_of("45 4 * * *"), [1, 2, 3, 4, 5, 6, 0])
-        self.assertEqual(df.hhmm_of("45 4 * * 1,6,0"), "04:45")
-        st = df.clean_settings({"name": "x", "categories": "a", "days": [1, 3]})
-        self.assertEqual((st["enumeration_cron"], st["navigation_cron"]), ("0 2 * * 1,3", "0 5 * * 1,3"))
-        pipe = {**PIPE, "stages": [{**s, "cron": "0 2 * * 1,3"} if s.get("role") == "enumeration" else s for s in PIPE["stages"]]}
-        self.assertEqual(df.clean_settings({"name": "y"}, pipe)["enumeration_cron"], "0 2 * * 1,3")
-        for bad in ([], [7], ["1"], "1", [True]):
-            with self.assertRaises(df.DfError, msg=bad):
-                df.clean_settings({"name": "x", "categories": "a", "days": bad})
-
-    def test_refusals(self):
-        for bad in ({"name": "", "categories": "a"}, {"name": "x"}, {"name": "x", "categories": "a", "timezone": "Not a zone!"},
-                    {"name": "x", "categories_file": "../secret"}, {"name": "x", "categories": "a", "enumeration_time": "25:00"}):
-            with self.assertRaises(df.DfError, msg=bad):
-                df.clean_settings(bad)
-
-    def test_update_keeps_times(self):
-        st = df.clean_settings({"name": "Renamed"}, PIPE)
-        self.assertEqual(st["enumeration_cron"], "0 2 * * *")
-        self.assertEqual(st["categories"], ["Energy", "Heating"])
-
-
-class Prompts(unittest.TestCase):
-    def test_enumeration_prompt(self):
-        t = df.enumeration_prompt(PIPE)
-        for s in ("dreamfall run begin", "dreamfall ideas", "dreamfall add --category", "at least 3 new ideas", "- Energy", "dreamfall run end",
-                  "Ideas for the house", "do not touch the Navigation or Implementation boards"):
-            self.assertIn(s, t)
-
-    def test_navigation_prompt_steps_and_mail(self):
-        t = df.navigation_prompt(PIPE)
-        self.assertIn("dreamfall promote <card>", t)
-        self.assertIn("never create, move or start cards there", t)
-        self.assertIn("\n7. Report briefly", t)
-        self.assertNotIn("mail send", t)
-        t = df.navigation_prompt({**PIPE, "mail": True})
-        self.assertIn("dieter mail send", t)
-        self.assertIn("\n8. Report briefly", t)
-
-    def test_schedule_args(self):
-        a = df.schedule_args({**PIPE, "enabled": False}, "navigation")
-        self.assertIn("--enabled=false", a)
-        self.assertEqual(a[a.index("--cron") + 1], "0 5 * * *")
-        self.assertEqual(a[a.index("--open-card") + 1], "skip_if_open")
-        self.assertEqual(a[a.index("--title") + 1], "Dreamfall · Navigation run")
-
-
-class NavigationLogic(unittest.TestCase):
-    def test_default_for_a_new_board(self):
-        st = df.clean_settings({"name": "x", "categories": "a"})
-        self.assertEqual(st["navigation_logic"], df.DEFAULT_NAVIGATION_LOGIC)
-
-    def test_custom_logic_reaches_the_prompt_quoted(self):
-        st = df.clean_settings({"name": "x", "categories": "a", "navigation_logic": "Only ideas under 50 EUR.\r\n\r\n\r\nNever lighting."})
-        self.assertEqual(st["navigation_logic"], "Only ideas under 50 EUR.\n\nNever lighting.")
-        t = df.navigation_prompt({**PIPE, "navigation_logic": st["navigation_logic"]})
-        self.assertIn("   > Only ideas under 50 EUR.\n   >\n   > Never lighting.", t)
-        self.assertNotIn("about one idea in four", t)
-        self.assertIn("it decides, not\n   your own taste", t)
-
-    def test_settings_keep_the_logic_unless_given(self):
-        cur = {**PIPE, "navigation_logic": "Keep me."}
-        self.assertEqual(df.clean_settings({"name": "Renamed"}, cur)["navigation_logic"], "Keep me.")
-        self.assertEqual(df.clean_settings({"navigation_logic": "New."}, cur)["navigation_logic"], "New.")
-
-    def test_older_records_get_the_default_with_their_pass_hint(self):
-        self.assertIn("about one idea in five should pass", df.navigation_logic({**PIPE, "pass_hint": "about one idea in five"}))
-        self.assertEqual(df.navigation_logic(PIPE), df.DEFAULT_NAVIGATION_LOGIC)
-
-    def test_refusals(self):
-        for bad in ("", "   \n ", "x" * (df.MAX_LOGIC + 1)):
-            with self.assertRaises(df.DfError):
-                df.clean_settings({"name": "x", "categories": "a", "navigation_logic": bad})
-
-    def test_topic_is_optional(self):
-        st = df.clean_settings({"name": "x", "categories": "a"})
-        self.assertEqual(st["goal"], "")
-        self.assertIn("improvements of this project", df.enumeration_prompt({**PIPE, "goal": ""}))
-
-
-class ImplementationExtras(unittest.TestCase):
-    def test_only_how_to_finish_by_default(self):
-        st = df.clean_settings({"name": "x", "categories": "a"})
-        self.assertEqual((st["implementation_instructions"], st["implementation_mail"]), ("", False))
-        self.assertEqual(df.implementation_extras({**PIPE, **st}), ("## For every implementation on this Dreamfall board\n\n" + df.FINISH_HOWTO, []))
-        self.assertNotIn("For every implementation", df.copy_brief("idea", "Picked", "Navigation", "you", "", "c_1"))
-
-    def test_finished_cards_move_to_review_without_a_remote(self):
-        text, _ = df.implementation_extras(PIPE)
-        self.assertIn("--lane review", text)
-        self.assertIn("no git remote", text)
-
-    def test_instructions_and_mail_go_on_picked_cards(self):
-        st = df.clean_settings({"name": "x", "categories": "a", "implementation_instructions": "Add a chart.\r\n\r\n\r\nMail it.", "implementation_mail": True})
-        self.assertEqual(st["implementation_instructions"], "Add a chart.\n\nMail it.")
-        text, args = df.implementation_extras({**PIPE, **st})
-        self.assertEqual(args, ["--mail"])
-        brief = df.copy_brief("**Idea:** X", "Picked", "Navigation", "you", "now", "c_1", text)
-        self.assertIn("## For every implementation on this Dreamfall board\n\nAdd a chart.\n\nMail it.", brief)
-        self.assertIn("dieter mail send", brief)
-        self.assertLess(brief.index("dieter mail send"), brief.index(df.FINISH_HOWTO))   # finishing comes last
-        self.assertTrue(brief.rstrip().endswith("<!-- dreamfall-source: c_1 -->"))   # the marker stays last
-
-    def test_mail_without_instructions_still_explains_how(self):
-        text, args = df.implementation_extras({**PIPE, "implementation_mail": True})
-        self.assertEqual(args, ["--mail"])
-        self.assertIn("vega-lite", text)
-
-    def test_settings_keep_them_unless_given(self):
-        cur = {**PIPE, "implementation_instructions": "Keep.", "implementation_mail": True}
-        st = df.clean_settings({"name": "Renamed"}, cur)
-        self.assertEqual((st["implementation_instructions"], st["implementation_mail"]), ("Keep.", True))
-        st = df.clean_settings({"implementation_instructions": "", "implementation_mail": False}, cur)
-        self.assertEqual((st["implementation_instructions"], st["implementation_mail"]), ("", False))
-        with self.assertRaises(df.DfError):
-            df.clean_settings({"name": "x", "categories": "a", "implementation_instructions": "x" * (df.MAX_LOGIC + 1)})
 
 
 class CacheView(unittest.TestCase):
@@ -295,25 +133,14 @@ class CacheView(unittest.TestCase):
         c._frame({"entries": [entry("c.c_2", {"stage": "navigation"})]})   # an idea's record: the boards stay
         self.assertEqual(asked, [1])
 
-    def test_transfer_scans_known_cards_instead_of_listing(self):
-        calls = []
-        def fake_cli(args, timeout=60, parse=True):
-            calls.append(args[:2])
-            if args[:2] == ["kv", "get"]:
-                raise df.DfError("not found")
-            if args[:2] == ["kv", "put"]:
-                return {}
-            if args[:2] == ["card", "move"]:
-                return ""
-            raise AssertionError(args)
-        src = {"id": "c_1", "title": "Energy: idea", "board_id": PIPE["stages"][1]["board_id"], "lane": "todo", "prompt": "brief", "provider": None, "model": None, "effort": None, "checkout_id": None}
-        copy = {"id": "c_9", "board_id": PIPE["stages"][2]["board_id"], "lane": "todo", "initial_prompt": f"brief\n<!-- {df.MARKER} c_1 -->"}
-        with mock.patch.object(df, "cli", fake_cli):
-            new_id, done = df.transfer(PIPE, src, "implementation", "human", "you", "Picked", known=lambda bid: [copy])
-        self.assertEqual(new_id, "c_9")                          # the copy the cache knows is reused, nothing created
-        self.assertNotIn(["card", "list"], calls)
-        self.assertNotIn(["card", "create"], calls)
-        self.assertIn(["card", "move"], calls)
+    def test_known_copies_name_their_sources(self):
+        self.c.records = {"p." + PIPE["id"]: PIPE}
+        self.c.cards = {"b_n": {"todo": (1, [{"id": "c_2", "board_id": "b_n", "initial_prompt": "brief\n<!-- dreamfall-source: c_1 -->\n"}])},
+                        "b_i": {"todo": (1, [{"id": "c_3", "board_id": "b_i", "initial_prompt": "brief\n<!-- dreamfall-source: c_1 -->\n"
+                                                                                       "more\n<!-- dreamfall-source: c_2 -->\n"}]), "done": (1, [])},
+                        "b_e": {}}
+        self.assertEqual(self.c.known_copies(), {"b_n": {"c_1": "c_2"}, "b_i": {"c_1": "c_3", "c_2": "c_3"}})   # b_e: not read yet
+
     def test_ideas_are_counted_once_not_per_copy(self):
         pid = PIPE["id"]
         recs = {"p." + pid: PIPE,

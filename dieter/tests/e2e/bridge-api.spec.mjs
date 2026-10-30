@@ -82,7 +82,6 @@ test("attachments: a file uploaded on the page goes with a follow-up and is gone
   expect(await again.json()).toEqual({ error: "attachment expired, add it again" });
 });
 
-
 test("dieter_move_card: the card moves to another lane", async ({ request }) => {
   test.skip(!cardId, "no card from the earlier test");
   await until(async () => (await state(request)).cards.find((c) => c.id === cardId)?.lane !== "running", 60_000);

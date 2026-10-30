@@ -2,10 +2,13 @@ package com.getdieter.web
 
 import com.getdieter.api.v1.Schedule
 import com.getdieter.api.v1.ScheduleDraft
+import com.getdieter.api.v1.ScheduleRun
 import com.getdieter.client.v1.*
 import com.getdieter.core.client.ClientSubscription
 import com.getdieter.core.schedules.SchedulePresentations
 import com.getdieter.mobile.store.MobileCore
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.days
 
 /**
  * A stand-in for the core: answers every observed slice from [DemoData] and handles the few
@@ -19,6 +22,8 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
     private val observers = mutableMapOf<Pair<Slice, String>, MutableList<(Update) -> Unit>>()
     /** What Tools → Schedules shows: one project's schedules or every project's. */
     private var schedulesShown: ScheduleProject? = null
+    /** The schedule whose run history is open ("" none). */
+    private var scheduleSelected = ""
 
     override suspend fun dispatch(command: Command): Result {
         command.board_view?.let { view ->
@@ -56,6 +61,7 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
         }
         command.schedules?.let { schedules ->
             schedules.bind?.let { schedulesShown = it }
+            schedules.select?.let { scheduleSelected = it.schedule_id }
             schedules.draft?.let { request ->
                 val projectId =
                     if (schedulesShown?.all_projects == true) request.project_id else schedulesShown?.project_id.orEmpty()
@@ -112,6 +118,17 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
             loaded = true,
             state = if (schedules.isEmpty()) SchedulesSlice.State.STATE_EMPTY else SchedulesSlice.State.STATE_LOADED,
             rows = schedules.map { SchedulePresentations.row(it) },
+            selected_id = scheduleSelected,
+            run_rows = if (scheduleSelected.isEmpty()) emptyList() else runs(scheduleSelected).map { SchedulePresentations.runRow(it) },
+        )
+    }
+
+    /** A schedule's last two runs, newest first: last night's and a manual one the day before. */
+    private fun runs(scheduleId: String): List<ScheduleRun> {
+        val now = Clock.System.now()
+        return listOf(
+            ScheduleRun(id = "$scheduleId-run-2", schedule_id = scheduleId, status = "completed", scheduled_for = (now - 1.days).toString()),
+            ScheduleRun(id = "$scheduleId-run-1", schedule_id = scheduleId, status = "failed", manual = true, created_at = (now - 2.days).toString(), message = "the machine was offline"),
         )
     }
 

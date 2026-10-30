@@ -24,7 +24,8 @@ Endpoints:
   GET  /api/ha                compact summary for HA sensors
   GET  /api/dreamfall/card/ID  Dreamfall: a card's trail and provenance chain
   POST /api/dreamfall          Dreamfall: create a pipeline (stage boards, records, schedules)
-  POST /api/dreamfall/ID/{update|delete|run|act}   settings, removal, run a stage now, a person's decision
+  POST /api/dreamfall/ID/{update|delete|run|act}   settings, removal, run a stage now, a person's decision; these by
+                              the operator (Dreamfall.kt); the bridge shows the result at once (records, lanes, a poll)
   GET  /api/{card|chat}/ID    conversation (last 200 messages) + detail
   GET  /api/{card|chat}/ID/stream?after=SEQ&delta=1   SSE of `dieter ... watch` frames: "conversation" (complete),
                               with delta=1 then "delta" (the changed messages and the conversation's other fields)
@@ -100,7 +101,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import dreamfall   # Dreamfall boards (bridge/dreamfall.py): pipelines, records, the agents' `dreamfall` command
+import dreamfall_view   # the live view of Dreamfall boards; the boards and the agents' command are the operator's
 import housekeeping   # work folders of finished worktree cards (bridge/housekeeping.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -539,7 +540,9 @@ OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",)),
                   ("GET", ("gateway",)), ("POST", ("gateway", "enroll")), ("POST", ("gateway", "enroll", "cancel")),
                   ("POST", ("gateway", "unenroll")),
                   ("GET", ("questions",)), ("POST", ("questions",)), ("GET", ("questions", "*")),
-                  ("POST", ("questions", "*", "answer")), ("POST", ("upload",))}
+                  ("POST", ("questions", "*", "answer")), ("POST", ("upload",)),
+                  ("POST", ("dreamfall",)), ("POST", ("dreamfall", "*", "update")), ("POST", ("dreamfall", "*", "delete")),
+                  ("POST", ("dreamfall", "*", "run")), ("POST", ("dreamfall", "*", "act"))}
 
 
 def operator_path(method, parts):
@@ -604,7 +607,10 @@ def after_operator(path, before, answer, body=None):
     up again, a new retention sweeps now instead of at the next hour, a new board order reaches the pages at once.
     After a Claude sign-in or sign-out (the operator restarts the daemon with it) the quota is probed again; after an
     enrollment (seen in the status the page polls) or unenrollment the pages get the daemon's new state. A new or
-    answered question reaches the pages at once, a new one Home Assistant too (dieter_question)."""
+    answered question reaches the pages at once, a new one Home Assistant too (dieter_question). A Dreamfall change is
+    shown at once (df_after); the answer the page gets is what this returns, if anything."""
+    if path[:1] == ("dreamfall",):
+        return df_after(path, answer)
     if path[:1] == ("questions",):
         refresh_questions()
         if path == ("questions",):
@@ -739,7 +745,7 @@ def housekeeping_loop():
     and untouched for the retention set in Settings (14 days; 0 keeps everything), once an hour and right after the setting changes. The daemon keeps every
     folder until someone cleans it up; see bridge/housekeeping.py."""
     sweeper = housekeeping.Sweeper(run, log, RETENTION_DEFAULT_DAYS, implementation_boards=lambda: {
-        s["board_id"] for p in dreamfall.list_pipelines() for s in p.get("stages") or [] if s.get("role") == "implementation" and s.get("board_id")})
+        s["board_id"] for p in DREAMFALL.pipelines() for s in p.get("stages") or [] if s.get("role") == "implementation" and s.get("board_id")})
     time.sleep(600)   # the daemon and the first board poll come first
     while True:
         sweeper.days = settings()["worktree_retention_days"]
@@ -1392,7 +1398,7 @@ class State:
 
     def card_list(self, pid):
         """A project's cards. A project with Dreamfall stage boards is listed whole: the daemon reads every card file
-        for each `card list` whatever its filters, so the stage boards' lanes come from this list (dreamfall.Cache.feed)
+        for each `card list` whatever its filters, so the stage boards' lanes come from this list (dreamfall_view.Cache.feed)
         instead of lists of their own; the state keeps CARD_LIMIT of them, as with --limit."""
         whole = pid in DREAMFALL.stage_projects()
         cards = [norm_card(c) for c in unwrap(run(["card", "list", "--project", pid, "--format", "json", "--limit",
@@ -1823,14 +1829,37 @@ class Mail:
 STATE = State()
 
 
-# --------------------------------------------------------------------------- Dreamfall boards (bridge/dreamfall.py)
-DREAMFALL = dreamfall.Cache(norm_card, on_change=lambda: STATE.touch(), on_boards=lambda: STATE.refresh(), log=log)
+# --------------------------------------------------------------------------- Dreamfall boards (bridge/dreamfall_view.py)
+DREAMFALL = dreamfall_view.Cache(norm_card, on_change=lambda: STATE.touch(), on_boards=lambda: STATE.refresh(), log=log)
 
 
 def df_poll():
     """Boards made or removed here and run cards started here must be in the next /api/state: a full poll, which
     reads the stage boards too (their project is listed whole, see State.card_list)."""
     STATE.refresh(wait=True)
+
+
+def df_after(path, answer):
+    """After the operator changed a Dreamfall board: what it wrote shows in the next state at once. A created or
+    removed board and a stage run started now need a full poll (the stage boards, the run card); a person's decision
+    is applied from the answer (df_apply), whose records and lanes the page does not need."""
+    if path == ("dreamfall",):
+        DREAMFALL.put_local("p." + answer["id"], answer["pipeline"])
+        df_poll()
+    elif path[2:] == ("update",):
+        DREAMFALL.put_local("p." + path[1], answer["pipeline"])
+    elif path[2:] == ("delete",):
+        DREAMFALL.put_local("p." + path[1], None)
+        df_poll()
+    elif path[2:] == ("run",):
+        df_poll()
+    elif path[2:] == ("act",):
+        for key, value in (answer.pop("records", None) or {}).items():
+            DREAMFALL.put_local(key, value)
+        df_apply(answer)
+        answer["rev"] = STATE.rev    # the state that shows the change: the page keeps the card busy until it has it
+        return answer
+    return None
 
 
 def df_apply(res):
@@ -1853,52 +1882,6 @@ def df_apply(res):
     res.pop("boards", None)
 
 
-def df_sync(*keys):
-    """Show records written here at once instead of when the kv watch delivers them."""
-    for k in keys:
-        if k:
-            try:
-                val, _ = dreamfall.kv_get(k)
-                DREAMFALL.put_local(k, val)
-            except dreamfall.DfError as e:
-                log(f"dreamfall: {k}: {e}")
-
-
-def dreamfall_post(path, body, user):
-    """POST /api/dreamfall[/ID/ACTION]: the page's Dreamfall actions (the person; agents use the `dreamfall` command)."""
-    try:
-        if not path:
-            p = dreamfall.create_pipeline(body, user)
-            DREAMFALL.put_local("p." + p["id"], p)
-            df_poll()
-            log(f"dreamfall: {p['name']} ({p['id']}) created in {p['project_id']}")
-            return {"ok": True, "id": p["id"], "pipeline": p}
-        pid, action = path[0], (path[1] if len(path) > 1 else "")
-        if action == "update":
-            p = dreamfall.update_pipeline(pid, body)
-            DREAMFALL.put_local("p." + pid, p)
-            return {"ok": True, "pipeline": p}
-        if action == "delete":
-            res = dreamfall.delete_pipeline(pid)
-            DREAMFALL.put_local("p." + pid, None)
-            df_poll()
-            log(f"dreamfall: {pid} removed, its boards stay")
-            return res
-        if action == "run":
-            res = dreamfall.run_now(pid, str(body.get("stage") or ""))
-            df_poll()
-            return res
-        if action == "act":
-            res = dreamfall.act(pid, body, user, known=DREAMFALL.cards_of)
-            df_sync("c." + str(body.get("card") or ""), ("c." + res["id"]) if res.get("id") else "")
-            df_apply(res)
-            res["rev"] = STATE.rev    # the state that shows the change: the page keeps the card busy until it has it
-            return res
-        raise ValueError("not found")
-    except dreamfall.DfError as e:
-        raise ValueError(str(e))
-
-
 def dreamfall_cards(data):
     """The open cards on Dreamfall stage boards (ideas and run cards) with the start of their brief: what the new
     page's add-on core draws Dreamfall boards from, without the rest of the cards."""
@@ -1915,31 +1898,35 @@ def dreamfall_detail(cid):
     rev, data = STATE.snapshot()
     d = DREAMFALL.detail(cid, data.get("cards") or [])
     for n in d["chain"]:
-        if not n["known"] and dreamfall.CARD_RE.match(n["card"] or ""):
+        if not n["known"] and dreamfall_view.CARD_RE.match(n["card"] or ""):
             try:
-                c = dreamfall.card_show(n["card"])
+                c = dreamfall_view.card_show(n["card"])
                 n.update(title=c["title"], lane="archived" if c["archived"] else c["lane"], board_id=c["board_id"])
                 if n.get("self") and d.get("brief") is None:
                     d["brief"] = c["prompt"]
-            except dreamfall.DfError:
+            except dreamfall_view.DfError:
                 pass
     return d
 
 
-def dreamfall_created(cid, b, user):
-    """A card the person adds to a Dreamfall stage board from the page gets a record (created by the person), so the
-    board can tell it from a card that arrived some other way (e.g. an agent's `dieter card create`)."""
+def dreamfall_created(cid, b, headers):
+    """A card the person adds to a Dreamfall stage board from the page gets a record (created by the person, by the
+    operator), so the board can tell it from a card that arrived some other way (e.g. an agent's `dieter card create`)."""
     board_id = b.get("board")
-    p = next((x for x in DREAMFALL.pipelines() if dreamfall.stage_of_board(x, board_id)), None)
+    p = next((x for x in DREAMFALL.pipelines() if dreamfall_view.stage_of_board(x, board_id)), None)
     if not p:
         return
-    s = dreamfall.stage_of_board(p, board_id)
+    s = dreamfall_view.stage_of_board(p, board_id)
     if s["actor"] == "agent" and b.get("start", True):
         return     # an agent turn started by hand on an agent stage is a run, not an idea
     try:
-        dreamfall.record_created(p, {"id": cid, "board_id": board_id, "title": str(b.get("title") or "")}, "human", user)
-        df_sync("c." + cid)
-    except dreamfall.DfError as e:
+        status, raw = operator_request("POST", f"/api/dreamfall/{p['id']}/record", {"card": cid, "board": board_id,
+                                       "title": str(b.get("title") or "")}, headers, timeout=60)
+        answer = json.loads(raw)
+        if status != 200:
+            raise ValueError(answer.get("error"))
+        DREAMFALL.put_local("c." + cid, answer.get("record"))
+    except (urllib.error.URLError, OSError, ValueError) as e:
         log(f"dreamfall: record of {cid}: {e}")
 
 
@@ -2185,9 +2172,7 @@ class Handler(BaseHTTPRequestHandler):
         """A path the operator answers: passed on with its query, body (or [raw] bytes) and the Home Assistant user,
         answered as it answers."""
         before = settings()
-        headers = [(h, self.headers.get(h)) for h in ("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name", "X-Filename")
-                   if self.headers.get(h)]
-
+        headers = self.user_headers() + ([("X-Filename", self.headers["X-Filename"])] if self.headers.get("X-Filename") else [])
         try:
             status, answer = operator_request(method, u.path + (f"?{u.query}" if u.query else ""), body, headers, raw=raw)
         except (urllib.error.URLError, OSError) as e:
@@ -2196,7 +2181,9 @@ class Handler(BaseHTTPRequestHandler):
         path = tuple(p for p in u.path.split("/") if p)[1:]
         if status == 200 and (method == "POST" or path == ("gateway",)):
             try:
-                after_operator(path, before, json.loads(answer), body)
+                changed = after_operator(path, before, json.loads(answer), body)
+                if changed is not None:
+                    answer = json.dumps(changed).encode()
             except Exception as e:
                 log("operator: after", u.path, e)
         self.send_response(status)
@@ -2206,9 +2193,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(answer)
 
-    def user_name(self):
-        """The Home Assistant user behind Ingress (it forwards the logged-in user's name), for the Dreamfall trail."""
-        return (self.headers.get("X-Remote-User-Display-Name") or self.headers.get("X-Remote-User-Name") or "you").strip()[:60] or "you"
+    def user_headers(self):
+        """Ingress's headers naming the Home Assistant user, passed on to the operator (its Dreamfall trail)."""
+        return [(h, self.headers.get(h)) for h in ("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name") if self.headers.get(h)]
 
     def caller_ip(self):
         """Real caller: X-Forwarded-For is trusted only from loopback (Caddy)."""
@@ -2634,9 +2621,9 @@ class Handler(BaseHTTPRequestHandler):
             if parts[:1] != ["api"]:
                 return self.send_json({"error": "not found"}, 404)
             if operator_path("POST", parts[1:]):
+                if parts[1] == "dreamfall" and parts[3:] == ["act"]:
+                    body = {**body, "known_copies": DREAMFALL.known_copies()}   # a pick lists no boards
                 return self.forward_operator("POST", urllib.parse.urlsplit(self.path), body)
-            if parts[1:2] == ["dreamfall"]:
-                return self.send_json(dreamfall_post(parts[2:], body, self.user_name()))
             if parts[1:] == ["card"] or parts[1:] == ["chat"]:
                 return self.send_json(self.create(parts[1], body))
             if parts[1:] == ["schedules"]:
@@ -2792,7 +2779,7 @@ class Handler(BaseHTTPRequestHandler):
         cid = (c or {}).get("id")
         card = norm_card(c or {}, kind)
         if kind == "card" and cid:
-            dreamfall_created(cid, b, self.user_name())
+            dreamfall_created(cid, b, self.user_headers())
         if entity and cid:
             TITLE_PENDING[cid] = first_line_title(b["prompt"])
             threading.Thread(target=retitle, args=(kind, cid, b["prompt"], entity), daemon=True).start()
@@ -2978,7 +2965,7 @@ def main():
     threading.Thread(target=STATE.loop, daemon=True).start()
     threading.Thread(target=Watch.loop, daemon=True).start()
     threading.Thread(target=Mail.loop, daemon=True).start()
-    dreamfall.DIETER = DIETER
+    dreamfall_view.DIETER = DIETER
     DREAMFALL.start()
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
     srv.daemon_threads = True

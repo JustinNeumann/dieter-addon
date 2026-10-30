@@ -2,7 +2,6 @@
 import { test, expect } from "@playwright/test";
 import { open, dragCopy, clipboard, tap } from "./helpers";
 
-
 test("conversation reply: drag-select and copy", async ({ page }) => {
   await open(page, "card Compose web UI behind Ingress");
   const copied = await dragCopy(page, page.getByText("Sora comes from Compose resources").last());

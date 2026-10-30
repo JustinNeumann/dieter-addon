@@ -30,3 +30,23 @@ test("a new schedule in the list of every project's asks for its project", async
   expect(sheet).toContain("New Schedule");
   expect(sheet).toMatch(/Project[\s\S]*Board[\s\S]*Checkout/);
 });
+
+// Run history used to open as a section after every schedule, below the screen, so the menu item seemed to do nothing.
+// (The test opens it with the debug script: once a menu closes, the page's accessibility tree keeps the menu.)
+test("a schedule's run history opens right under it, with the runs' ages, and its menu offers to hide it", async ({ page }) => {
+  await open(page, SCHEDULES + "; runs Backup");
+  await expect.poll(() => aria(page)).toContain("the machine was offline");
+  expect(await aria(page)).toMatch(/Backup review[\s\S]*Run history[\s\S]*Completed[\s\S]*1d ago · Scheduled[\s\S]*Failed[\s\S]*2d ago · Manual · the machine was offline[\s\S]*Morning ideas/);
+  await tap(page, page.getByRole("button", { name: "Schedule actions", exact: true }).nth(1));   // Backup review's
+  const menu = await settle(page, 600);
+  expect(menu).toContain("Hide run history");
+});
+
+test("a schedule's menu offers its run history", async ({ page }) => {
+  await open(page, SCHEDULES);
+  await expect.poll(() => aria(page)).toContain("Backup review");
+  await tap(page, page.getByRole("button", { name: "Schedule actions", exact: true }).nth(1));
+  const menu = await settle(page, 600);
+  expect(menu).toMatch(/Run now[\s\S]*Run history[\s\S]*Edit…/);
+  expect(menu).not.toContain("Hide run history");
+});

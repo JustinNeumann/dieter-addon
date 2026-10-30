@@ -22,7 +22,7 @@ class AddedCards(unittest.TestCase):
     def setUp(self):
         self.cli = FakeCli()
         self.state = br.State()
-        self.df = br.dreamfall.Cache(br.norm_card, on_change=lambda: None, log=lambda *a: None)
+        self.df = br.dreamfall_view.Cache(br.norm_card, on_change=lambda: None, log=lambda *a: None)
         self.df.records = {"p." + PIPE["id"]: PIPE}
         for p in (mock.patch.object(br, "run", self.cli), mock.patch.object(br, "STATE", self.state),
                   mock.patch.object(br, "DREAMFALL", self.df)):

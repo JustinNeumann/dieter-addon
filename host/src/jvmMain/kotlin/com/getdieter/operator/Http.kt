@@ -25,6 +25,10 @@ class Request(
 ) {
     val raw: ByteArray by lazy(read)
 
+    /** The Home Assistant user behind Ingress (it forwards the logged-in user's name, the bridge passes it on); "you" without one. */
+    val user: String
+        get() = listOfNotNull(headers["x-remote-user-display-name"], headers["x-remote-user-name"]).firstOrNull { it.isNotEmpty() }.orEmpty().trim().take(60).ifEmpty { "you" }
+
     val body: JsonObject by lazy {
         val text = raw.decodeToString()
         if (text.isBlank()) JsonObject(emptyMap())
@@ -114,7 +118,6 @@ class OperatorServer(private val address: InetSocketAddress, private val routes:
         if (bytes.size > Uploads.MAX) throw BadRequest("file too large (20 MB at most)")
         return bytes
     }
-
 
     private fun query(raw: String?): Map<String, List<String>> =
         raw.orEmpty().split("&").filter { it.isNotEmpty() }

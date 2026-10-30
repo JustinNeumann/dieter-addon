@@ -524,8 +524,12 @@ with the e2e suite green, and the last one deletes `dieter/bridge/` and Python f
    which forwards) and attachments (`api/upload`, into `DIETER_HOME/uploads`). The bridge fires `dieter_question` and
    keeps the open questions for `/api/state`; it still hands the uploads to the CLI with send and create (area 9)
 
-7. Dreamfall: the API, and the agents' `dreamfall` command (a mode of the jar instead of `dreamfall.py`; its records
-   stay in Dieter's key-value store)
+7. ✅ 0.6.431.19: Dreamfall's actions (`api/dreamfall`, `…/{update,delete,run,act,record}`) and the agents'
+   `dreamfall` command (`DreamfallCommand`, a mode of the jar instead of `dreamfall.py`); the records stay in Dieter's
+   key-value store. The bridge keeps the live view (`dreamfall_view.py`: the kv watch, the stage boards' cards, the
+   state's `dreamfall` block, a card's trail) until the state moves (area 9); it passes the copies it knows to a pick
+   (`known_copies`) and applies the records an action returns, so the page sees the change at once
+
 8. Housekeeping (work folder retention) and the Ollama titles
 9. Home Assistant's side: `/api/ha`, the rest_commands' endpoints (`/api/card`, `…/send`, `…/move`, `/api/focus`,
    `/api/state`) and the events `dieter_turn_finished`, `dieter_card_review`, `dieter_question`, on port 8099 with

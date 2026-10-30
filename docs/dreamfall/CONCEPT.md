@@ -1,7 +1,8 @@
 # Dreamfall: a multi-stage idea pipeline on Dieter boards
 
 Status: implemented in add-on 0.6.429.42 (`dieter/bridge/dreamfall.py`, the `dreamfall` command, and a Dreamfall
-view of the classic page, which 0.6.431.9 replaced with the Compose screens `web/…/addon/Dreamfall*.kt`); user
+view of the classic page, which 0.6.431.9 replaced with the Compose screens `web/…/addon/Dreamfall*.kt`; since
+0.6.431.19 the pipelines, the actions and the command are the operator's `Dreamfall.kt` and `DreamfallCommand.kt`); user
 documentation in `dieter/DOCS.md` → Dreamfall boards. This note keeps the design reasoning; the screenshots of the
 mockup (`board-*.png`, `phone-*.png`, `page-*.png`) predate the implementation, the mockup itself is in the history.
 
