@@ -56,4 +56,5 @@ internal fun addonExtensions(): MobileExtensions =
                 },
             ),
         boardRenderer = dreamfallBoards(),
+        conversationNamer = { rememberConversationNamer(it) },
     )

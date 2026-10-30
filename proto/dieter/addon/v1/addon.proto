@@ -37,7 +37,17 @@ message Command {
     DecideIdea decide_idea = 18;
     // Saves one of the account's agent instructions, or resets it to Dieter's default.
     ChangeInstructions change_instructions = 19;
+    // Has the add-on name a task or chat created without a title (SettingsSlice.titles_daemon_id).
+    NameConversation name_conversation = 20;
   }
+}
+
+message NameConversation {
+  string id = 1;
+  bool chat = 2;
+  string prompt = 3;
+  // The title it was created under, Dieter's placeholder; a rename waits while it still has it.
+  string provisional = 4;
 }
 
 message ChangeInstructions {
@@ -361,6 +371,9 @@ message SettingsSlice {
   string error = 2;
   Choice title_model = 3;
   Choice worktree_retention = 4;
+  // The add-on's machine while it names new tasks and chats there (Ollama through Home Assistant); empty when
+  // Dieter's auto-title does.
+  string titles_daemon_id = 5;
 }
 
 message InstructionsSlice {

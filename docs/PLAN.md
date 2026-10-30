@@ -357,7 +357,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Feature today | Compose | Work | Test |
 |---|---|---|---|
 | Six tabs, rail from 600 px, two panes from 840 px | ✅ | none | |
-| Most recently used project first, preselected in New task, opened by the Projects tab | 🟡 | verify; add if missing | `most recently used project is listed first…` |
+| Most recently used project first, preselected in New task, opened by the Projects tab | ✅ | opening a project, board, Dreamfall board or conversation tells the core (`remember_creation`), whose creation memory New task already preselects from; Projects lists it under "Last used" (unless pinned) and choosing the Projects tab from another tab opens it. Kept by the add-on's one core, so shared by every browser (the classic page keeps it per browser) | `projects.spec.ts`, `MobileStoreTest.theProjectUsedLast…` (fork) |
 | Push deep link `/<panel>/card/<id>` through HA's app-panel messages (`home-assistant/subscribe-properties`, `home-assistant/navigate`) | ✅ | `PanelRoutes`: card, tab, Dreamfall and idea routes that arrive while the page is open go through `openRoute`; the panel's address then goes back to `/<panel>/next` | `a push to /<panel>/card/<id> opens the card in the open page…`; `opened at /<panel>/next/dreamfall/<id>…` |
 | `?card=`, `?tab=`, legacy `api/focus` | ✅ `?route=card/<id>`, `?route=tab/<name>`, `<HA>/app/<slug>/next/<route>`; the page takes `api/focus` at start when no route was asked for | same entry point | `?route=card/<id> opens that conversation…`; add-on e2e `Push: the new page takes over the card…` |
 | Browser/Android back | ✅ | one history entry of the page's own while something can go back; `popstate` is a back event for Compose's handlers (`BrowserBack.kt`, a `NavigationEventInput`) | `the browser's Back closes New task, then leaves a board` |
@@ -398,7 +398,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Vault / mail access switches | ✅ | verify | |
 | Attachments (≤ 4 × 5 MB, 6 MB total: the apps' `Attachments` limits) | ✅ | `rememberAttachmentPicker` web actual: `<input type=file multiple>` → `Attachments.part`, the apps' limit messages | `the Attach button does not break the form`; `Attach in New task takes files from the browser's file dialog`; `a file over the limit is refused with the apps' message` |
 | Draft survives live updates, Escape closes, X cancels | ✅ | verify on web | `typing in the form survives live updates…`, `Escape closes the form`, … |
-| **Title model** (OpenAI vs Ollama via HA AI Task) | ❌ | the setting is on the new page, but a task created there without a title gets the daemon's auto-title (OpenAI) even with Ollama chosen: the classic page creates it under its first line and renames it. Needs a hook in the shared New task flow (title from a host, or "create, then call the host"), i.e. an extension point upstream | |
+| **Title model** (OpenAI vs Ollama via HA AI Task) | ✅ | with Ollama chosen, a task or chat sent without a title to the add-on's own machine is created under Dieter's placeholder without the auto-title and handed to the bridge (`POST api/titles`), which renames it as for the classic page. The fork's `ConversationNamer` (in `CreationModel.submit`) is the hook; the add-on core says which machine (`SettingsSlice.titles_daemon_id`). Other machines keep Dieter's auto-title (the bridge can only rename on its own daemon) | `MobileStoreTest.aHostThatNamesTasks…` (fork), `AddonCoreTest.whileOllamaNamesTasks…`, `titles_test.py` |
 
 #### F. Conversation
 

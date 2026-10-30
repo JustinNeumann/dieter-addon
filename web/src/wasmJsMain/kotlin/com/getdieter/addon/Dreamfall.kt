@@ -176,6 +176,8 @@ internal fun DreamfallBoardScreen(store: MobileStore, scope: String) {
         else actions.send(Command(decide_idea = DecideIdea(card.id, action.decision)))
     }
     val ready = board != null && !board.loading && !board.missing
+    // a board in use makes its project the last used, as opening a board does
+    LaunchedEffect(board?.project_id) { board?.project_id?.let(store::useProject) }
     Screen(
         ScreenChrome(
             board?.name?.ifEmpty { null } ?: "Dreamfall",

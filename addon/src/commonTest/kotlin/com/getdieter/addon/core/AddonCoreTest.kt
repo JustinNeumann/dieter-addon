@@ -10,6 +10,7 @@ import com.getdieter.addon.v1.EnrollGateway
 import com.getdieter.addon.v1.Enrollment
 import com.getdieter.addon.v1.Failure
 import com.getdieter.addon.v1.GatewaySlice
+import com.getdieter.addon.v1.NameConversation
 import com.getdieter.addon.v1.SettingChange
 import com.getdieter.addon.v1.Slice
 import com.getdieter.addon.v1.Step
@@ -217,6 +218,26 @@ class AddonCoreTest {
         runCurrent()
         assertEquals("30 days", seen.last().settings!!.worktree_retention!!.selected_label)
         assertEquals(Failure.Kind.KIND_INVALID, core.fails(Command(change_setting = SettingChange(title_model = "gpt"))).kind)
+    }
+
+    @Test
+    fun whileOllamaNamesTasksTheCoreSaysWhereAndHandsThemToTheBridge() = runTest {
+        bridge.answer(
+            "GET settings",
+            """{"title_model":"ollama","worktree_retention_days":14,"titles_daemon_id":"d-addon","title_models":[
+                {"id":"ollama","name":"Ollama (HA)","available":true,"detail":"ai_task.ollama"}]}""",
+        )
+        bridge.answer("POST titles", """{"ok":true}""")
+        val core = core()
+        assertEquals("d-addon", watch(core, Slice.SLICE_SETTINGS).last().settings!!.titles_daemon_id)
+        val named = core.dispatch(Command(name_conversation = NameConversation("c-1", false, "Fix the heating\nplease", "Fix the heating")))
+        assertEquals("", named.message, "nothing to tell: the title changes a moment later")
+        assertEquals(
+            """{"kind":"card","id":"c-1","prompt":"Fix the heating\nplease","provisional":"Fix the heating"}""",
+            bridge.sent("POST titles").single().toString(),
+        )
+        assertEquals(Failure.Kind.KIND_INVALID, core.fails(Command(name_conversation = NameConversation("", true, "Hi", "Hi"))).kind)
+        assertEquals(1, bridge.sent("POST titles").size)
     }
 
     @Test

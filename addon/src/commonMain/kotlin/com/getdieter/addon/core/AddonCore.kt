@@ -9,6 +9,7 @@ import com.getdieter.addon.v1.Command
 import com.getdieter.addon.v1.Enrollment
 import com.getdieter.addon.v1.Failure
 import com.getdieter.addon.v1.GatewaySlice
+import com.getdieter.addon.v1.NameConversation
 import com.getdieter.addon.v1.Option
 import com.getdieter.addon.v1.Question
 import com.getdieter.addon.v1.QuestionItem
@@ -177,6 +178,7 @@ class AddonCore(
         command.close_claude_sign_in?.let { return closeClaudeSignIn() }
         command.sign_out_of_claude?.let { return signOutOfClaude() }
         command.change_setting?.let { return changeSetting(it) }
+        command.name_conversation?.let { return nameConversation(it, user) }
         command.answer_question?.let { return answer(it, user) }
         command.add_repository?.let { return addRepository(it) }
         dreamfall.execute(command, user)?.let { return it }
@@ -489,6 +491,22 @@ class AddonCore(
 
     // ---- settings
 
+    /** A conversation created under its placeholder title on the add-on's machine: Ollama names it (Settings → Task titles). */
+    private suspend fun nameConversation(name: NameConversation, user: String): Result {
+        if (name.id.isBlank() || name.prompt.isBlank() || name.provisional.isBlank()) invalid("Name which conversation?")
+        bridge.write(
+            "titles",
+            buildJsonObject {
+                put("kind", if (name.chat) "chat" else "card")
+                put("id", name.id)
+                put("prompt", name.prompt)
+                put("provisional", name.provisional)
+            },
+            user,
+        )
+        return Result()
+    }
+
     private suspend fun changeSetting(change: SettingChange): Result {
         change.title_model?.let { model ->
             val known = settingsJson.objects("title_models").map { it.str("id") }
@@ -537,6 +555,7 @@ class AddonCore(
                         selected_label = retentionLabel(days),
                         options = (RETENTION_DAYS + days).distinct().sorted().map { Option(it.toString(), retentionLabel(it)) },
                     ),
+                titles_daemon_id = d.str("titles_daemon_id"),
             )
     }
 

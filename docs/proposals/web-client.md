@@ -60,9 +60,13 @@ other hosts (not only Home Assistant) offer Dieter in a browser.
 - **Usage shows raw reset times.** `QuotaRows.window` copies `ProviderQuotaWindow.resets_at` into the row
   (`QuotaRowsTest` expects the ISO stamp) and `UsageScreen` prints it as "resets 2026-10-30T01:29:59.711563+00:00".
   The widget already formats it with `Quotas.resetText(it, now)`; the row could carry that text instead.
-- **A host's title model.** A host that names tasks itself (the add-on: Ollama through Home Assistant) cannot hook
-  New task: a task without a title always gets the daemon's auto-title. A creation hook in `MobileExtensions`
-  (a provisional title from the host, or a call after create) would cover it.
+- **A host's title model.** A host that names tasks itself (the add-on: Ollama through Home Assistant) could not hook
+  New task: a task without a title always got the daemon's auto-title. The fork adds `ConversationNamer`
+  (`CreationModel.submit`): for the machines the host names, the task is created under `Titles`' placeholder
+  without `auto_generate_title`, then handed to the host. Upstream could take it as is, or as a `CreationIntent` flag.
+- **The project used last.** Every app already remembers the project last created in (`CreationPreferences.project_id`)
+  and `remember_creation` exists, but nothing reports opening a project. The fork reports opens from navigation, lists
+  the project first ("Last used") and opens it when the Projects tab is chosen from another tab.
 
 ## Security notes for a web host
 

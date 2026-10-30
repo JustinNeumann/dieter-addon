@@ -11,6 +11,8 @@ import com.getdieter.mobile.store.MobileCore
  */
 class DemoCore(private val data: DemoData = DemoData(), private val extras: DemoMailFiles = DemoMailFiles()) : MobileCore {
     private var sequence = 0L
+    /** The project last used on this "device" (the real core keeps it in its creation memory). */
+    private var project = ""
     private val observers = mutableMapOf<Pair<Slice, String>, MutableList<(Update) -> Unit>>()
 
     override suspend fun dispatch(command: Command): Result {
@@ -37,6 +39,10 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
                 if (data.hasCard(open.card_id)) NotificationTarget(card_id = open.card_id) else NotificationTarget(inbox = Step())
             return Result(notification_target = target)
         }
+        command.remember_creation?.let { remember ->
+            remember.project_id.ifEmpty { null }?.let { project = it }
+            publish(Slice.SLICE_CREATION, "")
+        }
         command.files?.let { files ->
             extras.filesCommand(files)
             publish(Slice.SLICE_FILES, files.scope)
@@ -56,6 +62,7 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
         when (slice) {
             Slice.SLICE_MAIL -> Update(slice = slice, scope = scope, mail = extras.mail())
             Slice.SLICE_FILES -> Update(slice = slice, scope = scope, files = extras.files())
+            Slice.SLICE_CREATION -> Update(slice = slice, scope = scope, creation = CreationSlice(project_id = project))
             else -> data.update(slice, scope)
         }
 
