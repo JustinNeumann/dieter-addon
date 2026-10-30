@@ -64,9 +64,7 @@ Endpoints:
                               {worktree_retention_days: 0..3650}  days a finished card's work folder is kept (0: forever)
   POST /api/titles            {kind: card|chat, id, prompt, provisional}  a card or chat the new page created on this
                               daemon under its placeholder title: Ollama names it in the background (as POST /api/card)
-  GET  /api/prompts           the daemon's prompt templates {template, board_skill, chat_skill, variables,
-                              overrides: [{kind: project|board, id, name, project?}]} (dieter prompt show)
-  POST /api/prompts           {template?, board_skill?, chat_skill?: text, reset?: [key]}  dieter prompt update
+  GET|POST /api/prompts       Agent instructions: answered by the operator (OPERATOR_PATHS), forwarded as they are
   GET  /api/claude/login      add-on only: state of a running `claude auth login` {running, url, done, auth}
   POST /api/claude/login      start the sign-in; returns the link the user opens on claude.com
   POST /api/claude/login/code {code}  hand the code from claude.com to the CLI; writes /data/.claude/.credentials.json
@@ -99,6 +97,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -591,50 +590,11 @@ def settings_view():
                               else "Works in the Home Assistant add-on only")}]}
 
 
-# Agent instructions (Settings → Agent instructions): the daemon's own prompt templates, which it renders into
-# the instructions of every turn of every harness: the template (every agent; a project's or board's own
-# template replaces it), then the board skill (cards) or the chat skill (standalone chats).
-PROMPT_KEYS = {"template": ("promptTemplate", "--template", "template"),
-               "board_skill": ("boardSkillTemplate", "--board-skill", "board-skill"),
-               "chat_skill": ("chatSkillTemplate", "--chat-skill", "chat-skill")}
-
-
-def prompts_view():
-    d = run(["prompt", "show"]) or {}
-    projects = unwrap(run(["project", "list", "--format", "json"], timeout=15), "projects")
-    boards = unwrap(run(["board", "list", "--format", "json"], timeout=15), "boards")
-    names = {p.get("id"): p.get("name") for p in projects}
-    overrides = [{"kind": "project", "id": p.get("id"), "name": p.get("name")}
-                 for p in projects if (p.get("promptTemplate") or p.get("prompt_template") or "").strip()]
-    overrides += [{"kind": "board", "id": b.get("id"), "name": b.get("name"), "project": names.get(b.get("project_id") or b.get("projectId"))}
-                  for b in boards if (b.get("prompt_template") or b.get("promptTemplate") or "").strip()]
-    return {**{k: d.get(f) or "" for k, (f, _, _) in PROMPT_KEYS.items()}, "variables": d.get("variables") or [], "overrides": overrides}
-
-
-def prompts_update(body):
-    """{template?, board_skill?, chat_skill?: text, reset?: [key]}: `dieter prompt update`. A reset template
-    follows Dieter's default of later releases again."""
-    args = ["prompt", "update"]
-    for k, (_, flag, _) in PROMPT_KEYS.items():
-        if k in body:
-            v = body[k]
-            if not isinstance(v, str) or not v.strip():
-                raise ValueError(f"{k}: text required (or reset it)")
-            args.append(f"{flag}={v}")                # =: a text starting with "-" is no flag
-    reset = body.get("reset") or []
-    if not isinstance(reset, list) or any(k not in PROMPT_KEYS or k in body for k in reset):
-        raise ValueError("reset: list of " + ", ".join(PROMPT_KEYS) + " (not also set)")
-    for k in reset:
-        args += ["--reset", PROMPT_KEYS[k][2]]
-    if len(args) == 2:
-        raise ValueError("nothing to update")
-    try:
-        run(args)
-    except CliError as e:                         # "error: rpc error: code = InvalidArgument desc = template must …"
-        if "InvalidArgument" not in str(e):
-            raise
-        raise ValueError(re.sub(r"^(error: )?rpc error: code = \w+ desc = ", "", str(e)))
-    return prompts_view()
+# The operator (Kotlin, host/…/operator, docs/PLAN.md Step 2) takes over the bridge one area at a time; run.sh
+# starts it as this same user on loopback. Until it serves port 8099 itself, the bridge forwards the moved paths
+# to it: (method, path below /api/). Agent instructions (api/prompts) moved first.
+OPERATOR_URL = os.environ.get("DIETER_OPERATOR_URL", "http://127.0.0.1:8096/")
+OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",))}
 
 
 def ollama_entity():
@@ -2946,6 +2906,29 @@ class Handler(BaseHTTPRequestHandler):
     def client_ip(self):
         return self.client_address[0]
 
+    def forward_operator(self, method, u, body):
+        """A path the operator answers: passed on with its query, body and the Home Assistant user, answered as it answers."""
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(OPERATOR_URL.rstrip("/") + u.path + (f"?{u.query}" if u.query else ""), data=data, method=method)
+        req.add_header("Content-Type", "application/json")
+        for h in ("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name"):
+            if self.headers.get(h):
+                req.add_header(h, self.headers.get(h))
+        try:
+            with urllib.request.urlopen(req, timeout=180) as r:
+                status, raw = r.status, r.read()
+        except urllib.error.HTTPError as e:
+            status, raw = e.code, e.read()
+        except (urllib.error.URLError, OSError) as e:
+            log("operator:", method, u.path, e)
+            return self.send_json({"error": "the add-on's operator is not running yet; try again in a moment"}, 503)
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(raw)
+
     def user_name(self):
         """The Home Assistant user behind Ingress (it forwards the logged-in user's name), for the Dreamfall trail."""
         return (self.headers.get("X-Remote-User-Display-Name") or self.headers.get("X-Remote-User-Name") or "you").strip()[:60] or "you"
@@ -3285,6 +3268,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_text(open(INDEX, "rb").read(), ctype="text/html; charset=utf-8")
             if parts[0] != "api":
                 return self.send_json({"error": "not found"}, 404)
+            if ("GET", tuple(parts[1:])) in OPERATOR_PATHS:
+                return self.forward_operator("GET", u, None)
             if len(parts) == 4 and parts[1] == "dreamfall" and parts[2] == "card":
                 return self.send_json(dreamfall_detail(parts[3]))
             if parts[1:] == ["machines"]:
@@ -3319,8 +3304,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.ha_summary())
             if parts[1:] == ["settings"]:
                 return self.send_json(settings_view())
-            if parts[1:] == ["prompts"]:
-                return self.send_json(prompts_view())
             if parts[1:] == ["focus"]:
                 fid = FOCUS["id"] if FOCUS["id"] and time.time() - FOCUS["at"] < FOCUS_TTL_S else None
                 if q.get("consume", ["0"])[0] == "1":
@@ -3387,6 +3370,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_body()
             if parts[:1] != ["api"]:
                 return self.send_json({"error": "not found"}, 404)
+            if ("POST", tuple(parts[1:])) in OPERATOR_PATHS:
+                return self.forward_operator("POST", urllib.parse.urlsplit(self.path), body)
             if parts[1:2] == ["dreamfall"]:
                 return self.send_json(dreamfall_post(parts[2:], body, self.user_name()))
             if parts[1:] == ["card"] or parts[1:] == ["chat"]:
@@ -3431,8 +3416,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(res)
             if parts[1:] == ["settings"]:
                 return self.send_json(settings_update(body))
-            if parts[1:] == ["prompts"]:
-                return self.send_json(prompts_update(body))
             if parts[1:] == ["boards", "order"]:
                 return self.send_json(board_order_update(body))
             if parts[1:] == ["focus"]:

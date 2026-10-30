@@ -496,21 +496,31 @@ Each group is done when its rows are ✅ and its tests pass against `/next/`. Ti
 ## Step 2: the bridge into the web host
 
 The Compose page talks to the web host only; the web host's add-on core still reaches Dieter's add-on features through
-the Python bridge (`addon/…/Bridge`: loopback HTTP and the event stream). The bridge also starts the daemon, serves
-Ingress on 8099 and answers Home Assistant. They move into the web host one area at a time, each its own add-on
-release with the e2e suite green, and the last one deletes `dieter/bridge/` and Python from the image:
+the Python bridge (`addon/…/Bridge`: loopback HTTP and the event stream).
 
-1. Settings, title model, board order, prompts (small, file-backed)
-2. Projects: clone, new repository, adoption
-3. Claude sign-in, gateway enrollment, SSH key
-4. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments
-5. Dreamfall (`dreamfall.py` stays a command for the agents; its records are Dieter's key-value store)
-6. Housekeeping (work folder retention) and the Ollama titles
-7. Home Assistant's side: `/api/ha`, the rest_commands' endpoints (`/api/card`, `…/send`, `…/move`, `/api/focus`,
+**Two processes, one jar** (decided 2026-10-30): the bridge's work moves to the *operator* (`host/…/operator`), not
+into the web host itself. The operator runs as `dieter`, the agents' user, like the bridge: it is the daemon's local
+operator through the store's identity, owns `/data/projects`, `/data/.ssh` and the Claude sign-in, and holds no secret.
+The web host stays `dieter-web` with the gateway session, which agents can neither read nor reach. Folding both into
+one process would need the web host to run as `dieter` (the session within the agents' reach) or a setuid `sudo` in
+the image. Until the operator serves port 8099 itself the bridge forwards the moved paths (`OPERATOR_PATHS`); the
+web host keeps calling `DIETER_WEB_BRIDGE_URL`, so nothing changes for it. The bridge also starts the daemon, serves
+Ingress on 8099 and answers Home Assistant. Its areas move to the operator one at a time, each its own add-on release
+with the e2e suite green, and the last one deletes `dieter/bridge/` and Python from the image:
+
+1. ✅ 0.6.431.10: the operator (run.sh starts it, the bridge forwards) and Agent instructions (`api/prompts`)
+2. Settings, title model, board order (`/data/bridge_settings.json`; the titles and housekeeping read it)
+3. Projects: clone, new repository, adoption
+4. Claude sign-in, gateway enrollment, SSH key
+5. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments
+6. Dreamfall: the API, and the agents' `dreamfall` command (a mode of the jar instead of `dreamfall.py`; its records
+   stay in Dieter's key-value store)
+7. Housekeeping (work folder retention) and the Ollama titles
+8. Home Assistant's side: `/api/ha`, the rest_commands' endpoints (`/api/card`, `…/send`, `…/move`, `/api/focus`,
    `/api/state`) and the events `dieter_turn_finished`, `dieter_card_review`, `dieter_question`, on port 8099 with
    the same paths and answers, so `homeassistant/packages/dieter.yaml` does not change
-8. Process supervision (daemon start and restart, harness runtime staging), Ingress on 8099, the page's files; then
-   `dieter/bridge/` goes
+9. Process supervision (daemon start and restart, harness runtime staging: run.sh), Ingress on 8099, the page's files
+   and the relay to the web host; then `dieter/bridge/` goes
 
 The e2e contract tests (`dieter/tests/e2e/bridge-api.spec.mjs`, `dreamfall-api.spec.mjs`) pin what Home Assistant and
 the agents rely on; they run unchanged against every step.
