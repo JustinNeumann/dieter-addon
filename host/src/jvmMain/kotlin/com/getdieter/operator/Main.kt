@@ -51,7 +51,9 @@ fun main() {
             Enrollment(env["DIETER_BIN"] ?: "/usr/local/bin/dieter", home, s.userHome, dieter, options, restart),
         )
     }
-    val server = OperatorServer(InetSocketAddress(host, port), routes(dieter, settings, projects, supervision?.daemon, access)).start()
+    val uploads = Uploads(File(home, "uploads"))
+    val server =
+        OperatorServer(InetSocketAddress(host, port), routes(dieter, settings, projects, supervision?.daemon, access, Questions(), uploads)).start()
     Log.line("listening on $host:${server.address.port}")
     supervision?.let { Thread.ofPlatform().name("supervisor").start(it::run) }
 }
@@ -119,7 +121,15 @@ class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
 class Access(val ssh: Ssh, val claude: ClaudeLogin, val enrollment: Enrollment)
 
 /** Every path the operator answers, under /api/ like the bridge's; [access] only in the add-on. */
-fun routes(dieter: Dieter, settings: Settings, projects: Projects, daemon: DaemonSupervisor? = null, access: Access? = null): Routes {
+fun routes(
+    dieter: Dieter,
+    settings: Settings,
+    projects: Projects,
+    daemon: DaemonSupervisor? = null,
+    access: Access? = null,
+    questions: Questions = Questions(),
+    uploads: Uploads? = null,
+): Routes {
     val prompts = Prompts(dieter)
     val ok = buildJsonObject { put("ok", true) }
     fun Request.text(key: String) = (body[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
@@ -131,6 +141,18 @@ fun routes(dieter: Dieter, settings: Settings, projects: Projects, daemon: Daemo
         .post("boards/order") { settings.order(it.body) }
         .post("project") { projects.add(it.body) }
         .post("page-load") { PageLoad.log(it.body) }
+        // agents' questions: the harness worker registers and polls (DIETER_QUESTIONS_URL), the page answers
+        .get("questions") { questions.pending() }
+        .post("questions") { questions.register(it.body) }
+        .get("questions/{id}") { questions.poll(it.params.getValue("id")) ?: throw NotFound("no such question") }
+        .post("questions/{id}/answer") { questions.answer(it.params.getValue("id"), it.body) }
+        .post("upload") {
+            val store = uploads ?: throw BadRequest("uploads are kept in the add-on only")
+            store.store(java.net.URLDecoder.decode(it.headers["x-filename"] ?: "file", Charsets.UTF_8), it.raw)
+
+
+        }
+
         .post("daemon/restart") {
             // after a Claude sign-in or a gateway enrollment (the bridge): the daemon starts again with them
             val restarted = (daemon ?: throw BadRequest("the daemon is supervised in the add-on only")).restart()

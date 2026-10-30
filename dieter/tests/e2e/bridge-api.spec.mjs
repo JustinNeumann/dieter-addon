@@ -68,6 +68,21 @@ test("dieter_send_message: a follow-up reaches the card and is answered", async 
   expect(await until(async () => (await conversation(request, cardId)).includes(`Mock harness received: again ${stamp}`))).toBe(true);
 });
 
+test("attachments: a file uploaded on the page goes with a follow-up and is gone after", async ({ request }) => {
+  test.skip(!cardId, "no card from the earlier test");
+  await until(async () => (await state(request)).cards.find((c) => c.id === cardId)?.lane !== "running", 60_000);
+  const upload = await request.post("api/upload", { data: Buffer.from(`notes ${stamp}\n`), headers: { "Content-Type": "text/plain", "X-Filename": "My%20notes.txt" } });
+  const file = await upload.json();
+  expect(upload.ok(), JSON.stringify(file)).toBe(true);
+  expect(file).toEqual({ id: expect.stringMatching(/^[A-Za-z0-9_-]{24}$/), name: "My-notes.txt", size: `notes ${stamp}\n`.length });
+  const r = await request.post(`api/card/${cardId}/send`, { data: { message: `attached ${stamp}`, attachments: [file.id] }, timeout: 60_000 });
+  expect(r.ok(), await r.text()).toBe(true);
+  expect(await until(async () => (await conversation(request, cardId)).includes(`Mock harness received: attached ${stamp}`))).toBe(true);
+  const again = await request.post(`api/card/${cardId}/send`, { data: { message: "never sent", attachments: [file.id] } });
+  expect(await again.json()).toEqual({ error: "attachment expired, add it again" });
+});
+
+
 test("dieter_move_card: the card moves to another lane", async ({ request }) => {
   test.skip(!cardId, "no card from the earlier test");
   await until(async () => (await state(request)).cards.find((c) => c.id === cardId)?.lane !== "running", 60_000);

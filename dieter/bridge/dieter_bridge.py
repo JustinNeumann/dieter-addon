@@ -45,7 +45,8 @@ Endpoints:
                               without a title: --auto-title, or with Settings → Ollama (HA) renamed in the background (title_entity)
   POST /api/chat              create {project, title, prompt, provider, model, effort}
   POST /api/{card|chat}/ID/send   {message, model?, effort?, attachments?: [upload id]}
-  POST /api/upload            raw file body (Content-Type, X-Filename) -> {id, name, size}; up to 20 MB, kept until sent
+  POST /api/upload            raw file body (Content-Type, X-Filename) -> {id, name, size}; up to 20 MB, kept until sent;
+                              stored by the operator (Uploads.kt) in DIETER_HOME/uploads, where send and create find it
   POST /api/card/ID/move      {lane}
   POST /api/card/ID/start
   POST /api/{card|chat}/ID/cancel     stop the running turn
@@ -72,6 +73,7 @@ Endpoints:
   POST /api/questions         {id, session, input}  the harness worker registers a question (DIETER_QUESTIONS_URL)
   GET  /api/questions/ID      {done: false} | {done: true, output}  the worker polls for the answer
   POST /api/questions/ID/answer  {action: answered|partially-answered|declined, answers: {qid: {optionIds, freeform?}}}
+                              these four by the operator (Questions.kt); the bridge fires dieter_question
   GET  /api/mail/ID           one message of Dieter Mail {header, body} (the headers are in /api/state: mail)
   POST /api/mail/mark         {ids, read?, flagged?, folder?: inbox|archive|trash}  dieter mail mark
   POST /api/mail/delete       {ids} | {empty_trash: true}  delete for good
@@ -142,13 +144,12 @@ TS_NETS = [ipaddress.ip_network(n) for n in ("100.64.0.0/10", "fd7a:115c:a1e0::/
 LANES = ["todo", "running", "review", "done"]
 FOCUS = {"id": None, "at": 0}                     # card the next page load should open (set by HA before a push)
 FOCUS_TTL_S = 900
-# Questions the agents ask the user (Claude Code's AskUserQuestion): the harness worker of the fork
-# release registers them here (DIETER_QUESTIONS_URL) and polls for the answer given on the page.
-QUESTIONS = {}                                    # tool call id -> {"id", "session", "input", "created_at", "output"}
-QUESTIONS_LOCK = threading.Lock()
-QUESTION_TTL_S = 24 * 3600
+# Questions the agents ask the user (Claude Code's AskUserQuestion) live in the operator (Questions.kt): the harness
+# worker registers them through the bridge (DIETER_QUESTIONS_URL) and polls for the answer given on the page. The
+# bridge keeps the open ones for /api/state: fetched after every forwarded question call and every QUESTIONS_REFRESH_S.
+QUESTIONS_SEEN = {"at": 0.0, "list": [], "refreshing": False}
+QUESTIONS_REFRESH_S = 30
 QUESTION_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
-QUESTION_ACTIONS = ("answered", "partially-answered", "declined", "cancelled")
 
 
 def log(*a):
@@ -536,16 +537,25 @@ OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",)),
                   ("GET", ("claude", "login")), ("POST", ("claude", "login")), ("POST", ("claude", "login", "code")),
                   ("POST", ("claude", "login", "cancel")), ("POST", ("claude", "logout")),
                   ("GET", ("gateway",)), ("POST", ("gateway", "enroll")), ("POST", ("gateway", "enroll", "cancel")),
-                  ("POST", ("gateway", "unenroll"))}
+                  ("POST", ("gateway", "unenroll")),
+                  ("GET", ("questions",)), ("POST", ("questions",)), ("GET", ("questions", "*")),
+                  ("POST", ("questions", "*", "answer")), ("POST", ("upload",))}
+
+
+def operator_path(method, parts):
+    """Whether the operator answers METHOD /api/PARTS; "*" in OPERATOR_PATHS stands for one segment (an id)."""
+    parts = tuple(parts)
+    return any(m == method and len(path) == len(parts) and all(a in ("*", b) for a, b in zip(path, parts))
+               for m, path in OPERATOR_PATHS)
 ENROLLED = {"started": None}   # the enrollment whose success the bridge followed up already
 
 
-def operator_request(method, path, body=None, headers=(), timeout=660):
+def operator_request(method, path, body=None, headers=(), timeout=660, raw=None):
     """(status, raw answer) of the operator for /api/…; raises URLError/OSError while it does not answer.
-    A clone may take its 10 minutes."""
-    data = json.dumps(body).encode() if body is not None else None
+    A clone may take its 10 minutes. [raw] bytes go as they are (an upload), else [body] as JSON."""
+    data = raw if raw is not None else json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(OPERATOR_URL.rstrip("/") + path, data=data, method=method)
-    req.add_header("Content-Type", "application/json")
+    req.add_header("Content-Type", "application/octet-stream" if raw is not None else "application/json")
     for k, v in headers:
         req.add_header(k, v)
     try:
@@ -555,12 +565,51 @@ def operator_request(method, path, body=None, headers=(), timeout=660):
         return e.code, e.read()
 
 
-def after_operator(path, before, answer):
+def refresh_questions():
+    """The operator's open questions into QUESTIONS_SEEN; the pages get them when they changed."""
+    try:
+        status, raw = operator_request("GET", "/api/questions", timeout=10)
+        found = (json.loads(raw).get("questions") or []) if status == 200 else None
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        log("questions: the operator did not answer:", e)
+        found = None
+    changed = found is not None and found != QUESTIONS_SEEN["list"]
+    QUESTIONS_SEEN.update(at=time.time(), refreshing=False, **({"list": found} if found is not None else {}))
+    if changed:
+        STATE.touch()
+
+
+def pending_questions():
+    """The open questions as last fetched (never waits: the state's snapshot calls it under its lock); a fetch starts
+    in the background when they are older than QUESTIONS_REFRESH_S (a question expired, the operator restarted)."""
+    if time.time() - QUESTIONS_SEEN["at"] > QUESTIONS_REFRESH_S and not QUESTIONS_SEEN["refreshing"]:
+        QUESTIONS_SEEN["refreshing"] = True
+        threading.Thread(target=refresh_questions, daemon=True).start()
+    return QUESTIONS_SEEN["list"]
+
+
+def question_event(body):
+    """Home Assistant's dieter_question for a question the operator registered (the card's title from the state)."""
+    inp = body.get("input") or {}
+    qid, session = str(body.get("id") or ""), str(body.get("session") or "")
+    rev, data = STATE.snapshot()
+    card = next((c for c in data.get("cards", []) + data.get("chats", []) if c.get("id") == session), None)
+    first = ((inp.get("questions") or [{}])[0] or {}).get("question") or ""
+    ha_event("dieter_question", {"id": qid, "card_id": session, "title": (card or {}).get("title") or session,
+                                 "question": first[:300], "count": len(inp.get("questions") or [])})
+
+
+def after_operator(path, before, answer, body=None):
     """What the bridge still does after the operator changed something it reads: the title model's entity is looked
     up again, a new retention sweeps now instead of at the next hour, a new board order reaches the pages at once.
     After a Claude sign-in or sign-out (the operator restarts the daemon with it) the quota is probed again; after an
-    enrollment (seen in the status the page polls) or unenrollment the pages get the daemon's new state."""
-    if path in (("claude", "login", "code"), ("claude", "logout")) and answer.get("ok"):
+    enrollment (seen in the status the page polls) or unenrollment the pages get the daemon's new state. A new or
+    answered question reaches the pages at once, a new one Home Assistant too (dieter_question)."""
+    if path[:1] == ("questions",):
+        refresh_questions()
+        if path == ("questions",):
+            question_event(body or {})
+    elif path in (("claude", "login", "code"), ("claude", "logout")) and answer.get("ok"):
         QUOTA_GEN[0] += 1
         QUOTA_CACHE.clear()
         threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.poll_slow()), daemon=True).start()
@@ -904,23 +953,6 @@ UPLOAD_MAX = 20 * 1024 * 1024
 UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 
 
-def upload_store(name, data):
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "file").strip()).strip(".-") or "file"
-    uid = secrets.token_urlsafe(18)
-    folder = os.path.join(UPLOADS_DIR, uid)
-    os.makedirs(folder, mode=0o700, exist_ok=True)
-    path = os.path.join(folder, safe[:120])
-    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
-        f.write(data)
-    # forget uploads nobody sent (page closed) after a day
-    now = time.time()
-    for other in os.listdir(UPLOADS_DIR):
-        op = os.path.join(UPLOADS_DIR, other)
-        if other != uid and now - os.path.getmtime(op) > 86400:
-            shutil.rmtree(op, ignore_errors=True)
-    return {"id": uid, "name": os.path.basename(path), "size": len(data)}
-
-
 def upload_paths(ids):
     """Upload ids from the page -> file paths for --attach (max four), or ValueError."""
     ids = [str(x) for x in (ids or []) if x]
@@ -941,83 +973,6 @@ def upload_paths(ids):
 def upload_forget(paths):
     for path in paths:
         shutil.rmtree(os.path.dirname(path), ignore_errors=True)
-
-
-def question_register(body):
-    qid, session, inp = str(body.get("id") or ""), str(body.get("session") or ""), body.get("input")
-    if not QUESTION_ID_RE.match(qid):
-        raise ValueError("invalid question id")
-    if not re.match(r"^[A-Za-z0-9._-]{1,80}$", session):
-        raise ValueError("invalid session")
-    if not isinstance(inp, dict) or not isinstance(inp.get("questions"), list) or not inp["questions"]:
-        raise ValueError("input.questions required")
-    if len(json.dumps(inp)) > 64_000:
-        raise ValueError("question too large")
-    q = {"id": qid, "session": session, "input": inp, "created_at": datetime_now(), "created": time.time(), "output": None}
-    with QUESTIONS_LOCK:
-        QUESTIONS[qid] = q
-    rev, data = STATE.snapshot()
-    card = next((c for c in data.get("cards", []) + data.get("chats", []) if c.get("id") == session), None)
-    first = (inp["questions"][0] or {}).get("question") or ""
-    log(f"question {qid}: {session} asks: {first[:80]}")
-    STATE.touch()
-    ha_event("dieter_question", {"id": qid, "card_id": session, "title": (card or {}).get("title") or session,
-                                 "question": first[:300], "count": len(inp["questions"])})
-    return {"ok": True}
-
-
-def question_answer(qid, body):
-    action = str(body.get("action") or "")
-    if action not in QUESTION_ACTIONS:
-        raise ValueError("action must be one of " + ", ".join(QUESTION_ACTIONS))
-    output = {"action": action}
-    if action in ("answered", "partially-answered"):
-        answers = body.get("answers")
-        if not isinstance(answers, dict):
-            raise ValueError("answers required")
-        clean = {}
-        for key, a in answers.items():
-            if not isinstance(a, dict):
-                continue
-            ids = [str(x) for x in (a.get("optionIds") or []) if isinstance(x, (str, int))]
-            entry = {"optionIds": ids}
-            if isinstance(a.get("freeform"), str) and a["freeform"].strip():
-                entry["freeform"] = a["freeform"][:4000]
-            if ids or "freeform" in entry:
-                clean[str(key)] = entry
-        output["answers"] = clean
-    with QUESTIONS_LOCK:
-        q = QUESTIONS.get(qid)
-        if not q:
-            raise ValueError("no such question (the agent may have moved on)")
-        if q["output"] is not None:
-            raise ValueError("already answered")
-        q["output"] = output
-    log(f"question {qid}: {action}")
-    STATE.touch()
-    return {"ok": True}
-
-
-def question_poll(qid):
-    """The worker's poll: hands the answer over once and forgets the question."""
-    with QUESTIONS_LOCK:
-        q = QUESTIONS.get(qid)
-        if not q:
-            return None
-        if q["output"] is None:
-            return {"done": False}
-        del QUESTIONS[qid]
-    STATE.touch()
-    return {"done": True, "output": q["output"]}
-
-
-def pending_questions():
-    now = time.time()
-    with QUESTIONS_LOCK:
-        for qid, q in list(QUESTIONS.items()):
-            if now - q["created"] > QUESTION_TTL_S:
-                del QUESTIONS[qid]
-        return [{k: q[k] for k in ("id", "session", "input", "created_at")} for q in QUESTIONS.values() if q["output"] is None]
 
 
 PUBLISH_MODES = ("manual", "pull_request", "push_base")   # Dieter's remote publish modes of a board or card
@@ -2226,27 +2181,30 @@ class Handler(BaseHTTPRequestHandler):
     def client_ip(self):
         return self.client_address[0]
 
-    def forward_operator(self, method, u, body):
-        """A path the operator answers: passed on with its query, body and the Home Assistant user, answered as it answers."""
+    def forward_operator(self, method, u, body, raw=None):
+        """A path the operator answers: passed on with its query, body (or [raw] bytes) and the Home Assistant user,
+        answered as it answers."""
         before = settings()
-        headers = [(h, self.headers.get(h)) for h in ("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name") if self.headers.get(h)]
+        headers = [(h, self.headers.get(h)) for h in ("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name", "X-Filename")
+                   if self.headers.get(h)]
+
         try:
-            status, raw = operator_request(method, u.path + (f"?{u.query}" if u.query else ""), body, headers)
+            status, answer = operator_request(method, u.path + (f"?{u.query}" if u.query else ""), body, headers, raw=raw)
         except (urllib.error.URLError, OSError) as e:
             log("operator:", method, u.path, e)
             return self.send_json({"error": "the add-on's operator is not running yet; try again in a moment"}, 503)
         path = tuple(p for p in u.path.split("/") if p)[1:]
         if status == 200 and (method == "POST" or path == ("gateway",)):
             try:
-                after_operator(path, before, json.loads(raw))
+                after_operator(path, before, json.loads(answer), body)
             except Exception as e:
                 log("operator: after", u.path, e)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Content-Length", str(len(answer)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(raw)
+        self.wfile.write(answer)
 
     def user_name(self):
         """The Home Assistant user behind Ingress (it forwards the logged-in user's name), for the Dreamfall trail."""
@@ -2587,7 +2545,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_text(open(INDEX, "rb").read(), ctype="text/html; charset=utf-8")
             if parts[0] != "api":
                 return self.send_json({"error": "not found"}, 404)
-            if ("GET", tuple(parts[1:])) in OPERATOR_PATHS:
+            if operator_path("GET", parts[1:]):
                 return self.forward_operator("GET", u, None)
             if len(parts) == 4 and parts[1] == "dreamfall" and parts[2] == "card":
                 return self.send_json(dreamfall_detail(parts[3]))
@@ -2627,11 +2585,6 @@ class Handler(BaseHTTPRequestHandler):
             if parts[1:] == ["events"]:
                 fields = [f for f in ",".join(q.get("fields", [])).split(",") if re.match(r"^[a-z_]{1,32}$", f)]
                 return self.stream_events(fields or None)
-            if parts[1:] == ["questions"]:
-                return self.send_json({"questions": pending_questions()})
-            if len(parts) == 3 and parts[1] == "questions":
-                st = question_poll(parts[2])
-                return self.send_json(st if st else {"error": "no such question"}, 200 if st else 404)
             if len(parts) >= 3 and parts[1] in ("card", "chat"):
                 kind, cid = parts[1], parts[2]
                 if not cid.startswith("c_"):
@@ -2676,12 +2629,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "Aktionen nur von Home Assistant, vom eigenen Tailscale-Gerät oder mit API-Key"}, 403)
             parts = [p for p in urllib.parse.urlsplit(self.path).path.split("/") if p]
             if parts == ["api", "upload"]:
-                name = urllib.parse.unquote(self.headers.get("X-Filename") or "file")
-                return self.send_json(upload_store(name, self.read_raw(UPLOAD_MAX)))
+                return self.forward_operator("POST", urllib.parse.urlsplit(self.path), None, raw=self.read_raw(UPLOAD_MAX))
             body = self.read_body()
             if parts[:1] != ["api"]:
                 return self.send_json({"error": "not found"}, 404)
-            if ("POST", tuple(parts[1:])) in OPERATOR_PATHS:
+            if operator_path("POST", parts[1:]):
                 return self.forward_operator("POST", urllib.parse.urlsplit(self.path), body)
             if parts[1:2] == ["dreamfall"]:
                 return self.send_json(dreamfall_post(parts[2:], body, self.user_name()))
@@ -2715,10 +2667,6 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({"error": "id required"}, 400)
                 FOCUS.update(id=fid, at=time.time())
                 return self.send_json({"ok": True})
-            if parts[1:] == ["questions"]:
-                return self.send_json(question_register(body))
-            if len(parts) == 4 and parts[1] == "questions" and parts[3] == "answer":
-                return self.send_json(question_answer(parts[2], body))
             if len(parts) == 4 and parts[1] in ("card", "chat") and parts[2].startswith("c_"):
                 kind, cid, action = parts[1], parts[2], parts[3]
                 if action == "send":

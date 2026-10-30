@@ -11,15 +11,29 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/** One request to /api/…: the path's segments after "api", the route's {placeholders}, the query and a JSON body. */
+/**
+ * One request to /api/…: the path's segments after "api", the route's {placeholders}, the query and the body, read
+ * when a handler asks: as bytes ([raw], an upload) or as a JSON object ([body]).
+ */
 class Request(
     val method: String,
     val parts: List<String>,
     val params: Map<String, String>,
     val query: Map<String, List<String>>,
     val headers: Map<String, String>,
-    val body: JsonObject,
-)
+    read: () -> ByteArray,
+) {
+    val raw: ByteArray by lazy(read)
+
+    val body: JsonObject by lazy {
+        val text = raw.decodeToString()
+        if (text.isBlank()) JsonObject(emptyMap())
+        else runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: throw BadRequest("body: a JSON object")
+    }
+}
+
+/** Nothing at this path (an unknown question); answered with 404 and the message. */
+class NotFound(message: String) : Exception(message)
 
 /** Routes by method and path pattern ("dreamfall/{pid}/act"); a handler answers JSON or throws [BadRequest]/[CliError]. */
 class Routes {
@@ -35,7 +49,7 @@ class Routes {
         apply { routes += Route(method, pattern.split("/"), handle) }
 
     /** (status, answer) for a request; 404 when no route takes it, 405 when only another method does. */
-    fun answer(method: String, parts: List<String>, query: Map<String, List<String>>, headers: Map<String, String>, body: () -> JsonObject): Pair<Int, JsonElement> {
+    fun answer(method: String, parts: List<String>, query: Map<String, List<String>>, headers: Map<String, String>, read: () -> ByteArray): Pair<Int, JsonElement> {
         var other = false
         for (route in routes) {
             val params = route.match(parts) ?: continue
@@ -44,9 +58,11 @@ class Routes {
                 continue
             }
             return try {
-                200 to route.handle(Request(method, parts, params, query, headers, body()))
+                200 to route.handle(Request(method, parts, params, query, headers, read))
             } catch (e: BadRequest) {
                 400 to error(e.message)
+            } catch (e: NotFound) {
+                404 to error(e.message)
             } catch (e: CliError) {
                 502 to error(e.message)
             }
@@ -82,7 +98,7 @@ class OperatorServer(private val address: InetSocketAddress, private val routes:
                 val uri = exchange.requestURI
                 val parts = uri.rawPath.split("/").filter { it.isNotEmpty() }.drop(1).map { URLDecoder.decode(it, Charsets.UTF_8) }
                 val headers = exchange.requestHeaders.mapNotNull { (k, v) -> v.firstOrNull()?.let { k.lowercase() to it } }.toMap()
-                routes.answer(exchange.requestMethod, parts, query(uri.rawQuery), headers) { body(exchange) }
+                routes.answer(exchange.requestMethod, parts, query(uri.rawQuery), headers) { read(exchange) }
             } catch (e: BadRequest) {
                 400 to error(e.message)
             } catch (e: Exception) {
@@ -92,11 +108,13 @@ class OperatorServer(private val address: InetSocketAddress, private val routes:
         exchange.reply(status, answer)
     }
 
-    private fun body(exchange: HttpExchange): JsonObject {
-        val text = exchange.requestBody.readBytes().decodeToString()
-        if (text.isBlank()) return JsonObject(emptyMap())
-        return runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: throw BadRequest("body: a JSON object")
+    /** The body, up to an upload's 20 MB. */
+    private fun read(exchange: HttpExchange): ByteArray {
+        val bytes = exchange.requestBody.readNBytes(Uploads.MAX + 1)
+        if (bytes.size > Uploads.MAX) throw BadRequest("file too large (20 MB at most)")
+        return bytes
     }
+
 
     private fun query(raw: String?): Map<String, List<String>> =
         raw.orEmpty().split("&").filter { it.isNotEmpty() }
