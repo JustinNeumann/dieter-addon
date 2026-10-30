@@ -162,3 +162,31 @@ test("Push: the new page takes over the card an HA automation registered for the
   await page.waitForSelector("#loading", { state: "detached", timeout: 60_000 });
   await expect.poll(async () => (await (await request.get("api/focus")).json()).id, { timeout: 15_000 }).toBeNull();
 });
+
+test("Settings: agent instructions are edited and reset through the add-on core", async ({ page, request }) => {
+  const prompts = async () => (await request.get("api/prompts")).json();
+  const before = await prompts();
+  await open(page, "script=tab%20tools;%20tool%20settings");
+  await scrollTo(page, page.getByRole("button", { name: /^Board cards/ }));
+  expect(await aria(page)).toContain("Standalone chats");
+  await tap(page, page.getByRole("button", { name: /^Board cards/ }));
+  await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("{{card.title}}");      // the variables
+  await typeInto(page, page.getByRole("textbox", { name: "Instructions" }), `Use the Dieter CLI. ${stamp}`);
+  await tap(page, page.getByRole("button", { name: "Save", exact: true }));
+  await expect.poll(async () => (await prompts()).board_skill, { timeout: 20_000 }).toBe(`Use the Dieter CLI. ${stamp}`);
+  // Every agent: the two blocks must stay; the page says so before anything is sent
+  await open(page, "script=tab%20tools;%20tool%20settings");
+  await scrollTo(page, page.getByRole("button", { name: /^Every agent/ }));
+  await tap(page, page.getByRole("button", { name: /^Every agent/ }));
+  await typeInto(page, page.getByRole("textbox", { name: "Instructions" }), "Hello");
+  await expect.poll(() => aria(page)).toContain("{{project.instructions_block}} must stay in the text exactly once.");
+  expect((await prompts()).template).toBe(before.template);
+  // Board cards back to Dieter's default
+  await open(page, "script=tab%20tools;%20tool%20settings");
+  await scrollTo(page, page.getByRole("button", { name: /^Board cards/ }));
+  await tap(page, page.getByRole("button", { name: /^Board cards/ }));
+  await scrollTo(page, page.getByRole("button", { name: /^Reset to Dieter's default/ }));
+  await tap(page, page.getByRole("button", { name: /^Reset to Dieter's default/ }));
+  await tap(page, page.getByRole("button", { name: "Reset", exact: true }));
+  await expect.poll(async () => (await prompts()).board_skill, { timeout: 20_000 }).not.toContain(stamp);
+});
