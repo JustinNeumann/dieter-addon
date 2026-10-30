@@ -7,10 +7,10 @@ plugins {
     id("com.squareup.wire")
 }
 
-// Wire models + :core:runtime + :ui common sources from the dieter submodule, compiled for the
+// Wire models + :core:runtime + :ui common sources from the fork submodule, compiled for the
 // browser, plus the browser actuals and the entry point in src/wasmJsMain. Nothing in the
 // submodule is built with its own Gradle build (that one needs the Android SDK).
-val dieter = rootDir.resolve("dieter")
+val dieter = rootDir.resolve("fork")
 val apps = dieter.resolve("apps/kotlin")
 
 // :ui's sources as they are, except that the Material type scale takes its monospace family from
@@ -95,7 +95,7 @@ wire {
 // The offline diagram renderer (apps/apple/mac/MarkdownPreview: vega-lite, vega, mermaid), built
 // the way :ui builds it for Android and iOS, from a copy so the submodule's tree stays clean. It
 // lands next to the UI's resources as files/markdown-preview, where DiagramAssets reads it.
-val previewSource = layout.projectDirectory.dir("../dieter/apps/apple/mac/MarkdownPreview")
+val previewSource = layout.projectDirectory.dir("../fork/apps/apple/mac/MarkdownPreview")
 val previewWork = layout.buildDirectory.dir("markdown-preview")
 val previewResources = layout.buildDirectory.dir("generated/markdownResources")
 val prepareMarkdownPreview =
@@ -130,7 +130,7 @@ val webResources = layout.buildDirectory.dir("generated/webComposeResources")
 val mergeComposeResources =
     tasks.register<Sync>("mergeComposeResources") {
         dependsOn(buildMarkdownPreview)
-        from(layout.projectDirectory.dir("../dieter/apps/kotlin/ui/src/commonMain/composeResources"))
+        from(layout.projectDirectory.dir("../fork/apps/kotlin/ui/src/commonMain/composeResources"))
         from(previewResources)
         into(webResources)
     }

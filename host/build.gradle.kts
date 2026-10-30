@@ -8,8 +8,8 @@ plugins {
 // The web host: runs Dieter's Kotlin core (ClientApi over CoreRuntime, JVM platform: OkHttp,
 // software device key, file-backed secure store) next to the add-on's daemon and serves it to the
 // browser over one WebSocket (proto/dieter/web/v1/host.proto). The core sources come from the
-// dieter submodule as they are, like the web module's.
-val dieter = rootDir.resolve("dieter")
+// fork submodule as they are, like the web module's.
+val dieter = rootDir.resolve("fork")
 val apps = dieter.resolve("apps/kotlin")
 
 // The Dieter release the submodule is at (gradle.properties dieterRelease): the client version the

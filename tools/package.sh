@@ -32,7 +32,7 @@ grep -q 'script.src = "dieter.js"' index.html || { echo "index.html has no bundl
 sed -i "s|script.src = \"dieter.js\"|script.src = \"dieter.$hash.js\"|" index.html
 sed -i "s|dieter.js.LICENSE.txt|dieter.$hash.js.LICENSE.txt|g" "dieter.$hash.js"
 
-commit=$(git -C "$ROOT/dieter" rev-parse HEAD 2>/dev/null || echo unknown)
+commit=$(git -C "$ROOT/fork" rev-parse HEAD 2>/dev/null || echo unknown)
 own=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)
 printf '{"version": "%s", "dieter_commit": "%s", "commit": "%s"}\n' "$VERSION" "$commit" "$own" > BUILD.json
 

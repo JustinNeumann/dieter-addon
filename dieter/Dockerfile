@@ -139,31 +139,27 @@ RUN set -eu; \
     rm -rf /tmp/src /tmp/src.tar.gz /tmp/sources.sha; \
     ls /opt/dieter-runtime | wc -l
 
-# The new page (Compose UI in the browser, Kotlin/Wasm) from github.com/JustinNeumann/dieter-addon-kotlin: the
-# same files for every architecture. The bridge serves them at /next/. The sha256 is the release's SHA256SUMS line.
-ARG DIETER_WEB_VERSION=0.4.5
-ARG DIETER_WEB_SHA=78e2f581146141e9823fe3c8629ea1589d0895f0c1c3b5ae66dcf8b5b7152115
-RUN set -eu; \
-    curl -fsSL -o /tmp/web.tar.gz "https://github.com/JustinNeumann/dieter-addon-kotlin/releases/download/v${DIETER_WEB_VERSION}/dieter-web-${DIETER_WEB_VERSION}.tar.gz"; \
-    echo "${DIETER_WEB_SHA}  /tmp/web.tar.gz" | sha256sum -c -; \
-    mkdir -p /opt/web; \
-    tar -xzf /tmp/web.tar.gz -C /opt/web --strip-components=1 --no-same-owner; \
-    rm /tmp/web.tar.gz; \
-    test -f /opt/web/index.html && cat /opt/web/BUILD.json
-
-# The web host (the new page's core on the JVM, same repository and release) and a headless Java 21 runtime
-# from Debian. run.sh starts it as user dieter-web on loopback; the bridge relays next/core and next/signin.
-ARG DIETER_WEB_HOST_SHA=d212a676fe8c61d1efeb7ed640234f3e077427c374cb371d46c5896734a9a8aa
+# The page (Dieter's Compose UI in the browser, Kotlin/Wasm) and the web host (its core on the JVM), built from this
+# repository (web/, host/, addon/) by tools/addon-dist.sh into web-dist/; the Builder workflow runs it before the image
+# build. The same files for every architecture. The bridge serves the page at /next/ and relays next/core and
+# next/signin to the web host, which run.sh starts as user dieter-web on loopback with Debian's headless Java 21.
+# DIETER_WEB=mounted builds without them (tests/run.sh mounts a build over /opt/web and the jar).
 RUN set -eu; \
     apt-get update; \
     apt-get install -y --no-install-recommends openjdk-21-jre-headless; \
     rm -rf /var/lib/apt/lists/*; \
-    mkdir -p /opt/web-host; \
-    if [ "${DIETER_WEB_HOST_SHA}" = skip ]; then echo "web host not downloaded (tests/run.sh WEB_HOST_JAR mounts one)"; else \
-      curl -fsSL -o /opt/web-host/dieter-web-host.jar "https://github.com/JustinNeumann/dieter-addon-kotlin/releases/download/v${DIETER_WEB_VERSION}/dieter-web-host-${DIETER_WEB_VERSION}.jar"; \
-      echo "${DIETER_WEB_HOST_SHA}  /opt/web-host/dieter-web-host.jar" | sha256sum -c -; \
-    fi; \
     java -version 2>&1 | head -1
+ARG DIETER_WEB=built
+COPY web-dist/ /tmp/web-dist/
+RUN set -eu; \
+    mkdir -p /opt/web /opt/web-host; \
+    if [ -f /tmp/web-dist/dieter-web.tar.gz ] && [ -f /tmp/web-dist/dieter-web-host.jar ]; then \
+      tar -xzf /tmp/web-dist/dieter-web.tar.gz -C /opt/web --strip-components=1 --no-same-owner; \
+      cp /tmp/web-dist/dieter-web-host.jar /opt/web-host/dieter-web-host.jar; \
+      test -f /opt/web/index.html && cat /opt/web/BUILD.json; \
+    elif [ "${DIETER_WEB}" = mounted ]; then echo "page and web host left out (DIETER_WEB=mounted)"; \
+    else echo "web-dist/ has no page or web host: run tools/addon-dist.sh first" >&2; exit 1; fi; \
+    rm -rf /tmp/web-dist
 
 COPY bridge/ /opt/bridge/
 # dreamfall: the command of the Dreamfall stage agents (bridge/dreamfall.py; they run it from their run cards)

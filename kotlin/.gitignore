@@ -1,8 +1,0 @@
-.gradle/
-.kotlin/
-build/
-out/
-*.iml
-.idea/
-local.properties
-node_modules/

@@ -1,12 +1,12 @@
 // Dieter's Compose UI for the Home Assistant add-on: the browser build of the real apps/kotlin UI
 // (:web) and, later, the JVM web host that runs the Kotlin core next to the add-on's daemon.
-// The Dieter sources come from the `dieter` submodule (JustinNeumann/dieter, pinned commit); all
+// The Dieter sources come from the `fork` submodule (JustinNeumann/dieter, pinned commit); all
 // toolchain and library versions come from its version catalog, so they move together with it.
 pluginManagement {
-    val toml = settingsDir.resolve("dieter/apps/kotlin/gradle/libs.versions.toml").readText()
+    val toml = settingsDir.resolve("fork/apps/kotlin/gradle/libs.versions.toml").readText()
     fun v(key: String) =
         Regex("""(?m)^$key\s*=\s*"([^"]+)"""").find(toml)?.groupValues?.get(1)
-            ?: error("$key missing from libs.versions.toml (is the dieter submodule checked out?)")
+            ?: error("$key missing from libs.versions.toml (is the fork submodule checked out?)")
     repositories {
         google()
         mavenCentral()
@@ -32,11 +32,11 @@ dependencyResolutionManagement {
         mavenCentral()
     }
     versionCatalogs {
-        create("libs") { from(files("dieter/apps/kotlin/gradle/libs.versions.toml")) }
+        create("libs") { from(files("fork/apps/kotlin/gradle/libs.versions.toml")) }
     }
 }
 
-rootProject.name = "dieter-addon-kotlin"
+rootProject.name = "dieter-addon"
 
 // The Compose UI compiled for the browser (Kotlin/Wasm).
 include(":web")

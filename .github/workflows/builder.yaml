@@ -1,5 +1,7 @@
 # Builds the add-on image the Supervisor pulls (config.yaml: image: ghcr.io/justinneumann/dieter).
-# Pushes to main build aarch64 and amd64 on native runners, sign them with Cosign and publish the
+# First the page (Kotlin/Wasm) and the web host (JVM) from web/, host/ and addon/ with the fork submodule,
+# their tests and the page's browser tests; tools/addon-dist.sh hands both to the image build in dieter/web-dist.
+# Pushes to main then build aarch64 and amd64 on native runners, sign them with Cosign and publish the
 # multi-arch manifest ghcr.io/justinneumann/dieter:<version from dieter/config.yaml> (+ :latest);
 # pull requests only build. A version whose tag already exists is not pushed again, so bump
 # config.yaml + CHANGELOG.md for every release (DEPLOY.md). One-time after the first run: make the
@@ -10,18 +12,18 @@ name: Builder
 on:
   push:
     branches: [main]
-    paths:
-      - "dieter/**"
-      - "!dieter/tests/**"
-      - "!dieter/DOCS.md"
-      - "!dieter/CHANGELOG.md"
-      - ".github/workflows/builder.yaml"
+    paths-ignore: # docs and the add-on's e2e tests (run locally: dieter/tests/run.sh) build nothing
+      - "**.md"
+      - "docs/**"
+      - "homeassistant/**"
+      - "dieter/tests/**"
   pull_request:
     branches: [main]
-    paths:
-      - "dieter/**"
-      - "!dieter/tests/**"
-      - ".github/workflows/builder.yaml"
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "homeassistant/**"
+      - "dieter/tests/**"
   workflow_dispatch:
 
 env:
@@ -58,9 +60,87 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "add-on version ${version}"
 
+  page:
+    name: Build the page and the web host
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # npm builds the offline diagram renderer (fork/apps/apple/mac/MarkdownPreview) into the page.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the page and the web host, test the web host and the add-on core
+        run: |
+          version=$(python3 -c 'import yaml; print(yaml.safe_load(open("dieter/config.yaml"))["version"])')
+          echo "page ${version}, fork $(git -C fork rev-parse --short HEAD)"
+          DIETER_WEB_VERSION="${version}" ./gradlew --console=plain :web:wasmJsBrowserDistribution :host:jvmTest :host:fatJar
+
+      - name: Pack them for the image build
+        run: |
+          sudo apt-get install -y -qq brotli >/dev/null
+          tools/addon-dist.sh --no-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: dieter/web-dist/dieter-web*
+
+  browser-tests:
+    # Selection, find, HTML islands, keyboard and the add-on's screens (tests/, Playwright) against the packed page.
+    name: Browser tests
+    needs: page
+    runs-on: ubuntu-24.04 # Playwright 1.59 has no browsers for 26.04 yet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dieter/web-dist
+
+      - name: Unpack the page
+        run: mkdir -p build/page && tar xzf dieter/web-dist/dieter-web.tar.gz -C build/page --strip-components=1
+
+      - name: Install Playwright
+        working-directory: tests
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Test
+        working-directory: tests
+        env:
+          DIETER_WEB_DIR: ${{ github.workspace }}/build/page
+        run: npm test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            tests/playwright-report
+            tests/test-results
+
   build:
     name: Build ${{ matrix.arch }} image
-    needs: init
+    needs: [init, page, browser-tests]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -71,6 +151,11 @@ jobs:
       matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dieter/web-dist
 
       # Passes BUILD_ARCH and BUILD_VERSION to the Dockerfile; BUILD_FROM keeps its default there.
       - name: Build image
