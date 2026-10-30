@@ -2,6 +2,19 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.7 (2026-10-30)
+
+- **New page (`next/`), dieter-addon-kotlin 0.4.3:**
+  - **Images in the chat:** an attached image shows as the picture, and a tool's screenshot (Claude Code reading an
+    image, browser screenshots) shows under its row. A tap opens it full screen over the page; a tap, ✕ or Escape
+    closes it. The tool's details show the images above its output.
+  - **Board order:** in Projects, hold a board and drag it into place. The order is the one this page keeps, so both
+    pages and every device show it.
+  - **New board** offers Publish (Manual, Push base, Pull request), as the board settings do.
+  - **Usage** shows Antigravity's quota groups while the add-on has Antigravity credentials (one card per group,
+    with its weekly and 5-hour windows).
+  - Relative links in an agent's mail open the file in the sender's checkout (verified; it already worked).
+
 ## 0.6.431.6 (2026-10-30)
 
 - **New page (`next/`), dieter-addon-kotlin 0.4.2:**
