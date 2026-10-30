@@ -138,6 +138,20 @@ test("port 8099: Ingress gets everything, Home Assistant its routes, the agents 
   expect((await request.get("api/questions")).status()).toBe(200);
 });
 
+test("the operator (127.0.0.1:8096): agents register and poll questions, nothing else; root and the web host get everything", async ({ request }) => {
+  const status = (user, method, path, body) => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "sh", "-c",
+    `curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X ${method} ${body ? `-H 'Content-Type: application/json' -d '${body}'` : ""} http://127.0.0.1:8096/api/${path}`],
+    { stdio: "pipe" }).toString().trim();
+  expect(status("dieter", "GET", "questions/toolu_nope")).toBe("404");             // the harness worker's poll
+  expect(status("dieter", "POST", "questions", "{}")).toBe("400");                   // its registration (refused as empty)
+  expect(status("dieter", "GET", "questions")).toBe("403");                          // another card's pending questions
+  expect(status("dieter", "POST", "questions/toolu_nope/answer", '{"action":"declined"}')).toBe("403");
+  expect(status("dieter", "POST", "gateway/unenroll", "{}")).toBe("403");
+  expect(status("dieter", "GET", "state")).toBe("403");
+  expect(status("root", "GET", "questions")).toBe("200");
+  expect((await request.get("api/questions")).status()).toBe(200);                   // the page, through the web host
+});
+
 test("the API key reaches the web host only: options.json is root's, the operator reads a copy without it", async () => {
   const sh = (cmd, user) => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
   expect(sh("stat -c '%U %a' /data/options.json", "root")).toBe("root 600");

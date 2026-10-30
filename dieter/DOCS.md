@@ -51,8 +51,16 @@ Port 8099 answers, as Home Assistant's add-on rules ask, the Supervisor only, pl
 - **Nobody else**: not other add-ons (`172.30.33.x`), not the agents on loopback. Only Ingress names a Home
   Assistant user to the add-on.
 
-The API key reaches the web host only; the operator and the agents get a copy of the options without it. The
-container runs under an AppArmor profile (`apparmor.txt`): Docker's default
+The API key reaches the web host only; the operator and the agents get a copy of the options without it.
+
+The operator on `127.0.0.1:8096` shares its user with the agents, so it tells the page from an agent by who
+opened the connection (the kernel's socket table): root and the web host's user `dieter-web` get every route;
+everyone else, the agents included, only registers questions and polls their answers (what the harness worker
+does). An agent cannot list or answer another card's question, which would reach that turn as your answer, nor
+enroll or unenroll the gateway. An agent determined to get around this (the add-on's processes share its user)
+still can; this closes the easy path, as Dieter's own turn token does for the daemon.
+
+The container runs under an AppArmor profile (`apparmor.txt`): Docker's default
 capability set, no mounts, no writes to kernel interfaces; file access is unrestricted because the
 agents run arbitrary tooling under `/data`.
 
@@ -250,7 +258,8 @@ no channel for that, so the fork's harness worker relays the question to the add
 (`DIETER_QUESTIONS_URL`), the card shows it with its options and a free-form field, the Inbox lists the
 card under "Waiting for your answer", and Home Assistant receives the event `dieter_question`
 (`card_id`, `title`, `question`, `count`) for a notification. The answer, or a decline, continues the
-turn. Unanswered questions expire after a day; cancelling the card cancels the question.
+turn. Unanswered questions expire after a day; cancelling the card cancels the question. Only the page answers:
+agents can ask, but neither see nor answer other cards' questions.
 
 Messages, new tasks and new chats take attachments (images and files); the harness saves them in the
 conversation's workspace and tells the agent where they are.

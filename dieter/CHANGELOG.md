@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.26 (2026-10-30)
+
+- **Agents can no longer act as you through the operator.** The operator (`127.0.0.1:8096`) runs as the agents'
+  user, and it accepted every request from loopback: an agent could list another card's pending question and
+  answer it (the answer reached that turn as yours), or unenroll the gateway without Dieter's turn token. Now it
+  asks the kernel who opened the connection: root and the web host's user (the page) get every route, everyone
+  else only what the harness worker needs (register a question, poll its answer).
+
 ## 0.6.431.25 (2026-10-30)
 
 - **Boards are wide on desktops and tablets**, like Dreamfall boards: the board takes the whole width and its

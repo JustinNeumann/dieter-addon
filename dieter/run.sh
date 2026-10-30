@@ -45,7 +45,7 @@ bashio::log.info "Dieter $(dieter --version) · node $(node --version) · Ingres
 (
   while true; do
     setpriv --reuid=dieter --regid=dieter --init-groups env HOME=/data USER=dieter LOGNAME=dieter \
-      DIETER_OPTIONS_FILE=/data/.operator-options.json \
+      DIETER_OPTIONS_FILE=/data/.operator-options.json DIETER_OPERATOR_TRUSTED_UIDS="0,$(id -u dieter-web)" \
       java -XX:+UseSerialGC -Xms16m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=24m \
         -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError -Djava.net.preferIPv4Stack=true \
         -cp /opt/web-host/dieter-web-host.jar com.getdieter.operator.MainKt || true
