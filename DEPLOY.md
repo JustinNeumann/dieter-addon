@@ -9,7 +9,9 @@ installs needs
 1. a new `version` in `dieter/config.yaml` (`<bundled Dieter release>.<add-on revision>`) and a
    `dieter/CHANGELOG.md` entry;
 2. `dieter/tests/run.sh` green;
-3. a push to `main`: `.github/workflows/builder.yaml` builds aarch64 and amd64 on native runners with
+3. a push to `main`: `.github/workflows/builder.yaml` builds the page and the web host from `web/`, `host/` and
+   `addon/` (with the `fork` submodule), runs the web host's tests and the page's browser tests, hands both to the
+   image in `dieter/web-dist` (`tools/addon-dist.sh`), then builds aarch64 and amd64 on native runners with
    the `home-assistant/builder` actions, signs them with Cosign and publishes the multi-arch manifest
    `ghcr.io/justinneumann/dieter:<version>` (plus `{arch}-dieter`); pull requests only build.
    A version whose tag already exists is not pushed again (`skip-existing`).
@@ -24,9 +26,11 @@ updates, or automatically within a day).
 ## Local add-on on the Pi (building on the device)
 
 The `dieter/` folder copied to `/addons/dieter` becomes the local add-on `local_dieter`. Because
-`image:` makes the Supervisor pull instead of build, the copy must drop that line:
+`image:` makes the Supervisor pull instead of build, the copy must drop that line. The image takes the page and the
+web host from `dieter/web-dist`, so build them first:
 
 ```bash
+tools/addon-dist.sh                       # -> dieter/web-dist/dieter-web.tar.gz, dieter-web-host.jar
 tar -C ~/dieter-addon/dieter -czf - --exclude=__pycache__ --exclude=tests/node_modules --exclude=tests/test-results . \
   | ssh hassio@192.168.0.10 'sudo sh -c "rm -rf /addons/dieter && mkdir -p /addons/dieter && tar -xzf - -C /addons/dieter && sed -i \"/^image:/d\" /addons/dieter/config.yaml"'
 ssh hassio@192.168.0.10 'bash -lc "ha store reload && ha apps rebuild local_dieter"'
@@ -89,11 +93,14 @@ and release artifacts that affect the add-on (scheduled card).
   cryptographically verified (no cosign here); runtime sources checksum and harness archives unchanged; the
   bridge reuses the staged runtime of an equal archive), Re-enroll texts in the page and DOCS.md.
 
-## The new page's bundle (dieter-addon-kotlin)
+## The page and the web host
 
-`dieter/Dockerfile` downloads `dieter-web-<version>.tar.gz` from the releases of
-[JustinNeumann/dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) and checks its sha256.
-A new bundle: tag `vX.Y.Z` there (its CI builds and publishes the tarball, the web host jar and `SHA256SUMS`), then
-set `DIETER_WEB_VERSION`, `DIETER_WEB_SHA` and `DIETER_WEB_HOST_SHA` (the lines of `SHA256SUMS`) and bump the add-on
-version. For a local test of unreleased builds: `tools/package.sh` and `./gradlew :host:fatJar` there, then
-`WEB_BUNDLE=<unpacked dir> WEB_HOST_JAR=<jar> dieter/tests/run.sh e2e/next.spec.mjs`.
+They are built from this repository with every image (`tools/addon-dist.sh`: the page's production build packed by
+`tools/package.sh`, and the web host's fat jar, copied to `dieter/web-dist`), so they always match the add-on's
+commit; nothing is pinned. Their version is the add-on's (`DIETER_WEB_VERSION`, shown in the page's `BUILD.json`).
+The UI is compiled from the `fork` submodule: moving it (`git -C fork checkout <commit>`, then commit the gitlink) is
+how the page gets Dieter's newer screens; the daemon in the image stays the fork release pinned in the Dockerfile.
+
+For a quick e2e run of a page built elsewhere: `WEB_BUNDLE=<unpacked dir> WEB_HOST_JAR=<jar> dieter/tests/run.sh`
+builds the image without them and mounts both. Until 0.6.431.8 the page came from the separate repository
+dieter-addon-kotlin (releases `vX.Y.Z`, pinned by sha256); its history is part of this repository.

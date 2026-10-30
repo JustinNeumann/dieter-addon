@@ -1,9 +1,12 @@
 # Dieter add-on
 
-Runs the [Dieter](https://github.com/dbpprt/dieter) daemon and the Dieter page inside Home Assistant.
-The page opens from the sidebar entry **Dieter** (Ingress: HA login, Nabu Casa and the Companion app
-work, nothing else is needed on the phone). The sidebar entry is the add-on's "Show in sidebar"
-switch (`ingress_panel`), enabled on install.
+Runs the [Dieter](https://github.com/dbpprt/dieter) daemon inside Home Assistant, with Dieter's own app as its
+page: the screens of the Android and iOS apps (Compose Multiplatform) compiled for the browser. The page opens
+from the sidebar entry **Dieter** (Ingress: HA login, Nabu Casa and the Companion app work, nothing else is needed
+on the phone). The sidebar entry is the add-on's "Show in sidebar" switch (`ingress_panel`), enabled on install.
+
+The page is a Dieter client like the apps: it signs in to your Dieter gateway once and then shows every machine
+of your account, the add-on's own daemon included once it is enrolled (see *The page* and *Gateway* below).
 
 ## Installation
 
@@ -27,7 +30,8 @@ not be root anyway.
 | Piece | Where |
 |---|---|
 | `dieter daemon start --addr 127.0.0.1:4242` | store `/data/dieter`, started and restarted by the bridge |
-| bridge `/opt/bridge/dieter_bridge.py` | `0.0.0.0:8099` (Ingress port); REST + SSE API, serves the page, `/api/ha` for sensors |
+| bridge `/opt/bridge/dieter_bridge.py` | `0.0.0.0:8099` (Ingress port): serves the page and relays it to the web host; REST + SSE API for the web host and Home Assistant (`/api/ha`, the rest_commands) |
+| web host `/opt/web-host/dieter-web-host.jar` (Java 21) | loopback, user `dieter-web`: Dieter's core for the page (signed in to your gateway) and the add-on's own features; state in `/data/web-host` |
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the bridge on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR`; staged runtimes of earlier versions are removed, and the Bun it carries is installed as the daemon's managed Bun (`/data/dieter/runtime/tools/bun/<bun version>`), which Oh My Pi's model discovery would otherwise download the whole archive for |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |
 | `hass-cli` 1.0.0 (HA core REST API), `ha-logs` (HA logs) | `/usr/local/bin`; authenticated with the add-on's token, see below |
@@ -49,7 +53,7 @@ agents run arbitrary tooling under `/data`.
 | `github_token` | token for github.com, used for every clone and push and for pull requests and Actions through the GitHub CLI (see GitHub below). Fine-grained, for *All repositories* or the repos you want: Contents read/write, Pull requests read/write, Actions read, Checks read, Commit statuses read, Metadata read; Workflows read/write only if agents may change `.github/workflows`; no Administration, Secrets or Actions write. Or classic `repo` (and `workflow`). Stored in `/data/.config/gh/hosts.yml` (gh's sign-in; git takes it from there) |
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
 | `gateway_url`, `gateway_host_ip`, `machine_name` | enroll the add-on's daemon with your Dieter gateway so the apps see it (see Gateway below); `gateway_host_ip` adds a hosts entry for the gateway's name |
-| `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **+** → *Add repository* (Git URL, optional name and base branch); *New folder* creates an empty Git repository `/data/projects/<name>` without a remote and registers it (an existing folder there is adopted). Further boards next to a project's *Main* board: the project's ⋮ menu (or a board's ⋮ menu) → *New board…* (name, *Review lane* on or off). Boards are listed in the order you choose: drag a board row (touch: long press first) on the Projects list or the project's page; the order is kept by the add-on for all devices. The page lists the most recently used project first, preselects it in New task and opens it when the Projects tab is tapped |
+| `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **Add** → *Clone repository* (Git URL, optional name and base branch) or *New empty repository* (an empty Git repository `/data/projects/<name>` without a remote, registered; an existing folder there is adopted). Boards are listed in the order you choose: drag a board row (touch: long press first) in Projects; the add-on keeps the order for every device. Projects lists the most recently used project first and opens it when the Projects tab is tapped |
 | `log_level` | bridge log level |
 
 Agents work in `/data/projects/*` on branches; publishing means push branch + pull request. The
@@ -112,7 +116,7 @@ Assistant. An optional status dashboard is in
 
 The harnesses run inside the container, so they need their own credentials:
 
-- **Claude Code**: either sign in on the Dieter page (**Tools → Usage → Sign in**: the add-on runs
+- **Claude Code**: either sign in on the page (**Tools → Usage → Sign in**: the add-on runs
   `claude auth login`, you open the link, allow Claude Code and paste the code back), or run
   `claude setup-token` on a machine where Claude Code is logged in and paste the long-lived token into
   the option **Claude Code token** (`CLAUDE_CODE_OAUTH_TOKEN` in `/data/dieter.env`, passed with
@@ -142,57 +146,29 @@ The harnesses run inside the container, so they need their own credentials:
 
 Restart the add-on after changing tokens.
 
-## Files
+## Files and schedules
 
-**Tools → Files** (and **Workspace → Files** on a project, **Files** in a conversation's menu)
-browses a checkout through the daemon (`dieter file list`, `stat`, `read`): folders first, file sizes,
-an eye icon shows dotfiles. Text files are displayed, images rendered, other binaries and files above
-5 MB only described; the download icon saves the file. The conversation's menu uses the card's
-workspace (its worktree for worktree cards), the Tools and project entries the project directory.
-Browsing is read-only; editing stays with the agents.
-
-## Schedules
-
-**Tools → Schedules** (and **Workspace → Schedules** on a project) manages the daemon's recurring
-tasks (`dieter schedule …`): the list shows cron, next run and paused state; **+** creates one with a
-name, the prompt, a cron expression (presets: weekdays 07:00, daily, hourly, …; the next three times
-are previewed as you type), the timezone (defaults to the browser's), project and board, agent, model
-and effort, whether each occurrence starts the agent or only adds a Todo card, worktree or project
-directory, and the vault/mail access of the cards. The detail page runs the schedule now, pauses or
-resumes it, lists the occurrence history (each entry opens its card) and deletes the definition (cards
-and history stay). The scheduler runs inside the add-on's daemon, so schedules fire while Home
-Assistant is up. Agents themselves can also create schedules and cards with the CLI inside a turn.
+**Files** browses a checkout, read-only (editing stays with the agents): text files are shown, images rendered and
+Markdown files drawn as formatted text. **Schedules** manages the daemons' recurring tasks (`dieter schedule …`):
+create, run now, pause, history, delete. Both are the Dieter app's screens. The add-on's scheduler runs inside its
+daemon, so its schedules fire while Home Assistant is up; agents can also create schedules and cards with the CLI
+inside a turn.
 
 ## Mail
 
-The **Mail** tab is the add-on's Dieter Mail: the read-only Markdown reports agents send with
-`dieter mail send` from cards, chats and schedules created with mail access (the **Allow mail to you** switch
-of New task and Schedules), and what scripts send as operator. It follows the Android app: the Inbox newest
-first in date groups (Today, Yesterday, This week, Last week, then by month), with sender, subject and preview;
-unread messages have a blue dot, important ones a red **!**, flagged ones a flag. The chips switch between
-**Inbox**, **Flagged**, **Unread**, **Archive** and **Trash**; search matches subject, sender, project and
-preview; the filter button narrows to a project, a sender or important mail; ⋮ marks everything read or
-empties the Trash. With a mouse, a row shows buttons for read/unread and archive when you point at it.
+The **Mail** tab is Dieter Mail: the read-only Markdown reports agents send with `dieter mail send` from cards,
+chats and schedules created with mail access (the **Allow mail to you** switch of New task and Schedules), and what
+scripts send as operator. It is the apps' Mail: the Inbox newest first, Flagged, Unread, Archive and Trash, search,
+and a message's page with its sender, **Open conversation** for the card or chat that sent it, Archive and Delete.
 
-Opening a message marks it read. Its page shows the sender (schedule, card, chat or operator, project,
-machine, agent and model), **Open conversation** for the card or chat that sent it, Archive, Delete (to the
-Trash; in the Trash, for good) and in ⋮ read/unread, flag, Move to Inbox and Copy Markdown. Changes offer
-**Undo**. The tab's badge counts unread Inbox mail.
-
-The body renders the apps' Markdown subset: headings, emphasis, strikethrough, code, links, nested and task
-lists, quotes, rules, tables with alignment (wide ones scroll sideways). Raw HTML stays text, images show as
-links and are never loaded, and relative links open the file in the sending card's checkout (Files). Charts in
-`vega-lite` (or `vegalite`), `vega` and `mermaid` fences are drawn as static SVG that follows the light or dark
-theme unless the chart sets its own background. The page loads the renderers (Vega 5, Vega-Lite 5, Mermaid 11)
-from jsDelivr with pinned versions and integrity hashes the first time a message has a chart, so drawing needs
-internet access in the browser; external datasets, images and links in charts are blocked, and a chart that
-can't be drawn keeps its source. Messages stay on the add-on's machine (`/data/dieter`); the bridge reads them as
-operator and lists them every 10 s (`BRIDGE_MAIL_POLL_S`), at once after a change made on the page.
+The body is real HTML inside the page, so the browser's selection, translation and screen readers work there.
+Charts in `vega-lite` (or `vegalite`), `vega` and `mermaid` fences are drawn offline (the renderers ship with the
+page) in sandboxed frames; raw HTML stays text and images show as links.
 
 ## Dreamfall boards
 
-A **Dreamfall board** is a funnel for ideas next to the project's Kanban boards: a project's ⋮ → **New
-Dreamfall board…** (or New board → **Dreamfall board**) creates three ordinary boards and two schedules. The form asks for three things: the
+A **Dreamfall board** is a funnel for ideas next to the project's Kanban boards: Projects → **Add** → **New
+Dreamfall board** (or **Tools → Dreamfall**) creates three ordinary boards and two schedules. The form asks for three things: the
 **categories** to enumerate (one per line, or a categories file of the project), the **enumeration goal** (new ideas per
 category and night) and the **navigation logic**: in plain language, what makes an idea worth your time, what to drop
 and how selective to be. It starts with sensible criteria (value, realism, novelty, risk; about one idea in four) for you
@@ -216,16 +192,14 @@ line, the times, the weekdays (all checked by default), the agent and the stage 
   without a pull request when the project has no git remote. A card whose agent finished but left it in
   Running shows **Finished · still in Running** and a **Review** button.
 
-The board shows the stages side by side with a funnel on top (stage, actor, schedule, waiting ideas,
-how many ideas pass) and, on a phone, as tabs. Released, transferred, parked and picked ideas sit in
-collapsible groups under each queue (the newest 40). Tapping an idea opens its brief, the verdict with
-the agent's reason and score, the **Provenance** (the copies across the stages) and the **Trail**: who
-created, judged, transferred, picked, parked or started it, when, and why. The board's ⋮ runs a stage
-now, pauses or resumes both schedules, changes the settings (name, topic, categories or a categories file
-of the project, ideas per category, navigation logic, implementation instructions and mail, times, time zone, agent; optionally a mail with the night's result)
-and opens a stage as a normal Kanban board. **Remove Dreamfall…** deletes the schedules; the three boards
-and their cards stay. New board can also take existing boards of the project (with a Review lane) as
-stages instead of creating new ones.
+**Tools → Dreamfall** lists the Dreamfall boards with the ideas waiting for you, and Projects shows each as one
+row. The board shows the night: a funnel (how many ideas pass from stage to stage), each stage's last run and
+Navigation's queue with its verdicts. Tapping an idea opens its brief, the verdict with the agent's reason and
+score, the **Provenance** (the copies across the stages) and the **Trail**: who created, judged, transferred,
+picked, parked or started it, when, and why. The board's ⋮ runs a stage now, changes the settings (name, topic,
+categories or a categories file of the project, ideas per category, navigation logic, implementation instructions
+and mail, times, time zone, agent, paused or not) and **Remove Dreamfall…** deletes the schedules; the three boards
+and their cards stay.
 
 The agents work through the `dreamfall` command in the image (`dreamfall --help`; run from their run
 cards): `run begin`/`run end`, `ideas`, `add`, `queue`, `promote`, `release`. It records every step and
@@ -240,29 +214,22 @@ The agents need the `dreamfall` command, so the project's checkout must be on th
 
 The Dieter apps (Android, iPhone, Mac) talk to a **gateway**, and a gateway lists the machines
 enrolled with it. The add-on's daemon is not enrolled by default, so the apps do not see its projects.
-**Tools → Machines → Gateway → Enroll** runs `dieter daemon enroll` against your gateway (the URL the
-apps use, HTTPS): open the sign-in link, authorize with GitHub, and the add-on appears as the machine
-`machine_name` (default `home-assistant`) after its daemon restarts. Then approve the daemon's pairing
-code, shown under **Tools → Devices**, in an app (Devices → Add a device) or on a trusted machine
-(`dieter device approve CODE`). Options: `gateway_url` prefills the URL; `gateway_host_ip` pins the
+**Tools → Machines → Gateway of this add-on → Enroll** runs `dieter daemon enroll` against your gateway (the URL
+the apps use, HTTPS): open the sign-in link, authorize with GitHub, and the add-on appears as the machine
+`machine_name` (default `home-assistant`) after its daemon restarts. Then approve the daemon's pairing code
+under **Devices → Add a device** (on the page or in an app) or on a trusted machine (`dieter device approve CODE`). Options: `gateway_url` prefills the URL; `gateway_host_ip` pins the
 gateway's host name in the container's `/etc/hosts` when it cannot be resolved there, for example a
 Tailscale name (`https://host.tailnet.ts.net:4443` with the host's Tailscale IP); the certificate is
 still verified against the name. Enrollment is kept in `/data/dieter/daemon`.
-When another device has removed the add-on's daemon from the account (Devices shows "Removed"),
-**Re-enroll** runs `dieter daemon unenroll` and shows the Enroll form again. A new enrollment gives the daemon a
+When another device has removed the add-on's daemon from the account, **Re-enroll** runs `dieter daemon unenroll` and shows the Enroll form again. A new enrollment gives the daemon a
 new daemon ID: projects and harness settings stay, and the daemon registers its checkouts again under the new ID
 at its first peer sync; conversations and schedules of the old ID stay as read-only history.
 
 ## Devices
 
-**Tools → Devices** shows the add-on daemon's trust state, the account's machines, apps and recovery
-key, the devices waiting to join, and **Add a device**: type the 16-character code a new app or
-machine shows and approve it; **Remove** takes a device out of the roster (removed devices are not
-listed, only counted). Only type a code you see on
-your own new device. This works when the add-on's daemon is itself a trusted device of your account,
-which needs `dieter daemon enroll` against your gateway; an add-on without enrollment (the default)
-shows "Not enrolled", and the code is then approved on an enrolled machine (`dieter device approve
-CODE`) or under Devices in the Dieter app.
+**Tools → Devices** is the Dieter app's Devices screen: your account's machines and apps, the devices waiting to
+join, and **Add a device** to approve the code a new app or machine shows. Only type a code you see on your own
+new device.
 
 ## Questions from the agent and attachments
 
@@ -273,24 +240,18 @@ card under "Waiting for your answer", and Home Assistant receives the event `die
 (`card_id`, `title`, `question`, `count`) for a notification. The answer, or a decline, continues the
 turn. Unanswered questions expire after a day; cancelling the card cancels the question.
 
-Messages, new tasks and new chats take attachments: images and files, up to four, 20 MB each. The page
-uploads them to the bridge (`/data/dieter/uploads`, removed once sent) and passes them to the CLI with
-`--attach`; the harness saves them in the conversation's workspace and tells the agent where they are.
-Images up to about 450 KB show as previews in the conversation, larger ones as a pill with the name.
+Messages, new tasks and new chats take attachments (images and files); the harness saves them in the
+conversation's workspace and tells the agent where they are.
 
 ## Images from the agent
 
 The conversation shows images the agent produces, without a special tool:
 
 - **Tool results with an image** (Claude Code's Read of a PNG/JPEG, screenshots of browser MCP tools)
-  appear under the tool row instead of being folded into the activity summary. The bridge fetches the
-  image from the tool output (`card|chat tool-output`) via `/api/{card|chat}/ID/tool-image`.
-- **Markdown images in a reply**, `![caption](path)`: the path names a file of the conversation's
-  checkout, relative or absolute inside it (`/api/{card|chat}/ID/image?path=`); `https:` and
-  `data:image/` URLs are shown as they are. A path outside the checkout shows a pill.
-
-Tap an image to view it full screen. The add-on's `~/.claude/CLAUDE.md` tells Claude Code about the
-Markdown form; Codex and Antigravity don't get that hint yet.
+  appear under the tool row instead of being folded into the activity summary. Tap one to view it full
+  screen.
+- **Markdown images in a reply**, `![caption](path)`, stay links: the file is in the conversation's
+  checkout (Files).
 
 ## SSH key of the add-on
 
@@ -304,8 +265,8 @@ the host name on success.
 
 ## Task titles
 
-Tools → Settings → **Title model** picks who names a task or chat created without a title (the page's
-New task with an empty title field, the `dieter_create_task` rest_command without `title`):
+Tools → Settings → **Title model** picks who names a task or chat created without a title (New task with an
+empty title field on this add-on's machine, the `dieter_create_task` rest_command without `title`):
 
 - **OpenAI** (default): Dieter's own `--auto-title`; the task is saved under its first line and GPT
   Spark improves the title (with OpenAI configured, otherwise the first line stays).
@@ -313,8 +274,8 @@ New task with an empty title field, the `dieter_create_task` rest_command withou
   first line and renames it a moment later with the model's short summary (`ai_task.generate_data`,
   same language as the task). It finds the model by itself: the first available `ai_task` entity of the
   [Ollama integration](https://www.home-assistant.io/integrations/ollama/) (add an *AI Task* entry to
-  the integration if it has only a conversation agent), looked up again every 10 minutes; the dialog
-  shows the entity it found. Without one, OpenAI titles instead. If the model fails or takes longer
+  the integration if it has only a conversation agent), looked up again every 10 minutes. Without one, OpenAI
+  titles instead. If the model fails or takes longer
   than 2 minutes the first line stays; a title you change in the meantime is kept.
 
 The choice is stored in `/data/bridge_settings.json`. Tasks that agents create with the `dieter` CLI do
@@ -377,15 +338,13 @@ Home Assistant's time zone. The system log holds WARNING and above since the las
 `/api/error_log` for the whole log file, which Home Assistant OS does not provide (it logs to the journal, and the
 Supervisor's `/core/logs` needs `hassio_api`, which stays off). The Claude Code note in `CLAUDE.md` mentions it.
 
-## New page (preview)
+## The page
 
-**Tools → Preview → New page** opens Dieter's own app screens (the Compose UI of the Android and iOS apps)
-compiled for the browser, at `next/` of this page. It is built in
-[dieter-addon-kotlin](https://github.com/JustinNeumann/dieter-addon-kotlin) and pinned in the image by version
-and sha256; its plan lists what comes next. It will replace this page once it does everything this one does.
+Dieter's own app screens (the Compose UI of the Android and iOS apps) compiled for the browser, built from this
+repository with the add-on. The add-on's root forwards to it at `next/`.
 
-- Served behind Ingress like this page: HA login, Nabu Casa and the Companion app work.
-- **Its own sign-in.** The new page is a Dieter *client* like the Android app: it signs in to your Dieter gateway
+- Served behind Ingress: HA login, Nabu Casa and the Companion app work.
+- **Its own sign-in.** The page is a Dieter *client* like the Android app: it signs in to your Dieter gateway
   with GitHub and is then paired like a new device. Its core runs inside this add-on (the *web host*, a small
   Java process), so the sign-in belongs to the add-on, not to a browser: sign in once and every browser and the
   Companion app that open the page use it. Until then it shows the sign-in screen; `next/?demo` shows demo data.
@@ -393,20 +352,20 @@ and sha256; its plan lists what comes next. It will replace this page once it do
   from the device's), live without a reload. **Dynamic color** (Settings) takes Dieter's colours from Home
   Assistant's primary colour, including custom themes.
 - **Browsers:** it needs WebAssembly GC: current Chrome, Edge and Firefox, Android's WebView (Companion app),
-  Safari and iPhone/iPad from iOS 18.2. Older browsers see a note with a link back to this page.
+  Safari and iPhone/iPad from iOS 18.2. Older browsers get a note saying so.
+- **Screen readers:** after a menu, dialog or sheet has closed, the page's accessibility tree keeps that popup's
+  entries until a reload (Compose for Web 1.12; 1.13 fixes it once its text input is reliable).
 - First load about 5 MB (the WebAssembly is fetched gzip-compressed and inflated in the browser, because Ingress
   neither forwards `Accept-Encoding` nor compresses WebAssembly), afterwards from the browser cache.
 - `next/?theme=dark|light` overrides the theme, `next/?script=tab projects; board Main` replays the app's debug
-  navigation. `<your HA address>/app/<this add-on's slug>/next/` opens the new page directly; behind it
+  navigation. `<your HA address>/app/<this add-on's slug>/next/` opens the page directly; behind it
   `card/<id>` opens a conversation, `tab/<name>` a tab, `dreamfall/<id>` a Dreamfall board (`…/settings` its
-  settings) and `idea/<id>` an idea. While the new page is open, Dieter's push notifications open their card in
-  it (as they do on this page); the address then goes back to `…/next`, so a reload stays on the new page.
-- **Dreamfall** is on the new page too: Tools → Dreamfall, or a stage board opened from Projects. Picks, parks and
-  settings made there are the same as on this page; the trail names the Home Assistant user who made them.
+  settings) and `idea/<id>` an idea. While the page is open, Dieter's push notifications open their card in it;
+  the address then goes back to `…/next`, so a reload stays on the page.
 
-### Signing in the new page
+### Signing in the page
 
-GitHub sends you back to your gateway, and the gateway sends the browser back to the app. For the new page that
+GitHub sends you back to your gateway, and the gateway sends the browser back to the app. For the page that
 return address is your Home Assistant: `https://<your HA address>/app/<this add-on's slug>/next/signin` (the
 slug is the part after `/app/` when you open the add-on, e.g. `4d8f2a84_dieter`). The gateway accepts only
 return addresses it lists, so once:
@@ -414,7 +373,7 @@ return addresses it lists, so once:
 1. On the gateway's machine add the address to `DIETER_NATIVE_REDIRECT_URIS` (comma-separated, exact, keep the
    app's existing entries), e.g. in the gateway's `.env`, and restart the gateway. Add one address per way you
    open Home Assistant for signing in (e.g. the Nabu Casa address).
-2. Open the new page through that address, enter the gateway address, **Sign in**, approve on GitHub and on the
+2. Open the page through that address, enter the gateway address, **Sign in**, approve on GitHub and on the
    gateway's confirmation page. The browser comes back to Home Assistant and the page says *Signed in*.
 3. The page then shows a pairing code: approve it on a device that is already trusted (the Dieter app's Devices
    screen, or `dieter device approve <code>` on a paired machine).
@@ -429,7 +388,7 @@ of using the one you opened Home Assistant with.
 the add-on's backups). It runs as its own user, so the agents (user `dieter`) can neither read that directory
 nor talk to it: it answers only the bridge, which proves itself with a secret created at every start and kept
 only in the bridge's memory (the bridge is non-dumpable, so processes of the agents' user cannot read it). The
-session gives full access to every machine of your Dieter account, like any signed-in app. Sign out in the new
+session gives full access to every machine of your Dieter account, like any signed-in app. Sign out in the
 page's Settings, or revoke the device in the Dieter app.
 
 ## Backups

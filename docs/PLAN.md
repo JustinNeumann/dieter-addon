@@ -1,7 +1,10 @@
 # Compose web UI for the Dieter add-on: plan
 
-Status (2026-10-29): **Phases 1, 3 and 4.0 built and tested locally; Phase 2 built on branch `phase2`; parity (4.A–J) not
-started.** See [Progress](#progress) for what is done, where it deviates from this plan and what is open.
+Status (2026-10-30): **Phases 1–4 done; the switch is done in add-on 0.6.431.9**: one repository
+(`JustinNeumann/dieter-addon`, this one), the Compose page is the add-on's only page and the classic page is removed.
+Next: the bridge's remaining duties move into the web host one area at a time, each its own release, until no Python
+is left (see [Step 2](#step-2-the-bridge-into-the-web-host)). See [Progress](#progress) for what is done, where it
+deviates from this plan and what is open.
 
 The work runs in the order you set:
 
@@ -37,11 +40,13 @@ features over one group at a time.
   work is done. The host answers only requests carrying a per-boot secret that `run.sh` hands to the bridge on an
   inherited descriptor; the host runs as its own user (`dieter-web`) with `/data/web-host` private, so the
   agents (user `dieter`) can neither read the session nor talk to the host.
-- D5: the bundle and the host jar are released from *this* repository (tag `vX.Y.Z` → `dieter-web-X.Y.Z.tar.gz`,
-  `dieter-web-host-X.Y.Z.jar`, `SHA256SUMS`), not from the fork's server release.
+- D5: the bundle and the host jar are built from *this* repository by the add-on's Builder (`builder.yaml`, job
+  `page`: `tools/addon-dist.sh` hands both to the image build in `dieter/web-dist`), from the same commit as the
+  image. Until add-on 0.6.431.8 they were releases (`vX.Y.Z`, `SHA256SUMS`) of the separate repository
+  dieter-addon-kotlin, pinned by sha256 in the Dockerfile.
 - Sign-in: the gateway only redirects to exact registered addresses, and how you reach HA varies (Nabu Casa,
   LAN), so each sign-in starts with the address the page is on: `<HA>/app/<slug>/next/signin`. HA opens the
-  add-on at its root for any `/app/<slug>/…` path, so the classic page forwards `next/…` deep links (which also
+  add-on at its root for any `/app/<slug>/…` path, so the add-on's root page forwards `next/…` deep links (which also
   makes `<HA>/app/<slug>/next/` a direct link to the new page). The host completes the code under its fixed
   internal callback (the core checks only the prefix and exchanges code + PKCE verifier). Pasting the landed
   address into the gateway field also completes. The session belongs to the add-on, so every browser and the
@@ -481,11 +486,34 @@ Test: `the HA summary endpoint stays consistent`, `hass-cli is in the image…`.
 4. **Extension API + add-on-only screens**: questions, Claude sign-in, Gateway, SSH key, Title model, work
    folders, Add repository / New folder, board order
 5. **Dreamfall** (I)
-6. **Switch**: `/next/` becomes `/`, old page at `/classic/` for one release, then removed together with
-   `app.js` / `app.css` and the bridge's page-only endpoints
+6. **Switch** ✅ (0.6.431.9, without the planned `/classic/` release): the add-on's root forwards to `next/`, `app.js`
+   and `app.css` are removed, the two repositories are one. The bridge's endpoints that only the classic page used go
+   in step 2, area by area
 7. **Upstream proposals**: web target for `:ui`, the extension points, the `platformMonospace()` fix
 
 Each group is done when its rows are ✅ and its tests pass against `/next/`. Tick the rows in this file as you go.
+
+## Step 2: the bridge into the web host
+
+The Compose page talks to the web host only; the web host's add-on core still reaches Dieter's add-on features through
+the Python bridge (`addon/…/Bridge`: loopback HTTP and the event stream). The bridge also starts the daemon, serves
+Ingress on 8099 and answers Home Assistant. They move into the web host one area at a time, each its own add-on
+release with the e2e suite green, and the last one deletes `dieter/bridge/` and Python from the image:
+
+1. Settings, title model, board order, prompts (small, file-backed)
+2. Projects: clone, new repository, adoption
+3. Claude sign-in, gateway enrollment, SSH key
+4. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments
+5. Dreamfall (`dreamfall.py` stays a command for the agents; its records are Dieter's key-value store)
+6. Housekeeping (work folder retention) and the Ollama titles
+7. Home Assistant's side: `/api/ha`, the rest_commands' endpoints (`/api/card`, `…/send`, `…/move`, `/api/focus`,
+   `/api/state`) and the events `dieter_turn_finished`, `dieter_card_review`, `dieter_question`, on port 8099 with
+   the same paths and answers, so `homeassistant/packages/dieter.yaml` does not change
+8. Process supervision (daemon start and restart, harness runtime staging), Ingress on 8099, the page's files; then
+   `dieter/bridge/` goes
+
+The e2e contract tests (`dieter/tests/e2e/bridge-api.spec.mjs`, `dreamfall-api.spec.mjs`) pin what Home Assistant and
+the agents rely on; they run unchanged against every step.
 
 ---
 
@@ -504,7 +532,7 @@ Each group is done when its rows are ✅ and its tests pass against `/next/`. Ti
 ## Sources
 
 - Spike: `~/dieter/spike/web` (README, `build.gradle.kts`, `DemoData.kt`, `watch.sh`, `ha/dashboard.py`)
-- Add-on: [JustinNeumann/dieter-addon](https://github.com/JustinNeumann/dieter-addon): `dieter/DOCS.md`, `dieter/bridge/app.js`,
+- Add-on: [JustinNeumann/dieter-addon](https://github.com/JustinNeumann/dieter-addon): `dieter/DOCS.md`, `dieter/bridge/app.js` (removed in 0.6.431.9),
   `dieter/bridge/dieter_bridge.py`, `dieter/tests/e2e/*.spec.mjs`, `docs/dreamfall/CONCEPT.md`
 - Dieter: [dbpprt/dieter](https://github.com/dbpprt/dieter): `apps/kotlin/ui/.../store/MobileCore.kt`, `navigation/Navigation.kt`,
   `core/runtime/.../platform/Platform.kt`, `CoreRuntime.kt` (loopback routes)

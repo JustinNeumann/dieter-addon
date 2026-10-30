@@ -66,7 +66,7 @@ test("?islands=off keeps Compose's renderer", async ({ page }) => {
 
 test("Markdown files are islands, plain text stays Compose's editor", async ({ page }) => {
   await open(page, "file README.md");
-  await expect(page.locator(".dieter-island h1")).toHaveText("dieter-addon-kotlin");
+  await expect(page.locator(".dieter-island h1")).toHaveText("dieter-addon");
   await open(page, "file notes.txt");
   await expect(page.locator(".dieter-island")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "File contents" })).toHaveCount(1);

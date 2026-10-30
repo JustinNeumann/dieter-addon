@@ -1,5 +1,5 @@
 {
-  "name": "dieter-addon-kotlin-tests",
+  "name": "dieter-addon-page-tests",
   "private": true,
   "scripts": {
     "test": "playwright test --grep-invert @measure",

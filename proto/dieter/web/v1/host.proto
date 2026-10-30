@@ -73,7 +73,7 @@ message HostFrame {
 message Hello {
   // The Dieter release the host's core was built from.
   string core_version = 1;
-  // This host's own version (dieter-addon-kotlin).
+  // This host's own version (the add-on's).
   string host_version = 2;
   // The Home Assistant user behind Ingress (X-Remote-User-Display-Name), if any.
   string user_name = 3;

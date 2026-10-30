@@ -66,7 +66,7 @@ class DemoMailFiles {
             ),
             Message(
                 "m-build", "Nightly build: bundle size and timings", "Nightly build",
-                "dieter-addon-kotlin · workstation · Codex", "NB", 180, "07:02",
+                "dieter-addon · workstation · Codex", "NB", 180, "07:02",
                 """
                 # Nightly build
 
@@ -184,7 +184,7 @@ class DemoMailFiles {
     private val tree: Map<String, String> =
         mapOf(
             "README.md" to """
-                # dieter-addon-kotlin
+                # dieter-addon
 
                 Dieter's Compose UI compiled for the browser with **Kotlin/Wasm** and served by the
                 Home Assistant add-on behind Ingress.
