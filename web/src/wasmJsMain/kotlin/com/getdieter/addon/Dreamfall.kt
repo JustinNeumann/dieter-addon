@@ -285,16 +285,18 @@ private fun boardMenu(store: MobileStore, board: DreamfallSlice, actions: AddonA
 
 /** The stages in a row with how many ideas wait in each and how many went on; on phones they are the tabs. */
 @Composable
-private fun Funnel(stages: List<DreamfallStage>, selected: StageKind?, wide: Boolean, select: (StageKind) -> Unit) {
+private fun Funnel(stages: List<DreamfallStage>, selected: StageKind?, wide: Boolean, select: (StageKind) -> Unit) = BoxWithConstraints {
+    // what went on between stages; a phone shows only the arrows (as the classic page's tabs), so the names fit
+    val roomy = maxWidth >= 520.dp
     Row(
         Modifier.fillMaxWidth().padding(horizontal = ScreenMargin, vertical = 8.dp).testTag("dreamfall-funnel"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         stages.forEachIndexed { index, stage ->
             if (index > 0)
-                Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.padding(horizontal = if (roomy) 4.dp else 1.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Glyph.CHEVRON_RIGHT, null, tint = palette.tertiaryLabel, size = 16.dp)
-                    if (stage.passes.isNotEmpty()) Text(stage.passes, style = type.caption, color = palette.secondaryLabel, maxLines = 1)
+                    if (roomy && stage.passes.isNotEmpty()) Text(stage.passes, style = type.caption, color = palette.secondaryLabel, maxLines = 1)
                 }
             val on = selected == stage.kind
             Row(
