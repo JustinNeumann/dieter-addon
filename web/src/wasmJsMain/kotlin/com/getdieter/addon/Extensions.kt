@@ -25,6 +25,7 @@ internal fun addonExtensions(): MobileExtensions =
                     DreamfallFormScreen(store, scope)
                 },
                 ExtensionPage("dreamfall-kanban", "Board", Glyph.BOARD, 0xFFAF52DE) { store, id -> BoardScreen(store, id) },
+                ExtensionPage("agent-instructions", "Agent instructions", Glyph.CODE, 0xFFFF9F0A) { store, kind -> InstructionsScreen(store, kind) },
             ),
         toolSections =
             mapOf(
@@ -34,7 +35,11 @@ internal fun addonExtensions(): MobileExtensions =
                         ExtensionSection("ssh") { SshKeySection(it) },
                     ),
                 ToolPage.USAGE to listOf(ExtensionSection("claude") { ClaudeAccountSection(it) }),
-                ToolPage.SETTINGS to listOf(ExtensionSection("addon-settings") { AddonSettingsSection(it) }),
+                ToolPage.SETTINGS to
+                    listOf(
+                        ExtensionSection("addon-settings") { AddonSettingsSection(it) },
+                        ExtensionSection("addon-instructions") { InstructionsSection(it) },
+                    ),
             ),
         inboxSections = listOf(ExtensionSection("questions") { WaitingForAnswerSection(it) }),
         conversationWidgets = listOf(ConversationWidget("questions") { store, cardId -> QuestionWidget(store, cardId) }),

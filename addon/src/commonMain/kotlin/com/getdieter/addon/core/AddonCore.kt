@@ -76,6 +76,7 @@ class AddonCore(
 ) {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + dispatcher)
     private val dreamfall = Dreamfall(bridge, scope, clock, offsetSeconds, timezone)
+    private val instructions = Instructions(bridge, scope)
 
     private val gateway = MutableStateFlow(GatewaySlice(loading = true))
     private val ssh = MutableStateFlow(SshSlice(loading = true))
@@ -141,7 +142,7 @@ class AddonCore(
                     questions.map { all ->
                         Update(questions = if (scope.isEmpty()) all else all.copy(questions = all.questions.filter { it.card_id == scope }))
                     }
-                else -> dreamfall.updates(slice, scope) ?: invalid("The add-on has no such page.")
+                else -> dreamfall.updates(slice, scope) ?: instructions.updates(slice) ?: invalid("The add-on has no such page.")
             }
         val job =
             this.scope.launch {
@@ -179,8 +180,10 @@ class AddonCore(
         command.answer_question?.let { return answer(it, user) }
         command.add_repository?.let { return addRepository(it) }
         dreamfall.execute(command, user)?.let { return it }
+        instructions.execute(command)?.let { return it }
         command.refresh?.let {
             for (slice in listOf(Slice.SLICE_GATEWAY, Slice.SLICE_SSH, Slice.SLICE_SETTINGS, Slice.SLICE_CLAUDE)) load(slice)
+            instructions.reload()
             return Result()
         }
         invalid("The add-on does not know this command.")

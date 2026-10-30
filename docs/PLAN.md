@@ -435,7 +435,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Usage | **Claude sign-in** (`claude auth login`, paste code, cancel, logout) | ✅ add-on core (`claude` slice, sign-in/code/cancel/sign-out commands) | extension section + bridge `claude` endpoints | `Usage offers the Claude sign-in…` |
 | Changes | project changes | ✅ | none | |
 | Devices | trust state, approve code, remove | ✅ | none (refusal message when not enrolled) | `Devices shows the daemon's trust state…` |
-| Settings | **Agent instructions** (prompt templates, reset) | ✅/🟡 | verify editor parity (variables, validation) | `Settings: agent instructions…` |
+| Settings | **Agent instructions** (prompt templates, reset) | ✅ add-on core | the account's three parts (`dieter prompt` through the bridge's `api/prompts`): a Settings section and an editor with variables, own templates and Reset; `AddonRules.instructionsProblem` checks the two blocks before sending. Per-project and per-board instructions stay in the shared admin screens | `InstructionsTest` (JVM); add-on e2e `Settings: agent instructions are edited and reset…` |
 | Settings | **Title model**, **Keep finished work folders** | ✅ add-on core (`settings` slice, `ChangeSetting`) | extension settings section + bridge `settings` | |
 | Settings | show reasoning, appearance, palette | ✅ | Phase 3 adds "follow HA" | |
 | Terminals / Screens | (not on today's page) | ✅ in apps | web actuals: xterm.js island; screens later or hidden on web | |

@@ -35,7 +35,28 @@ message Command {
     RemoveDreamfall remove_dreamfall = 16;
     RunDreamfallStage run_dreamfall_stage = 17;
     DecideIdea decide_idea = 18;
+    // Saves one of the account's agent instructions, or resets it to Dieter's default.
+    ChangeInstructions change_instructions = 19;
   }
+}
+
+message ChangeInstructions {
+  InstructionsKind kind = 1;
+  // The new text; ignored with reset.
+  string text = 2;
+  // Back to Dieter's default, which later Dieter releases then update.
+  bool reset = 3;
+}
+
+// The parts Dieter puts at the start of every turn's instructions (`dieter prompt`).
+enum InstructionsKind {
+  INSTRUCTIONS_UNSPECIFIED = 0;
+  // First, for every agent in every project.
+  INSTRUCTIONS_EVERY_AGENT = 1;
+  // Then, for a card on a board.
+  INSTRUCTIONS_BOARD_CARDS = 2;
+  // Or, for a standalone chat.
+  INSTRUCTIONS_CHATS = 3;
 }
 
 message Step {}
@@ -209,6 +230,8 @@ enum Slice {
   // The form: scope "new:<project ID>" (or "new:" to choose the project) for a new Dreamfall board,
   // or a board's ID for its settings.
   SLICE_DREAMFALL_FORM = 9;
+  // The account's agent instructions.
+  SLICE_INSTRUCTIONS = 10;
 }
 
 message Update {
@@ -226,6 +249,7 @@ message Update {
     DreamfallSlice dreamfall = 10;
     IdeaSlice idea = 11;
     DreamfallFormSlice dreamfall_form = 12;
+    InstructionsSlice instructions = 13;
   }
 }
 
@@ -337,6 +361,34 @@ message SettingsSlice {
   string error = 2;
   Choice title_model = 3;
   Choice worktree_retention = 4;
+}
+
+message InstructionsSlice {
+  bool loading = 1;
+  string error = 2;
+  // In the order Dieter puts them together.
+  repeated Instructions items = 3;
+  // What the text may use, e.g. "{{project.name}}".
+  repeated string variables = 4;
+  // Projects and boards with a template of their own instead of "every agent".
+  repeated Override overrides = 5;
+
+  message Instructions {
+    InstructionsKind kind = 1;
+    string title = 2;
+    // The row's subtitle: the text's last line that is not only variables.
+    string summary = 3;
+    string text = 4;
+    // What this part is for.
+    string help = 5;
+  }
+
+  message Override {
+    string name = 1;
+    // "Project", or "Board of <project>".
+    string detail = 2;
+    bool board = 3;
+  }
 }
 
 // A setting with fixed options.

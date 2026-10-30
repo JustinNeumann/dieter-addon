@@ -2,6 +2,7 @@ package com.getdieter.addon.core
 
 import com.getdieter.addon.v1.Answer
 import com.getdieter.addon.v1.DreamfallSettings
+import com.getdieter.addon.v1.InstructionsKind
 import com.getdieter.addon.v1.Question
 import com.getdieter.addon.v1.QuestionItem
 
@@ -21,6 +22,17 @@ object AddonRules {
     private val TIMEZONE = Regex("""^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$|^UTC$""")
 
     fun isTimezone(zone: String): Boolean = TIMEZONE.matches(zone)
+
+    /** The blocks the instructions for every agent must keep exactly once (Dieter refuses the text otherwise). */
+    val INSTRUCTION_BLOCKS = listOf("{{project.instructions_block}}", "{{labels.instructions_block}}")
+
+    /** Why [text] cannot be saved as the [kind] instructions; null when it can. Dieter checks the variables. */
+    fun instructionsProblem(kind: InstructionsKind, text: String): String? {
+        if (text.isBlank()) return "Write the instructions, or reset them to Dieter's default."
+        if (kind == InstructionsKind.INSTRUCTIONS_EVERY_AGENT)
+            INSTRUCTION_BLOCKS.firstOrNull { text.split(it).size != 2 }?.let { return "$it must stay in the text exactly once." }
+        return null
+    }
     /** The longest navigation logic and implementation instructions the bridge keeps. */
     const val MAX_LOGIC = 4000
 
