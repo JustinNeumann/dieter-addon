@@ -28,7 +28,7 @@ features over one group at a time.
 | Extension points + add-on core ([ADR 0005](https://github.com/JustinNeumann/dieter/blob/web-addon/docs/adr/0005-web-client.md)) | built: `MobileExtensions` in the fork; the add-on core runs in the web host (`dieter.addon.v1`, rules in `AddonRules`); screens for gateway enrollment, SSH key, Claude sign-in, title model and work-folder retention, agent questions (Inbox + conversation), Clone repository / New empty repository; add-on e2e `next-addon.spec.mjs` | `addon/`, `proto/dieter/addon/v1/addon.proto`, `web/…/addon/`, fork `apps/kotlin/ui/…/extensions/` |
 | I. Dreamfall | built: Tools → Dreamfall lists the boards, a stage board opened from Projects shows its Dreamfall board (`BoardRenderer`), funnel + stages side by side (tabs on phones), idea page with brief, provenance and trail, Pick/Park/Promote/Release/Back to the queue/Start/Review, the ⋮ menu, the settings form (new board from Tools or Projects → Add). The rules are the add-on core's (`Dreamfall.kt`: lanes, verdicts, run lines, times in the board's time zone); add-on e2e `next-dreamfall.spec.mjs` | `addon/…/core/Dreamfall.kt`, `web/…/addon/Dreamfall*.kt`, add-on bridge `?fields=dreamfall_cards` |
 | 4.A–J parity rest, switch to `/` | open; Mail, Tools, Inbox, boards and conversations already show real data from the fixture gateway | |
-| Upstream proposal | drafted; per-attempt redirect, extension points and deep links through the core are implemented in the fork | `docs/proposals/web-client.md` |
+| Upstream proposals | drafted, not posted; per-attempt redirect, extension points (used by questions and Dreamfall) and deep links through the core are implemented in the fork | `docs/proposals/web-client.md`, `docs/proposals/dreamfall.md` |
 
 **Deviations from the plan, and why:**
 
@@ -453,8 +453,8 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Adding an idea by hand on Enumeration or Implementation | 🟡 | through the stage's Kanban view (its New task); no button on the Dreamfall board yet | |
 | `dreamfall` command, schedules, KV records | n/a | unchanged (server side) | `the Enumeration agent adds ideas…`, `Navigation waits for Enumeration…` |
 
-Upstream path: the Dreamfall proposal (`docs/proposals/dreamfall.md`) can point at this Compose
-implementation as the reference once it exists.
+Upstream path: the Dreamfall proposal (`docs/proposals/dreamfall.md`, draft) points at this Compose implementation
+as the reference.
 
 #### J. Home Assistant side: unchanged
 

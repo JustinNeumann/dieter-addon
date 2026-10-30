@@ -41,11 +41,19 @@ other hosts (not only Home Assistant) offer Dieter in a browser.
    renderer; empty by default. Extensions are presentation: a host's own features bring their own core. Here that
    is the add-on core (`addon/`, protocol `proto/dieter/addon/v1/addon.proto`), which runs in the web host next to
    Dieter's core and shares the WebSocket (`addon_dispatch` / `addon_observe` frames). Upstream would need only the
-   extension points; how a host serves its features stays its own.
+   extension points; how a host serves its features stays its own. Two features use them by now: agent questions
+   (Inbox section, conversation widget) and Dreamfall (Tools page, board renderer, Projects action; see
+   `dreamfall.md`).
 6. **Deep links through the core** (done in the fork). `OpenConversationRequest{card_id}` returns the
    `NotificationTarget` a link should open (the conversation, or the Inbox when the card is unknown or archived),
    the resolution a notification tap uses. The web page maps `…/next/card/<id>` to it instead of opening a card it
    cannot check.
+
+7. **Browser actuals for `:ui`.** If upstream builds `apps/kotlin/ui` for wasmJs, these could live there instead
+   of in each host: the attachment picker (`<input type=file>` into `Attachments.part`, the apps' limit messages),
+   the attachment viewer (a Blob URL in a new tab, or a download for types a browser does not show), the text
+   sharer (Web Share where there is one, else a Markdown download) and the system Back (browser history through
+   `NavigationEventInput`). Each is a few dozen lines in `web/src/wasmJsMain`.
 
 ## Security notes for a web host
 
