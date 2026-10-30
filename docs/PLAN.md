@@ -520,7 +520,10 @@ with the e2e suite green, and the last one deletes `dieter/bridge/` and Python f
    made at the operator's start). The bridge only follows up: the quota is probed again after a sign-in or sign-out,
    and the pages get the daemon's state after an enrollment (seen in the `gateway` status the page polls meanwhile)
 
-6. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments
+6. ✅ 0.6.431.18: agent questions (`api/questions…`; the harness's `DIETER_QUESTIONS_URL` still points at the bridge,
+   which forwards) and attachments (`api/upload`, into `DIETER_HOME/uploads`). The bridge fires `dieter_question` and
+   keeps the open questions for `/api/state`; it still hands the uploads to the CLI with send and create (area 9)
+
 7. Dreamfall: the API, and the agents' `dreamfall` command (a mode of the jar instead of `dreamfall.py`; its records
    stay in Dieter's key-value store)
 8. Housekeeping (work folder retention) and the Ollama titles

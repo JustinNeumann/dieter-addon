@@ -2,7 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.18 (2026-10-30)
+
+- **The bridge into Kotlin, step 6 of 10:** the questions agents ask you (*Waiting for your answer* in the Inbox) and
+  the files you attach to a message are kept by the operator now. Nothing changes on the page or for Home Assistant:
+  a new question still fires `dieter_question`, and attachments still go with the message and are removed once sent
+  (or after a day if never sent).
+
 ## 0.6.431.17 (2026-10-30)
+
 
 - A conversation's header names the card's lane as well, e.g. *sem2_ha · Home Assistant Ideas · Navigation · Done*.
   Moving a card from the conversation (⋯ → Move to, or *Move to Review* above the message field) worked, but nothing
