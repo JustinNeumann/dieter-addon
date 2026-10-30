@@ -73,7 +73,7 @@ class OperatorTest {
 
     @Test
     fun `the server answers JSON on loopback with the bridge's status codes`() {
-        val server = OperatorServer(InetSocketAddress("127.0.0.1", 0), routes(FakeDieter(mapOf("prompt show" to show), "error: daemon unreachable"), Settings(kotlin.io.path.createTempFile().toFile(), OllamaEntity(null)) { "" })).start()
+        val server = OperatorServer(InetSocketAddress("127.0.0.1", 0), routes(FakeDieter(mapOf("prompt show" to show), "error: daemon unreachable"), Settings(kotlin.io.path.createTempFile().toFile(), OllamaEntity(null)) { "" }, Projects(FakeDieter(emptyMap()), kotlin.io.path.createTempDirectory().toFile(), { null }))).start()
         try {
             val base = "http://127.0.0.1:${server.address.port}"
             fun call(method: String, path: String, body: String = ""): Pair<Int, JsonObject> {
