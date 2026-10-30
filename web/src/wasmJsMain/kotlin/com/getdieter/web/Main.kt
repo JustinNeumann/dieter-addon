@@ -63,6 +63,7 @@ fun main() {
     val script = queryParameter("script").orEmpty()
     onFindShortcut { FindRequests.request() }
     val route = queryParameter("route").orEmpty()
+    PanelRoutes.start(route, focus = queryParameter("demo") == null && route.isBlank() && script.isBlank())
     MainScope().launch {
         browserMonospace =
             runCatching {
@@ -85,6 +86,7 @@ private fun show(store: MobileStore, addon: AddonClient, script: String, route: 
                 hideLoading()
                 if (route.isNotBlank()) openRoute(store, route)
                 if (script.isNotBlank()) store.runDebugScript(script)
+                for (later in PanelRoutes.later) openRoute(store, later)
             }
             ChromeColor(store)
             BrowserBack()
@@ -109,7 +111,7 @@ private fun ChromeColor(store: MobileStore) {
  * Deep links: `?route=card/<id>` opens that conversation where the core says it belongs (or the Inbox
  * once it is gone), `?route=tab/<name>` a tab, `?route=dreamfall/<id>[/settings]` a Dreamfall board (or a
  * stage board) and `?route=idea/<id>` an idea. The classic page turns `<HA>/app/<slug>/next/<route>` into this (Home
- * Assistant always opens the add-on at its root).
+ * Assistant always opens the add-on at its root); routes that arrive while the page is open come from [PanelRoutes].
  */
 private suspend fun openRoute(store: MobileStore, route: String) {
     val parts = route.trim('/').split('/')

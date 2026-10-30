@@ -358,8 +358,8 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 |---|---|---|---|
 | Six tabs, rail from 600 px, two panes from 840 px | ✅ | none | |
 | Most recently used project first, preselected in New task, opened by the Projects tab | 🟡 | verify; add if missing | `most recently used project is listed first…` |
-| Push deep link `/<panel>/card/<id>` through HA's app-panel messages (`home-assistant/subscribe-properties`, `home-assistant/navigate`) | ❌ | JS interop in the web entry point → `store.openConversation` | `a push to /<panel>/card/<id> opens the card…` |
-| `?card=`, `?tab=`, legacy `api/focus` | 🟡 `?route=card/<id>`, `?route=tab/<name>` and `<HA>/app/<slug>/next/<route>` done; push `api/focus` open | same entry point | `a push deep link (api/focus)…` |
+| Push deep link `/<panel>/card/<id>` through HA's app-panel messages (`home-assistant/subscribe-properties`, `home-assistant/navigate`) | ✅ | `PanelRoutes`: card, tab, Dreamfall and idea routes that arrive while the page is open go through `openRoute`; the panel's address then goes back to `/<panel>/next` | `a push to /<panel>/card/<id> opens the card in the open page…`; `opened at /<panel>/next/dreamfall/<id>…` |
+| `?card=`, `?tab=`, legacy `api/focus` | ✅ `?route=card/<id>`, `?route=tab/<name>`, `<HA>/app/<slug>/next/<route>`; the page takes `api/focus` at start when no route was asked for | same entry point | `?route=card/<id> opens that conversation…`; add-on e2e `Push: the new page takes over the card…` |
 | Browser/Android back | ✅ | one history entry of the page's own while something can go back; `popstate` is a back event for Compose's handlers (`BrowserBack.kt`, a `NavigationEventInput`) | `the browser's Back closes New task, then leaves a board` |
 
 #### B. Inbox
