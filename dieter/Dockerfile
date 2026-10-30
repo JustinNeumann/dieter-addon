@@ -10,8 +10,8 @@ ARG BUILD_ARCH
 # The harness runtime *sources* (runner.mjs + adapters) are taken from the same tag's source tree and
 # checked against RUNTIME_SOURCES_SHA (sha256 of the `sha256sum` lines of the LC_ALL=C-sorted files); the bridge lays
 # them over the release's node_modules archive at start. Node checksums: nodejs.org/dist/vX/SHASUMS256.txt.
-ARG DIETER_VERSION=0.6.431-antigravity.6
-ARG DIETER_COMMIT=2c576408a107867393b384e0cbf40a015d498602
+ARG DIETER_VERSION=0.6.431-antigravity.8
+ARG DIETER_COMMIT=2aafb54b68949a6474af4c0cef773b853243d41d
 ARG RUNTIME_SOURCES_SHA=d68763f51e2656dff84e6f3d5753183050cb23e0ccf4e3bfc559004efa16dbe2
 ARG NODE_VERSION=22.23.4
 
@@ -25,9 +25,9 @@ RUN apt-get update \
 
 RUN set -eu; \
     case "${BUILD_ARCH}" in \
-      aarch64) D=arm64; DSHA=40ecdb7c3aa29777c336a58e3e3d4bf5b3c13ab480af90d0d72498aec7ae0c42; \
+      aarch64) D=arm64; DSHA=7471c369bbfab5995abc85ea2a26dd69c30fb6c940159d11e01a0f92d7a92935; \
                N=arm64; NSHA=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b ;; \
-      amd64)   D=amd64; DSHA=5f180e4eece99724c6a12feaa93ed40ad9ab63bc14fb2647c5b6253abd87648a; \
+      amd64)   D=amd64; DSHA=995d4aaed76490ec77cbba98322bd23d03989b3f9f550ef319684ce5231405c7; \
                N=x64;   NSHA=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce ;; \
       *) echo "unsupported BUILD_ARCH ${BUILD_ARCH}" >&2; exit 1 ;; \
     esac; \
@@ -141,8 +141,8 @@ RUN set -eu; \
 
 # The new page (Compose UI in the browser, Kotlin/Wasm) from github.com/JustinNeumann/dieter-addon-kotlin: the
 # same files for every architecture. The bridge serves them at /next/. The sha256 is the release's SHA256SUMS line.
-ARG DIETER_WEB_VERSION=0.4.3
-ARG DIETER_WEB_SHA=0aac8e3c7d8f78794445f223f3f61b3d5b0ba10a800927ca477405486c2a2215
+ARG DIETER_WEB_VERSION=0.4.5
+ARG DIETER_WEB_SHA=78e2f581146141e9823fe3c8629ea1589d0895f0c1c3b5ae66dcf8b5b7152115
 RUN set -eu; \
     curl -fsSL -o /tmp/web.tar.gz "https://github.com/JustinNeumann/dieter-addon-kotlin/releases/download/v${DIETER_WEB_VERSION}/dieter-web-${DIETER_WEB_VERSION}.tar.gz"; \
     echo "${DIETER_WEB_SHA}  /tmp/web.tar.gz" | sha256sum -c -; \
@@ -153,7 +153,7 @@ RUN set -eu; \
 
 # The web host (the new page's core on the JVM, same repository and release) and a headless Java 21 runtime
 # from Debian. run.sh starts it as user dieter-web on loopback; the bridge relays next/core and next/signin.
-ARG DIETER_WEB_HOST_SHA=253380dd0edabc03460f400f0eafc8e43832c07832435cd625eaa06a91fb4485
+ARG DIETER_WEB_HOST_SHA=d212a676fe8c61d1efeb7ed640234f3e077427c374cb371d46c5896734a9a8aa
 RUN set -eu; \
     apt-get update; \
     apt-get install -y --no-install-recommends openjdk-21-jre-headless; \

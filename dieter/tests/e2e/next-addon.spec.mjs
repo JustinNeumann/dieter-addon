@@ -198,8 +198,9 @@ test("Projects: a board dragged after a long press keeps its place for every dev
     const tree = await aria(page);
     return ["Upstream", "Releases", "Website"].sort((a, b) => tree.indexOf(`button "${a}`) - tree.indexOf(`button "${b}`));
   };
-  await open(page, "script=tab%20projects");
-  await expect.poll(shown).toEqual(["Upstream", "Releases", "Website"]);
+  // the web host re-reads the bridge's settings when a page opens and its copy is older than 15 s
+  await expect.poll(async () => { await open(page, "script=tab%20projects"); return shown(); }, { timeout: 60_000, intervals: [4_000] })
+    .toEqual(["Upstream", "Releases", "Website"]);
   const row = (name) => page.getByRole("button", { name: new RegExp(`^${name} \\d`) }).first();
   const from = await row("Website").boundingBox(), to = await row("Upstream").boundingBox();
   await page.mouse.move(from.x + 60, from.y + from.height / 2);

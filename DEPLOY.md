@@ -71,6 +71,10 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (scheduled card).
 
+- **2026-10-30**, fork release **`0.6.431-antigravity.8`** (`2aafb54b`): `antigravity.6` plus two store/API changes
+  (`.7`: a board whose cards are all archived can be retired; `.8`: those archived cards stay readable). Adapter
+  file, runtime sources checksum and both harness archives unchanged; tarball checksums from its `SHA256SUMS`,
+  verified with cosign. Bumped in 0.6.431.8 (`.7` was never pinned in a release).
 - **2026-10-29**, fork release **`0.6.431-antigravity.6`** (`2c576408`): `fork-release` merged with upstream main
   (v0.6.431, `7f2afded`, the range screened below), the fork's CI fixed and green, bumped to it in 0.6.431.1.
   Adapter file (`antigravity-runtime.mjs`), runtime sources checksum and both harness archives are the same as in
