@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.20 (2026-10-30)
+
+- **The bridge into Kotlin, step 8 of 10:** the hourly removal of finished work folders (Tools → Settings → *Keep
+  finished work folders*) and the renaming of new tasks by Ollama (*Task titles → Ollama (HA)*) are the operator's
+  now. Both work as before; the log lines read `operator: housekeeping: …` and `operator: title: …`.
+- An Ollama title whose closing quote was followed by a period kept the quote; a long first line without a space
+  made an 81-character provisional title. Both fixed.
+
 ## 0.6.431.19 (2026-10-30)
 
 - **The bridge into Kotlin, step 7 of 10:** Dreamfall boards belong to the operator now: creating a board, its

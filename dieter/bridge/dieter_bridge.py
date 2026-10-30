@@ -43,7 +43,8 @@ Endpoints:
   GET  /next/signin?code=…    the gateway's redirect after GitHub sign-in, relayed to the web host
   GET  /api/ws/echo           WebSocket echo (checks that WebSockets pass Ingress; Phase 1 of the Compose page)
   POST /api/card              create {project, board, title, prompt, provider, model, effort, workspace, branch?, base?, publish?, vault?, mail?, lane, attachments?}
-                              without a title: --auto-title, or with Settings → Ollama (HA) renamed in the background (title_entity)
+                              without a title: --auto-title, or with Settings → Ollama (HA) its first line, renamed in the
+                              background by the operator (Titles.kt; ollama_titles)
   POST /api/chat              create {project, title, prompt, provider, model, effort}
   POST /api/{card|chat}/ID/send   {message, model?, effort?, attachments?: [upload id]}
   POST /api/upload            raw file body (Content-Type, X-Filename) -> {id, name, size}; up to 20 MB, kept until sent;
@@ -102,7 +103,6 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import dreamfall_view   # the live view of Dreamfall boards; the boards and the agents' command are the operator's
-import housekeeping   # work folders of finished worktree cards (bridge/housekeeping.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTIONS_FILE = "/data/options.json"              # written by the Supervisor from the add-on's options
@@ -490,21 +490,11 @@ def ha_api(path, body, timeout=10):
 
 # Task titles. Settings → Task titles picks who titles a card or chat created without a title:
 #   "openai" (default): the daemon's --auto-title (saved at once, GPT Spark improves the title);
-#   "ollama": saved at once under the first line of its task and renamed in the background with a title from
-#   HA's AI Task (ai_task.generate_data) of the Ollama integration, whose first available ai_task entity is
-#   looked up again every TITLE_DETECT_TTL_S, so an integration added later is picked up. Without such an
-#   entity the daemon's --auto-title applies.
+#   "ollama": saved at once under the first line of its task (first_line_title) and renamed in the background by the
+#   operator with a title from HA's AI Task of the Ollama integration (Titles.kt). Without such an entity the
+#   daemon's --auto-title applies. The work folders of finished worktree cards are the operator's too (Housekeeping.kt).
 SETTINGS_FILE = os.environ.get("BRIDGE_SETTINGS_FILE", "/data/bridge_settings.json" if ADDON else os.path.expanduser("~/.config/dieter-bridge/settings.json"))
-TITLE_MODELS = {"openai": "OpenAI", "ollama": "Ollama (HA)"}
-RETENTION_DEFAULT_DAYS = 14                       # work folders of finished worktree cards, see housekeeping_loop()
-RETENTION_MAX_DAYS = 3650
-HOUSEKEEPING_WAKE = threading.Event()             # set when the retention changes: sweep now, not at the next hour
-TITLE_DETECT_TTL_S = 600
-TITLE_TIMEOUT_S = 120                             # a cold Ollama loads the model first
 TITLE_MAX = 80
-TITLER = {"entity": None, "at": 0}
-TITLE_SLOTS = threading.Semaphore(2)              # a burst of new cards must not queue up the model server
-TITLE_PENDING = {}                                # card/chat id -> provisional title, until renamed or edited
 
 
 def settings():
@@ -514,10 +504,7 @@ def settings():
     except (OSError, ValueError):
         d = {}
     order = d.get("board_order")
-    days = d.get("worktree_retention_days")
-    return {"title_model": d.get("title_model") if d.get("title_model") in TITLE_MODELS else "openai",
-            "board_order": [str(x) for x in order] if isinstance(order, list) else [],
-            "worktree_retention_days": days if isinstance(days, int) and not isinstance(days, bool) and 0 <= days <= RETENTION_MAX_DAYS else RETENTION_DEFAULT_DAYS}
+    return {"board_order": [str(x) for x in order] if isinstance(order, list) else []}
 
 
 def order_boards(boards, order=None):
@@ -542,7 +529,7 @@ OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",)),
                   ("GET", ("questions",)), ("POST", ("questions",)), ("GET", ("questions", "*")),
                   ("POST", ("questions", "*", "answer")), ("POST", ("upload",)),
                   ("POST", ("dreamfall",)), ("POST", ("dreamfall", "*", "update")), ("POST", ("dreamfall", "*", "delete")),
-                  ("POST", ("dreamfall", "*", "run")), ("POST", ("dreamfall", "*", "act"))}
+                  ("POST", ("dreamfall", "*", "run")), ("POST", ("dreamfall", "*", "act")), ("POST", ("titles",))}
 
 
 def operator_path(method, parts):
@@ -602,13 +589,12 @@ def question_event(body):
                                  "question": first[:300], "count": len(inp.get("questions") or [])})
 
 
-def after_operator(path, before, answer, body=None):
-    """What the bridge still does after the operator changed something it reads: the title model's entity is looked
-    up again, a new retention sweeps now instead of at the next hour, a new board order reaches the pages at once.
-    After a Claude sign-in or sign-out (the operator restarts the daemon with it) the quota is probed again; after an
-    enrollment (seen in the status the page polls) or unenrollment the pages get the daemon's new state. A new or
-    answered question reaches the pages at once, a new one Home Assistant too (dieter_question). A Dreamfall change is
-    shown at once (df_after); the answer the page gets is what this returns, if anything."""
+def after_operator(path, answer, body=None):
+    """What the bridge still does after the operator changed something it reads: a new board order reaches the pages
+    at once. After a Claude sign-in or sign-out (the operator restarts the daemon with it) the quota is probed again;
+    after an enrollment (seen in the status the page polls) or unenrollment the pages get the daemon's new state. A
+    new or answered question reaches the pages at once, a new one Home Assistant too (dieter_question). A Dreamfall
+    change is shown at once (df_after); the answer the page gets is what this returns, if anything."""
     if path[:1] == ("dreamfall",):
         return df_after(path, answer)
     if path[:1] == ("questions",):
@@ -626,38 +612,20 @@ def after_operator(path, before, answer, body=None):
             threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.touch()), daemon=True).start()
     elif path == ("gateway", "unenroll"):
         threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.touch()), daemon=True).start()
-    elif path == ("settings",):
-        TITLER["at"] = 0
-        if settings()["worktree_retention_days"] != before.get("worktree_retention_days"):
-            HOUSEKEEPING_WAKE.set()
     elif path == ("boards", "order") and isinstance(answer.get("board_order"), list):
         STATE.reorder_boards(answer["board_order"])
     elif path == ("project",):
         STATE.refresh(wait=True)
 
 
-def ollama_entity():
-    """First available ai_task entity of HA's Ollama integration (cached for TITLE_DETECT_TTL_S)."""
-    if not (ADDON and SUPERVISOR_TOKEN):
-        return None
-    if time.time() - TITLER["at"] > TITLE_DETECT_TTL_S:
-        TITLER["at"] = time.time()
-        try:
-            found = json.loads(ha_api("template", {"template": "{{ integration_entities('ollama') | select('match', 'ai_task\\\\.')"
-                                                                 " | reject('is_state', 'unavailable') | list | tojson }}"}))
-        except Exception as e:
-            found = []
-            log("title: ollama lookup", e)
-        entity = found[0] if found else None
-        if entity != TITLER["entity"]:
-            log("title: ollama ai task", entity or "none")
-        TITLER["entity"] = entity
-    return TITLER["entity"]
-
-
-def title_entity():
-    """The AI Task entity that titles new cards, or None when the daemon's --auto-title does."""
-    return ollama_entity() if settings()["title_model"] == "ollama" else None
+def ollama_titles():
+    """True while Settings name Ollama and it can be asked: the operator's settings name the daemon it titles on."""
+    try:
+        status, raw = operator_request("GET", "/api/settings", timeout=20)
+        return status == 200 and bool(json.loads(raw).get("titles_daemon_id"))
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        log("title: settings", e)
+        return False
 
 
 def first_line_title(prompt):
@@ -668,59 +636,6 @@ def first_line_title(prompt):
         return line or "New task"
     cut = line[:TITLE_MAX + 1].rsplit(" ", 1)[0]
     return (cut if len(cut) >= TITLE_MAX // 2 else line[:TITLE_MAX]).rstrip(" ,;:-")
-
-
-def clean_title(text):
-    line = next((l for l in str(text or "").splitlines() if l.strip()), "")
-    line = re.sub(r"^\s*(title|titel)\s*:\s*", "", line.strip(), flags=re.I)
-    line = re.sub(r"\s+", " ", line.strip(" \"'`*#„“”‚‘’«»")).rstrip(" .")
-    return line[:TITLE_MAX].strip() or None
-
-
-def ai_title(entity, prompt):
-    instructions = ("Write a short title for the task below, as a task list would show it: at most 8 words, no quotes, "
-                    "no trailing period. Write the title in the same language as the task: a German task gets a German "
-                    "title, an English task an English one. Reply with the title only.\n\nTask:\n"
-                    + prompt.strip()[:4000])
-    res = json.loads(ha_api("services/ai_task/generate_data?return_response",
-                            {"entity_id": entity, "task_name": "Dieter task title", "instructions": instructions},
-                            timeout=TITLE_TIMEOUT_S))
-    return clean_title(((res or {}).get("service_response") or {}).get("data"))
-
-
-def retitle(kind, cid, prompt, entity):
-    """Background: rename a card/chat created under its provisional title, unless someone renamed it meanwhile."""
-    try:
-        with TITLE_SLOTS:
-            title = ai_title(entity, prompt)
-        provisional = TITLE_PENDING.get(cid)
-        if not title or provisional is None or title == provisional:
-            return
-        cur = run([kind, "show", cid], timeout=15) or {}
-        if ((cur.get(kind) if isinstance(cur, dict) else None) or {}).get("title") != provisional:
-            return
-        run([kind, "rename", "--title", title, cid], timeout=30, parse=False)
-        log("title:", cid, repr(title))
-        STATE.patch(cid, title=title)
-    except Exception as e:
-        log("title:", cid, entity, e)
-    finally:
-        TITLE_PENDING.pop(cid, None)
-
-
-def name_later(b):
-    """POST /api/titles: a card or chat another client (the new page) created on this daemon under its provisional
-    title, without Dieter's auto-title, because Ollama names them here."""
-    kind, cid = b.get("kind"), str(b.get("id") or "")
-    prompt, provisional = str(b.get("prompt") or ""), str(b.get("provisional") or "")
-    if kind not in ("card", "chat") or not QUESTION_ID_RE.match(cid) or not prompt.strip() or not provisional.strip():
-        raise ValueError("titles: {kind: card|chat, id, prompt, provisional}")
-    entity = title_entity()
-    if not entity:
-        raise ValueError("Ollama no longer names new tasks; this one keeps its first line as title")
-    TITLE_PENDING[cid] = provisional
-    threading.Thread(target=retitle, args=(kind, cid, prompt, entity), daemon=True).start()
-    return {"ok": True}
 
 
 # --------------------------------------------------------------------------- daemon (add-on only)
@@ -738,24 +653,6 @@ def daemon_wait_healthy(timeout=180):
         time.sleep(2)
     log("daemon: not healthy after", timeout, "s")
     return False
-
-
-def housekeeping_loop():
-    """Remove the work folders of worktree cards that were Done (or archived; on a Dreamfall Implementation board: started)
-    and untouched for the retention set in Settings (14 days; 0 keeps everything), once an hour and right after the setting changes. The daemon keeps every
-    folder until someone cleans it up; see bridge/housekeeping.py."""
-    sweeper = housekeeping.Sweeper(run, log, RETENTION_DEFAULT_DAYS, implementation_boards=lambda: {
-        s["board_id"] for p in DREAMFALL.pipelines() for s in p.get("stages") or [] if s.get("role") == "implementation" and s.get("board_id")})
-    time.sleep(600)   # the daemon and the first board poll come first
-    while True:
-        sweeper.days = settings()["worktree_retention_days"]
-        HOUSEKEEPING_WAKE.clear()
-        if sweeper.days > 0:
-            try:
-                sweeper.sweep()
-            except Exception as e:
-                log("housekeeping: sweep failed:", e)
-        HOUSEKEEPING_WAKE.wait(3600)
 
 
 QUOTA_CACHE = {}   # provider -> {"at", "gen", "item"} of the local probes
@@ -2171,7 +2068,6 @@ class Handler(BaseHTTPRequestHandler):
     def forward_operator(self, method, u, body, raw=None):
         """A path the operator answers: passed on with its query, body (or [raw] bytes) and the Home Assistant user,
         answered as it answers."""
-        before = settings()
         headers = self.user_headers() + ([("X-Filename", self.headers["X-Filename"])] if self.headers.get("X-Filename") else [])
         try:
             status, answer = operator_request(method, u.path + (f"?{u.query}" if u.query else ""), body, headers, raw=raw)
@@ -2181,7 +2077,7 @@ class Handler(BaseHTTPRequestHandler):
         path = tuple(p for p in u.path.split("/") if p)[1:]
         if status == 200 and (method == "POST" or path == ("gateway",)):
             try:
-                changed = after_operator(path, before, json.loads(answer), body)
+                changed = after_operator(path, json.loads(answer), body)
                 if changed is not None:
                     answer = json.dumps(changed).encode()
             except Exception as e:
@@ -2628,8 +2524,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.create(parts[1], body))
             if parts[1:] == ["schedules"]:
                 return self.send_json(schedule_create(body))
-            if parts[1:] == ["titles"]:
-                return self.send_json(name_later(body))
             if parts[1:] == ["mail", "mark"]:
                 return self.send_json(Mail.mark(body))
             if parts[1:] == ["mail", "delete"]:
@@ -2689,8 +2583,6 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "update":
                     title = (body.get("title") or "").strip()
                     prompt = body.get("prompt")
-                    if title:
-                        TITLE_PENDING.pop(cid, None)          # the user's title wins over a pending model title
                     if not title and prompt is None:
                         return self.send_json({"error": "title or prompt required"}, 400)
                     if kind == "chat":
@@ -2753,8 +2645,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("board required")
             args += ["--board", b["board"], "--lane", "running" if b.get("start", True) else "todo"]
         title = str(b.get("title") or "").strip()
-        entity = None if title else title_entity()
-        if title or entity:
+        ollama = not title and ollama_titles()
+        if title or ollama:
             args += ["--title", title or first_line_title(b["prompt"])]
         else:
             args += ["--auto-title"]
@@ -2780,9 +2672,12 @@ class Handler(BaseHTTPRequestHandler):
         card = norm_card(c or {}, kind)
         if kind == "card" and cid:
             dreamfall_created(cid, b, self.user_headers())
-        if entity and cid:
-            TITLE_PENDING[cid] = first_line_title(b["prompt"])
-            threading.Thread(target=retitle, args=(kind, cid, b["prompt"], entity), daemon=True).start()
+        if ollama and cid:
+            try:   # the operator renames it once Ollama answers
+                operator_request("POST", "/api/titles", {"kind": kind, "id": cid, "prompt": b["prompt"],
+                                                         "provisional": first_line_title(b["prompt"])}, timeout=20)
+            except (urllib.error.URLError, OSError) as e:
+                log("title:", cid, e)
         if cid:
             if (kind == "chat" or b.get("start", True)) and card["runtime"] == "idle":
                 card["runtime"] = "running"    # the turn is starting; the next poll has the daemon's runtime
@@ -2951,7 +2846,6 @@ def main():
         os.makedirs(DIETER_HOME, mode=0o700, exist_ok=True)
         # the operator makes the SSH key, writes what the options configure, stages the harness runtime and starts
         # the daemon
-        threading.Thread(target=housekeeping_loop, daemon=True).start()
 
         def after_daemon():
             # the first start downloads the harness runtime (≈ 775 MB) before the daemon comes up

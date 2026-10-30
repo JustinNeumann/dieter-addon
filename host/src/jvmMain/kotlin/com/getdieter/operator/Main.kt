@@ -28,14 +28,16 @@ import kotlinx.serialization.json.put
  *   DIETER_RUNTIME_SRC     the runtime sources of that build, default /opt/dieter-runtime
  *   DIETER_DAEMON_ADDR     the daemon's API, default 127.0.0.1:4242; BRIDGE_PORT  the bridge's port, default 8099
  * In the add-on it also starts the daemon and keeps it running, after staging the harness runtime and writing what
- * the options configure (Setup), and owns the add-on's SSH key, its Claude sign-in and the gateway enrollment.
+ * the options configure (Setup), owns the add-on's SSH key, its Claude sign-in and the gateway enrollment, and
+ * removes the work folders of finished worktree cards (Housekeeping).
  */
 fun main() {
     val env = System.getenv()
     val (host, port) = (env["DIETER_OPERATOR_ADDR"] ?: "127.0.0.1:8096").let { it.substringBeforeLast(":") to it.substringAfterLast(":").toInt() }
     val dieter = ProcessDieter(env["DIETER_BIN"] ?: "/usr/local/bin/dieter")
     val home = File(env["DIETER_HOME"] ?: "/data/dieter")
-    val settings = Settings(File(env["BRIDGE_SETTINGS_FILE"] ?: "/data/bridge_settings.json"), OllamaEntity(HomeAssistant.supervisor(env))) {
+    val ha = HomeAssistant.supervisor(env)
+    val settings = Settings(File(env["BRIDGE_SETTINGS_FILE"] ?: "/data/bridge_settings.json"), OllamaEntity(ha)) {
         Settings.localDaemonId(home)
     }
     val optionsFile = File(env["DIETER_OPTIONS_FILE"] ?: "/data/options.json")
@@ -54,10 +56,19 @@ fun main() {
         )
     }
     val uploads = Uploads(File(home, "uploads"))
-    val server =
-        OperatorServer(InetSocketAddress(host, port), routes(dieter, settings, projects, supervision?.daemon, access, Questions(), uploads)).start()
+    val titles = Titles(dieter, ha, settings::titleEntity)
+    // the work folders of finished worktree cards, in the add-on only (the daemon never removes them)
+    val housekeeping = supervision?.let {
+        val dreamfall = Dreamfall(dieter)
+        Housekeeping(Sweeper(dieter, Settings.RETENTION_DEFAULT_DAYS, implementationBoards = dreamfall::implementationBoards)) { settings.read().retentionDays }
+    }
+    val server = OperatorServer(
+        InetSocketAddress(host, port),
+        routes(dieter, settings, projects, supervision?.daemon, access, Questions(), uploads, titles, housekeeping),
+    ).start()
     Log.line("listening on $host:${server.address.port}")
     supervision?.let { Thread.ofPlatform().name("supervisor").start(it::run) }
+    housekeeping?.let { Thread.ofPlatform().name("housekeeping").daemon().start { it.loop() } }
 }
 
 /** The add-on's start: the setup the options ask for, the harness runtime, then the daemon for good. */
@@ -131,6 +142,8 @@ fun routes(
     access: Access? = null,
     questions: Questions = Questions(),
     uploads: Uploads? = null,
+    titles: Titles = Titles(dieter, null) { null },
+    housekeeping: Housekeeping? = null,
 ): Routes {
     val prompts = Prompts(dieter)
     val dreamfall = Dreamfall(dieter)
@@ -147,7 +160,11 @@ fun routes(
         .get("prompts") { prompts.view() }
         .post("prompts") { prompts.update(it.body) }
         .get("settings") { settings.view() }
-        .post("settings") { settings.update(it.body) }
+        .post("settings") { r ->
+            val days = settings.read().retentionDays
+            settings.update(r.body).also { if (settings.read().retentionDays != days) housekeeping?.wake() }   // sweep now
+        }
+        .post("titles") { titles.nameLater(it.body) }
         .post("boards/order") { settings.order(it.body) }
         .post("project") { projects.add(it.body) }
         .post("page-load") { PageLoad.log(it.body) }

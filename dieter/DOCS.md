@@ -289,7 +289,7 @@ checkout per task, and the daemon never removes it. Tools → Settings → **Kee
 they stay: 0 (*Never remove*) keeps everything, 30 removes a folder 30 days after its task went to Done (or was
 archived) without anything happening in it since. The default is 14 days; the choice is stored in
 `/data/bridge_settings.json` and checked once an hour and right after you change it (log lines start with
-`housekeeping:`). The folder and its branch are removed when the work is merged: the branch is merged into its base,
+`operator: housekeeping:`). The folder and its branch are removed when the work is merged: the branch is merged into its base,
 or GitHub has a merged pull request ending at the folder's last commit (squash merges; that removal keeps a recovery
 copy in `/data/dieter/recovery`). Unmerged work and running tasks are kept.
 
