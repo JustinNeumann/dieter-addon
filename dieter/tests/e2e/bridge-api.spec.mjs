@@ -150,3 +150,24 @@ test("Settings (api/settings, api/boards/order): title models, work folder reten
   expect(order.board_order[0]).toBe(`b-e2e-${stamp}`);
   expect(order.board_order.slice(1)).toEqual(before.board_order.filter((x) => x !== `b-e2e-${stamp}`));
 });
+
+test("the operator supervises the daemon: a restart on request, and an operator that died leaves no second daemon", async () => {
+  // root's sh is not matched (-u dieter), so neither pgrep nor pkill can hit the shell that runs them
+  const sh = (cmd, user = "root") => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
+  const daemons = () => sh("pgrep -u dieter -f 'dieter --store /data/dieter daemon start' || true").split("\n").filter(Boolean);
+  const healthy = () => { try { return JSON.parse(sh("HOME=/data DIETER_HOME=/data/dieter dieter status --format json", "dieter")).health?.status === "ok"; } catch { return false; } };
+  const replaced = (old, ms) => until(async () => { const d = daemons(); return d.length === 1 && d[0] !== old && healthy() ? d[0] : null; }, ms);
+  const first = daemons();
+  expect(first.length, first.join(" ")).toBe(1);
+  // what the bridge asks for after a Claude sign-in or a gateway enrollment
+  expect(JSON.parse(sh("curl -s -X POST -d '{}' http://127.0.0.1:8096/api/daemon/restart"))).toEqual({ ok: true, restarted: true });
+  const second = await replaced(first[0], 60_000);
+  expect(second, "one new daemon, healthy").toBeTruthy();
+  sh("pkill -KILL -u dieter -f com.getdieter.operator.MainKt");
+  await new Promise((f) => setTimeout(f, 1000));
+  expect(daemons(), "the daemon outlives its operator").toEqual([second]);
+  // run.sh starts the next operator after 5 s; it stops the leftover before it starts its own
+  expect(await replaced(second, 120_000), "one new daemon after the operator's restart").toBeTruthy();
+  const log = execFileSync("sh", ["-c", "docker logs dieter-e2e 2>&1 | tail -300"]).toString();
+  expect(log).toContain(`operator: daemon: stopping the daemon an earlier operator left running (pid ${second})`);
+});

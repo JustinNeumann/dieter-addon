@@ -8,8 +8,8 @@ ARG BUILD_ARCH
 #     --certificate-identity https://github.com/JustinNeumann/dieter/.github/workflows/fork-server-release.yml@refs/tags/v${DIETER_VERSION} \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
 # The harness runtime *sources* (runner.mjs + adapters) are taken from the same tag's source tree and
-# checked against RUNTIME_SOURCES_SHA (sha256 of the `sha256sum` lines of the LC_ALL=C-sorted files); the bridge lays
-# them over the release's node_modules archive at start. Node checksums: nodejs.org/dist/vX/SHASUMS256.txt.
+# checked against RUNTIME_SOURCES_SHA (sha256 of the `sha256sum` lines of the LC_ALL=C-sorted files); the operator lays
+# them over the release's node_modules archive at start (its checksums: host/…/operator/Harness.kt). Node checksums: nodejs.org/dist/vX/SHASUMS256.txt.
 ARG DIETER_VERSION=0.6.431-antigravity.8
 ARG DIETER_COMMIT=2aafb54b68949a6474af4c0cef773b853243d41d
 ARG RUNTIME_SOURCES_SHA=d68763f51e2656dff84e6f3d5753183050cb23e0ccf4e3bfc559004efa16dbe2
@@ -123,7 +123,7 @@ RUN useradd --uid 1000 --user-group --home-dir /data --no-create-home --shell /b
 RUN useradd --uid 1001 --user-group --home-dir /data/web-host --no-create-home --shell /usr/sbin/nologin dieter-web
 
 # Harness runtime sources of exactly this Dieter build (the fork's internal/harness/runtime without
-# tests and node_modules); the bridge combines them with the release's node_modules archive.
+# tests and node_modules); the operator combines them with the release's node_modules archive.
 COPY patches/ /tmp/patches/
 RUN set -eu; \
     curl -fsSL -o /tmp/src.tar.gz "https://github.com/JustinNeumann/dieter/archive/${DIETER_COMMIT}.tar.gz"; \
@@ -161,6 +161,8 @@ RUN set -eu; \
     else echo "web-dist/ has no page or web host: run tools/addon-dist.sh first" >&2; exit 1; fi; \
     rm -rf /tmp/web-dist
 
+# the fork release this image carries: the operator stages its harness runtime (harness-staged/<version>)
+ENV DIETER_VERSION=${DIETER_VERSION}
 COPY bridge/ /opt/bridge/
 # dreamfall: the command of the Dreamfall stage agents (bridge/dreamfall.py; they run it from their run cards)
 RUN printf '#!/bin/sh\nexec python3 /opt/bridge/dreamfall.py "$@"\n' > /usr/local/bin/dreamfall && chmod 755 /usr/local/bin/dreamfall \
