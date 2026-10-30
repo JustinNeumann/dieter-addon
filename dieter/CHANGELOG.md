@@ -2,7 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.17 (2026-10-30)
+
+- A conversation's header names the card's lane as well, e.g. *sem2_ha · Home Assistant Ideas · Navigation · Done*.
+  Moving a card from the conversation (⋯ → Move to, or *Move to Review* above the message field) worked, but nothing
+  on that screen changed, so it looked as if the move had failed. Now the lane changes the moment you tap.
+
 ## 0.6.431.16 (2026-10-30)
+
 
 - **The bridge into Kotlin, step 5 of 10:** the Claude sign-in (Tools → Usage), the gateway enrollment and the
   add-on's SSH key with its connection test (Tools → Machines) belong to the operator now. The page, its buttons and
