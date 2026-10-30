@@ -43,9 +43,10 @@ async function openTool(page, tool, section, dialog) {
 const openMachines = (page) => openTool(page, "machines", "Gateway of this add-on", "Enroll with the gateway");
 const openUsage = (page) => openTool(page, "usage", "Claude Code account of this add-on", "Sign in to Claude");
 
-/** Scrolls the detail pane until [locator] is drawn (lazy lists compose only what is on screen). */
+/** Scrolls the detail pane until [locator] is on screen (lazy lists compose only what is near it, so a row can exist
+ *  just below the visible part; a step of 400 px cannot pass it in a 900 px window). */
 async function scrollTo(page, locator, x = 900) {
-  for (let i = 0; i < 60 && !(await locator.count()); i++) { // the slice may still be on its way
+  for (let i = 0; i < 60 && !(await locator.first().isVisible().catch(() => false)); i++) { // the slice may still be on its way
     await page.mouse.move(x, 500);
     await page.mouse.wheel(0, 400);
     await page.waitForTimeout(250);

@@ -62,6 +62,7 @@ Endpoints:
   POST /api/titles            {kind: card|chat, id, prompt, provisional}  a card or chat the new page created on this
                               daemon under its placeholder title: Ollama names it in the background (as POST /api/card)
   GET|POST /api/prompts       Agent instructions: answered by the operator (OPERATOR_PATHS), forwarded as they are
+  POST /api/page-load         the page's start on a device (time, files downloaded): one line in the log, by the operator
   GET  /api/claude/login      add-on only: state of a running `claude auth login` {running, url, done, auth}
   POST /api/claude/login      start the sign-in; returns the link the user opens on claude.com
   POST /api/claude/login/code {code}  hand the code from claude.com to the CLI; writes /data/.claude/.credentials.json
@@ -532,7 +533,7 @@ def order_boards(boards, order=None):
 OPERATOR_URL = os.environ.get("DIETER_OPERATOR_URL", "http://127.0.0.1:8096/")
 OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",)),
                   ("GET", ("settings",)), ("POST", ("settings",)), ("POST", ("boards", "order")),
-                  ("POST", ("project",))}
+                  ("POST", ("project",)), ("POST", ("page-load",))}
 
 
 def operator_request(method, path, body=None, headers=(), timeout=660):

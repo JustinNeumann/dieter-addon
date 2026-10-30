@@ -12,7 +12,8 @@ internal external fun openInNewTab(url: String)
 @JsFun("(name) => new URLSearchParams(window.location.search).get(name)")
 internal external fun queryParameter(name: String): String?
 
-@JsFun("() => { const l = document.getElementById('loading'); if (l) l.remove() }")
+/** The first frame is drawn: the loader goes, and the page reports its start (index.html). */
+@JsFun("() => { const l = document.getElementById('loading'); if (l) { l.remove(); if (window.dieterLoaded) window.dieterLoaded() } }")
 internal external fun hideLoading()
 
 @JsFun("() => document.hidden")
