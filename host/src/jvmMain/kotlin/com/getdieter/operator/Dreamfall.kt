@@ -40,7 +40,7 @@ import kotlinx.serialization.json.put
  *
  * The operator answers the page's actions with it (the person), the `dreamfall` command the agents run from their run
  * cards (DreamfallCommand) the rest; both refuse what a stage's actor may not do (no agent writes to the human stage).
- * The bridge's live view of the records (bridge/dreamfall_view.py) reads what both write.
+ * The board's live view of the records ([DreamfallView]) reads what both write.
  */
 class Dreamfall(private val dieter: Dieter, private val now: () -> Instant = Instant::now) {
     private val random = SecureRandom()

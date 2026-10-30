@@ -26,7 +26,7 @@ cleanup() { kill "${PROXY:-}" 2>/dev/null || true; [ -n "${E2E_KEEP:-}" ] || doc
 trap cleanup EXIT
 echo "waiting for the bridge and daemon (first run stages the harness runtime, ~800 MB)…"
 for i in $(seq 1 180); do
-  if curl -sf http://127.0.0.1:18099/api/state 2>/dev/null | grep -q '"id": "mock"'; then break; fi
+  if curl -sf http://127.0.0.1:18099/api/state 2>/dev/null | grep -qE '"id": ?"mock"'; then break; fi
   sleep 5
   [ "$i" = 180 ] && { echo "add-on did not become ready"; docker logs dieter-e2e | tail -20; exit 1; }
 done

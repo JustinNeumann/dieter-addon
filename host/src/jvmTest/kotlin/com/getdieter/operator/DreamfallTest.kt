@@ -475,10 +475,11 @@ class DreamfallTest {
             assertEquals(400, post("dreamfall/$pid/act", """{"action": "pick", "card": "nonsense"}""").first)
             val p = made.obj("pipeline")!!
             val card = store.card(Dreamfall.stage(p, "implementation")!!.field("board_id"), "Mine")
-            val (s2, recorded) = post("dreamfall/$pid/record", """{"card": "$card", "board": "${Dreamfall.stage(p, "implementation")!!.field("board_id")}", "title": "[Garden] Mine"}""")
-            assertEquals(200, s2)
-            assertEquals("human" to "Justin", recorded.obj("record")!!.obj("created_by")!!.let { it.field("actor") to it.field("name") })
-            assertEquals("Garden", recorded.obj("record")!!.field("category"))
+            // a card the person adds on a stage board (Cards.create since 0.6.431.21, the page's record call before)
+            val recorded = df.recordCreated(p, card, Dreamfall.stage(p, "implementation")!!.field("board_id"), "[Garden] Mine", "human", "Justin")!!
+            assertEquals("human" to "Justin", recorded.obj("created_by")!!.let { it.field("actor") to it.field("name") })
+            assertEquals("Garden", recorded.field("category"))
+            assertEquals(404, post("dreamfall/$pid/record", "{}").first)
             assertEquals(200, post("dreamfall/$pid/delete", "{}").first)
         } finally {
             server.stop(0)

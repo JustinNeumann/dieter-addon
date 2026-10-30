@@ -164,6 +164,8 @@ RUN set -eu; \
 # the fork release this image carries: the operator stages its harness runtime (harness-staged/<version>)
 ENV DIETER_VERSION=${DIETER_VERSION}
 COPY bridge/ /opt/bridge/
+# the operator's helper scripts (the Claude quota probe for a setup-token login)
+COPY operator/ /opt/operator/
 # dreamfall: the command of the Dreamfall stage agents, a mode of the operator's jar (DreamfallCommand; they run it
 # from their run cards). Small and short-lived like the operator; checked when the image carries the jar.
 RUN printf '#!/bin/sh\nexec java -XX:+UseSerialGC -Xms8m -Xmx64m -XX:TieredStopAtLevel=1 -Xshare:auto -cp /opt/web-host/dieter-web-host.jar com.getdieter.operator.DreamfallCommand "$@"\n' \

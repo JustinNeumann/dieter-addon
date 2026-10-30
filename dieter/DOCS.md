@@ -30,8 +30,8 @@ not be root anyway.
 | Piece | Where |
 |---|---|
 | `dieter daemon start --addr 127.0.0.1:4242` | store `/data/dieter`, started and restarted by the operator (again after a Claude sign-in or a gateway enrollment) |
-| bridge `/opt/bridge/dieter_bridge.py` | `0.0.0.0:8099` (Ingress port): serves the page and relays it to the web host; REST + SSE API for the web host and Home Assistant (`/api/ha`, the rest_commands) |
-| operator (same jar, `com.getdieter.operator`) | `127.0.0.1:8096`, user `dieter`: the bridge's duties already moved to Kotlin (Agent instructions, settings, board order, repositories, the daemon and what the options configure: provider tokens, git and gh, Claude Code's note; the page's start lines `page: started in …`; so far); the bridge forwards them to it |
+| bridge `/opt/bridge/dieter_bridge.py` | `0.0.0.0:8099` (Ingress port): serves the page, relays it to the web host and forwards `/api/` (the web host's and Home Assistant's requests: `/api/ha`, the rest_commands) to the operator |
+| operator (same jar, `com.getdieter.operator`) | `127.0.0.1:8096`, user `dieter`: the add-on's API in Kotlin: the daemon and what the options configure (provider tokens, git and gh, Claude Code's note), the board's state and events stream, cards and Home Assistant's side, Dreamfall, Agent instructions, settings, repositories, sign-ins, questions, housekeeping and titles |
 | web host `/opt/web-host/dieter-web-host.jar` (Java 21) | loopback, user `dieter-web`: Dieter's core for the page (signed in to your gateway) and the add-on's own features; state in `/data/web-host` |
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the operator on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR`; staged runtimes of earlier versions are removed, and the Bun it carries is installed as the daemon's managed Bun (`/data/dieter/runtime/tools/bun/<bun version>`), which Oh My Pi's model discovery would otherwise download the whole archive for |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |
@@ -97,7 +97,7 @@ The add-on works on its own from the sidebar. The repository ships an optional p
   *running tasks*, *waiting for you*, *Claude week*, CPU/GPU;
 - `rest_command.dieter_create_task`, `dieter_send_message`, `dieter_move_card`, `dieter_focus` to
   drive Dieter from automations;
-- an automation that pushes to the Companion app when the bridge fires `dieter_turn_finished`
+- an automation that pushes to the Companion app when the add-on fires `dieter_turn_finished`
   (an agent ended its turn) or `dieter_card_review` (a card moved to Review). The tap opens
   `/4d8f2a84_dieter/card/<card id>`: Home Assistant's app panel hands that route to the Dieter page,
   which opens the card's conversation, also when the page is already open and with several pushes
@@ -122,7 +122,7 @@ The harnesses run inside the container, so they need their own credentials:
   `claude setup-token` on a machine where Claude Code is logged in and paste the long-lived token into
   the option **Claude Code token** (`CLAUDE_CODE_OAUTH_TOKEN` in `/data/dieter.env`, passed with
   `--env-file`). The page sign-in is the fuller one: it is stored in `/data/.claude/.credentials.json`,
-  renewed by the bridge, and it can read your quota, which a setup-token cannot (the usage API answers
+  renewed by the add-on, and it can read your quota, which a setup-token cannot (the usage API answers
   401 for it, so nothing is shown under Usage with a token). When both exist, the sign-in wins.
 - **Codex**: paste an OpenAI API key into **OpenAI API key** (`OPENAI_API_KEY`).
 - **Antigravity**: the CLI keeps its sign-in in a small JSON file. On a computer where `agy` is
@@ -235,7 +235,7 @@ new device.
 ## Questions from the agent and attachments
 
 Claude Code may ask the user a question with options (its AskUserQuestion tool). Dieter's daemon has
-no channel for that, so the fork's harness worker relays the question to the bridge
+no channel for that, so the fork's harness worker relays the question to the add-on
 (`DIETER_QUESTIONS_URL`), the card shows it with its options and a free-form field, the Inbox lists the
 card under "Waiting for your answer", and Home Assistant receives the event `dieter_question`
 (`card_id`, `title`, `question`, `count`) for a notification. The answer, or a decline, continues the
@@ -271,7 +271,7 @@ empty title field on this add-on's machine, the `dieter_create_task` rest_comman
 
 - **OpenAI** (default): Dieter's own `--auto-title`; the task is saved under its first line and GPT
   Spark improves the title (with OpenAI configured, otherwise the first line stays).
-- **Ollama (HA)**: a local model through Home Assistant's AI Task. The bridge saves the task under its
+- **Ollama (HA)**: a local model through Home Assistant's AI Task. The add-on saves the task under its
   first line and renames it a moment later with the model's short summary (`ai_task.generate_data`,
   same language as the task). It finds the model by itself: the first available `ai_task` entity of the
   [Ollama integration](https://www.home-assistant.io/integrations/ollama/) (add an *AI Task* entry to
@@ -280,7 +280,7 @@ empty title field on this add-on's machine, the `dieter_create_task` rest_comman
   than 2 minutes the first line stays; a title you change in the meantime is kept.
 
 The choice is stored in `/data/bridge_settings.json`. Tasks that agents create with the `dieter` CLI do
-not pass the bridge and keep Dieter's own title.
+not pass the add-on and keep Dieter's own title.
 
 ## Work folders
 

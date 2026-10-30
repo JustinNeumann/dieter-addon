@@ -503,7 +503,8 @@ into the web host itself. The operator runs as `dieter`, the agents' user, like 
 operator through the store's identity, owns `/data/projects`, `/data/.ssh` and the Claude sign-in, and holds no secret.
 The web host stays `dieter-web` with the gateway session, which agents can neither read nor reach. Folding both into
 one process would need the web host to run as `dieter` (the session within the agents' reach) or a setuid `sudo` in
-the image. Until the operator serves port 8099 itself the bridge forwards the moved paths (`OPERATOR_PATHS`); the
+the image. Until the operator serves port 8099 itself the bridge forwards to it (the moved paths, `OPERATOR_PATHS`,
+every `/api/` path since area 9); the
 web host keeps calling `DIETER_WEB_BRIDGE_URL`, so nothing changes for it. The bridge also serves Ingress on 8099 and
 answers Home Assistant. Its areas move to the operator one at a time, each its own add-on release
 with the e2e suite green, and the last one deletes `dieter/bridge/` and Python from the image:
@@ -535,9 +536,14 @@ with the e2e suite green, and the last one deletes `dieter/bridge/` and Python f
    bridge keeps the provisional first-line title of Home Assistant's `/api/card` (area 9) and asks the operator's
    settings whether Ollama names new tasks
 
-9. Home Assistant's side: `/api/ha`, the rest_commands' endpoints (`/api/card`, `…/send`, `…/move`, `/api/focus`,
-   `/api/state`) and the events `dieter_turn_finished`, `dieter_card_review`, `dieter_question`, on port 8099 with
-   the same paths and answers, so `homeassistant/packages/dieter.yaml` does not change
+9. ✅ 0.6.431.21: the board's state and Home Assistant's side: the polls and `dieter watch changes` (`Board`,
+   `ChangeWatch`), the Dreamfall live view (`DreamfallView`: the kv watch, the stage boards' cards, the state's
+   `dreamfall` block, a card's trail), the quota probes (`Usage`), the events stream (`api/events`, SSE), `/api/ha`,
+   the rest_commands' endpoints (`/api/card`, `…/send`, `…/move`, `/api/focus`, `/api/state`) and the events
+   `dieter_turn_finished`, `dieter_card_review`, `dieter_question` (`Cards`), with the same paths and answers, so
+   `homeassistant/packages/dieter.yaml` does not change. Dreamfall's `record` call is gone: a card made on a stage
+   board gets its record from the create itself. The bridge forwards every `/api/` path; the classic page's own
+   endpoints (files, diffs, devices, machines, mail) are dropped
 10. Ingress on 8099, the page's files and the relay to the web host; then `dieter/bridge/` goes
 
 The e2e contract tests (`dieter/tests/e2e/bridge-api.spec.mjs`, `dreamfall-api.spec.mjs`) pin what Home Assistant and
