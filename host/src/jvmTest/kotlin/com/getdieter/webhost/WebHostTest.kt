@@ -85,7 +85,7 @@ class WebHostTest {
         bridge.start()
         val state = Files.createTempDirectory("web-host").toFile()
         val env = mapOf("DIETER_OPERATOR_URL" to "http://127.0.0.1:${bridge.address.port}/", "DIETER_WEB_DIR" to state.path)
-        host = WebHostServer(state, env, "127.0.0.1", 0, allowed = { true }, ingress = { fromIngress })
+        host = WebHostServer(state, env, "127.0.0.1", 0, ingress = { fromIngress }, core = { false }, apiKey = "")
         port = host.start()
     }
 

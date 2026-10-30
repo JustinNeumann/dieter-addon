@@ -2,6 +2,22 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.24 (2026-10-30)
+
+- **Port 8099 answers only whom it must**, as Home Assistant's add-on rules ask (allow the Supervisor, deny the
+  rest). Before, everything on the Supervisor's network (`172.30.32.0/23`, where other add-ons sit at
+  `172.30.33.x`) and loopback (where the agents run) could use the whole API, and any add-on could open the
+  page's core with the account session. Now:
+  - Home Assistant's Ingress (`172.30.32.2`), i.e. a person signed in to Home Assistant: the page, its core and the
+    whole API, as before.
+  - Home Assistant itself (`172.30.32.1`), or a caller with the new **API key** option
+    (`Authorization: Bearer <key>`): Home Assistant's routes only (sensor, board state, new card, follow-up, move,
+    focus). The Home Assistant package keeps working unchanged.
+  - Nobody else, not other add-ons and not the agents.
+- Only Ingress can name a Home Assistant user to the add-on (`X-Remote-User-*`).
+- The API key reaches the web host only: `/data/options.json` belongs to root now, and the operator, the daemon
+  and the agents read a copy without the key.
+
 ## 0.6.431.23 (2026-10-30)
 
 - **The bridge into Kotlin, step 10 of 10:** the add-on's front door on the Ingress port is the web host now. It

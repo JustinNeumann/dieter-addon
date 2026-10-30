@@ -24,7 +24,9 @@ import okio.Path.Companion.toOkioPath
  * ([FrontDoor]). Environment:
  *   DIETER_WEB_HOST_STATE    state directory (device key, session, settings), default /data/web-host
  *   BRIDGE_BIND, BRIDGE_PORT the front door, default 0.0.0.0:8099 (the add-on's Ingress port)
- *   BRIDGE_INGRESS_NETS      address ranges besides the Supervisor's network that reach the page's core (e2e only)
+ *   BRIDGE_INGRESS_NETS      address ranges treated as Ingress besides the Supervisor's 172.30.32.2 (e2e only)
+ *   BRIDGE_CORE_NETS         address ranges treated as Home Assistant besides its 172.30.32.1 (e2e only)
+ *   BRIDGE_API_KEY           lets any caller with `Authorization: Bearer <key>` use Home Assistant's routes (option api_key)
  *   DIETER_WEB_DIR           the page's bundle, default /opt/web
  *   DIETER_OPERATOR_URL      the operator, which answers /api/, default http://127.0.0.1:8096/
  *   DIETER_WEB_SIGN_IN_CALLBACK  pins the sign-in callback (https://<HA>/app/<slug>/next/signin); else the page tells it
@@ -36,11 +38,13 @@ fun main() {
     val env = System.getenv()
     Log.verbose = env["DIETER_WEB_HOST_VERBOSE"] == "1"
     val state = File(env["DIETER_WEB_HOST_STATE"] ?: "/data/web-host")
-    val ingress = listOf(Net.SUPERVISOR) + Net.list(env["BRIDGE_INGRESS_NETS"])
+    val ingress = listOf(Net.INGRESS) + Net.list(env["BRIDGE_INGRESS_NETS"])
+    val core = listOf(Net.HOME_ASSISTANT) + Net.list(env["BRIDGE_CORE_NETS"])
     WebHostServer(
         state, env, env["BRIDGE_BIND"] ?: "0.0.0.0", env["BRIDGE_PORT"]?.toInt() ?: 8099,
-        allowed = { it.isLoopbackAddress || it in Net.SUPERVISOR },   // Ingress, Home Assistant core, the add-on's own processes
-        ingress = { a -> ingress.any { a in it } },                     // the page's core: never loopback, where the agents are
+        ingress = { a -> ingress.any { a in it } },
+        core = { a -> core.any { a in it } },
+        apiKey = env["BRIDGE_API_KEY"].orEmpty(),
     ).start()
 }
 
@@ -50,8 +54,9 @@ class WebHostServer(
     env: Map<String, String>,
     bind: String,
     port: Int,
-    allowed: (java.net.InetAddress) -> Boolean,
     ingress: (java.net.InetAddress) -> Boolean,
+    core: (java.net.InetAddress) -> Boolean,
+    apiKey: String,
 ) {
     val runtime: CoreRuntime
     private val api: ClientApi
@@ -112,7 +117,7 @@ class WebHostServer(
         )
         foreground = Foreground(api, commands, env["DIETER_WEB_HOST_IDLE_MS"]?.toLongOrNull() ?: 120_000)
         server =
-            FrontDoor(bind, port, File(env["DIETER_WEB_DIR"] ?: "/opt/web"), operator, allowed, ingress, onSignIn = ::signIn) { ws ->
+            FrontDoor(bind, port, File(env["DIETER_WEB_DIR"] ?: "/opt/web"), operator, ingress, core, apiKey, onSignIn = ::signIn) { ws ->
                 val user = ws.headers["x-remote-user-display-name"] ?: ws.headers["x-remote-user-name"].orEmpty()
                 val hello = Hello(BuildInfo.DIETER_RELEASE, BuildInfo.VERSION, user)
                 CoreConnection(api, runtime, addon, commands, ws, hello, foreground).run()

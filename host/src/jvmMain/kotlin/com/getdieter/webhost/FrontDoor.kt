@@ -25,22 +25,29 @@ import java.util.Base64
  *   GET  /next/…                the Compose page ([webDir]): hashed files immutable, the rest no-cache + ETag;
  *                               *.wasm.gz raw for the loader, .br/.gz by Accept-Encoding outside Ingress only
  *                               (Ingress drops that header and compresses at Home Assistant's border)
- *   GET  /next/core             the page's core (WebSocket), and /next/signin the gateway's return after sign-in:
- *                               [ingress] callers only, never the agents on loopback (they would drive the session)
+ *   GET  /next/core             the page's core (WebSocket), and /next/signin the gateway's return after sign-in
  *   GET  /api/ws/echo           WebSocket echo (checks that WebSockets pass Ingress)
  *   GET, POST /api/…            the operator's ([operator]): passed on with query, body and the Home Assistant
  *                               user, answered as it answers; an event stream as it comes
  *
- * Everything is open to [allowed] callers only (the Supervisor's network and loopback in the add-on). One request
- * per connection.
+ * Who may call (Home Assistant's add-on rule: allow the Supervisor, deny every other address):
+ *   [ingress]    Home Assistant's Ingress (the Supervisor, 172.30.32.2), i.e. a person signed in to Home Assistant:
+ *                everything above
+ *   [core]       Home Assistant itself (172.30.32.1: its REST sensor, rest_commands and scripts), or any caller with
+ *                the add-on's [apiKey] (`Authorization: Bearer …`, option api_key): Home Assistant's routes only
+ *                ([homeAssistantRoute])
+ *   anyone else  nothing: other add-ons (172.30.33.x) and the agents on loopback, which would drive the session or
+ *                act as the person
+ * One request per connection.
  */
 internal class FrontDoor(
     private val bind: String,
     private val port: Int,
     private val webDir: File,
     private val operator: URI,
-    private val allowed: (InetAddress) -> Boolean,
     private val ingress: (InetAddress) -> Boolean,
+    private val core: (InetAddress) -> Boolean,
+    private val apiKey: String,
     private val onSignIn: (query: String) -> HttpReply,
     private val onCore: (WebSocket) -> Unit,
 ) {
@@ -118,8 +125,10 @@ internal class FrontDoor(
     private fun route(ex: Exchange) {
         val r = ex.request
         if (r.method != "GET" && r.method != "POST") return ex.text(501, "unsupported method ${r.method}")
-        if (!allowed(ex.socket.inetAddress)) return ex.json(403, obj("error" to "forbidden"))
         val parts = r.parts
+        val person = ingress(ex.socket.inetAddress)
+        if (!person && !((core(ex.socket.inetAddress) || keyed(r.headers["authorization"])) && homeAssistantRoute(r.method, parts)))
+            return ex.json(403, obj("error" to "forbidden"))
         if (r.method == "POST") {
             if (parts.firstOrNull() != "api") return ex.json(404, obj("error" to "not found"))
             val body = try {
@@ -127,11 +136,10 @@ internal class FrontDoor(
             } catch (e: BodyTooLarge) {
                 return ex.json(400, obj("error" to "file too large (20 MB at most)"))
             }
-            return forward(ex, body)
+            return forward(ex, body, person)
         }
         when {
             parts.size == 2 && parts[0] == "next" && (parts[1] == "core" || parts[1] == "signin") -> {
-                if (!ingress(ex.socket.inetAddress)) return ex.text(403, "The page's core is reached through Home Assistant only.")
                 if (parts[1] == "signin") onSignIn(r.query).let { ex.reply(it.status, it.type, it.body.toByteArray(), "X-Content-Type-Options" to "nosniff") }
                 else upgrade(ex)?.let { ws ->
                     try {
@@ -147,8 +155,14 @@ internal class FrontDoor(
             parts == listOf("api", "ws", "echo") -> upgrade(ex)?.let(::echo)
             parts.isEmpty() || parts == listOf("index.html") -> ex.reply(200, "text/html; charset=utf-8", root)
             parts[0] != "api" -> ex.json(404, obj("error" to "not found"))
-            else -> forward(ex, null)
+            else -> forward(ex, null, person)
         }
+    }
+
+    /** A request carrying the add-on's API key (none configured: no request does). */
+    private fun keyed(authorization: String?): Boolean {
+        if (apiKey.isEmpty() || authorization == null || !authorization.startsWith("Bearer ", ignoreCase = true)) return false
+        return java.security.MessageDigest.isEqual(authorization.substring(7).trim().toByteArray(), apiKey.toByteArray())
     }
 
     // ------------------------------------------------------------------ WebSockets
@@ -229,8 +243,9 @@ internal class FrontDoor(
 
     // ------------------------------------------------------------------ the operator
 
-    /** Passes the request on to the operator and its answer back; an event stream as it comes, until either side leaves. */
-    private fun forward(ex: Exchange, body: ByteArray?) {
+    /** Passes the request on to the operator and its answer back; an event stream as it comes, until either side leaves.
+     * Home Assistant's user headers only come from Ingress ([person]); nobody else can claim to be someone. */
+    private fun forward(ex: Exchange, body: ByteArray?, person: Boolean) {
         val r = ex.request
         val uri = runCatching { URI.create(operator.toString().trimEnd('/') + r.target) }.getOrElse { return ex.json(400, obj("error" to "bad path")) }
         val request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(OPERATOR_TIMEOUT_S))
@@ -238,7 +253,7 @@ internal class FrontDoor(
             request.POST(HttpRequest.BodyPublishers.ofByteArray(body))
             request.header("Content-Type", r.headers["content-type"] ?: "application/json")
         } else request.GET()
-        for (h in FORWARDED) r.headers[h.lowercase()]?.takeIf { it.isNotEmpty() }?.let { request.header(h, it) }
+        for (h in FORWARDED) if (person || h == "X-Filename") r.headers[h.lowercase()]?.takeIf { it.isNotEmpty() }?.let { request.header(h, it) }
         val answer = try {
             http.send(request.build(), HttpResponse.BodyHandlers.ofInputStream())
         } catch (e: java.io.IOException) {
@@ -294,6 +309,16 @@ internal class FrontDoor(
         private const val GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         /** what the operator learns of the caller: the Home Assistant user (its Dreamfall trail) and an upload's name */
         private val FORWARDED = listOf("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name", "X-Filename")
+
+        /** What Home Assistant itself calls (homeassistant/packages/dieter.yaml and its scripts): its sensor
+         * (GET api/ha), the board (GET api/state), new cards, follow-ups, moves and focus. */
+        fun homeAssistantRoute(method: String, parts: List<String>): Boolean = parts.none { it == "." || it == ".." || '%' in it } && when (method) {
+            "GET" -> parts == listOf("api", "ha") || parts == listOf("api", "state")
+            "POST" -> parts == listOf("api", "card") || parts == listOf("api", "focus") ||
+                parts.size == 4 && parts[0] == "api" && parts[3] == "send" ||
+                parts.size == 4 && parts[0] == "api" && parts[1] == "card" && parts[3] == "move"
+            else -> false
+        }
         // webpack's wasm assets (20 hex) and the packaged dieter.<16 hex>.js never change under their name
         private val WEB_HASHED = Regex("(^|[./])[0-9a-f]{16,}\\.(wasm|js|mjs)(\\.LICENSE\\.txt)?(\\.gz|\\.br)?$")
         private val WEB_TYPES = mapOf(
@@ -375,8 +400,11 @@ internal class Net(spec: String) {
     }
 
     companion object {
-        /** The Supervisor's network: its Ingress proxy and Home Assistant core. */
-        val SUPERVISOR = Net("172.30.32.0/23")
+        /** Home Assistant's Ingress: the Supervisor's address, the only one the add-on rules allow. */
+        val INGRESS = Net("172.30.32.2/32")
+
+        /** Home Assistant core, which runs on the host network and so reaches add-ons from the network's gateway. */
+        val HOME_ASSISTANT = Net("172.30.32.1/32")
 
         fun list(specs: String?): List<Net> = specs.orEmpty().split(',').filter { it.isNotBlank() }.map(::Net)
     }
