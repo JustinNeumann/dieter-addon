@@ -141,9 +141,9 @@ class DemoData {
 
     private val retired = mutableSetOf<String>()
 
-    /** Archives (retires) or restores a board; like the daemon, only an empty one. */
+    /** Archives (retires) or restores a board; like the daemon, only one without open cards. */
     fun setRetired(id: String, value: Boolean) {
-        val kept = cards.firstOrNull { it.board_id == id }
+        val kept = cards.firstOrNull { it.board_id == id && !it.archived }
         if (value && kept != null)
             throw CoreException(FailureKind.PERMANENT, BoardRetirement.refusal("board has surviving card ${kept.id}")!!)
         if (value) retired += id else retired -= id
