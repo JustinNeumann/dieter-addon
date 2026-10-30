@@ -1,6 +1,7 @@
 package com.getdieter.addon.core
 
 import com.getdieter.addon.v1.AddRepository
+import com.getdieter.addon.v1.AntigravitySlice
 import com.getdieter.addon.v1.AnswerQuestion
 import com.getdieter.addon.v1.Choice
 import com.getdieter.addon.v1.ClaudeSignIn
@@ -11,6 +12,7 @@ import com.getdieter.addon.v1.Failure
 import com.getdieter.addon.v1.GatewaySlice
 import com.getdieter.addon.v1.NameConversation
 import com.getdieter.addon.v1.Option
+import com.getdieter.addon.v1.OrderBoards
 import com.getdieter.addon.v1.Question
 import com.getdieter.addon.v1.QuestionItem
 import com.getdieter.addon.v1.QuestionOption
@@ -84,6 +86,7 @@ class AddonCore(
     private val claude = MutableStateFlow(ClaudeSlice(loading = true))
     private val settings = MutableStateFlow(SettingsSlice(loading = true))
     private val questions = MutableStateFlow(QuestionsSlice(loading = true))
+    private val antigravity = MutableStateFlow(AntigravitySlice())
 
     // What the bridge said last, and what only this core knows
     private var gatewayJson: JsonObject? = null
@@ -117,6 +120,14 @@ class AddonCore(
                     authError = ""
                     publishClaude()
                 }
+                antigravity.value =
+                    AntigravitySlice(
+                        configured = state.objects("backends").any { it.str("id") == "antigravity" },
+                        groups =
+                            AddonRules.antigravityGroups(
+                                state.objects("quota").firstOrNull { it.str("provider") == "antigravity" }.objects("windows")
+                            ),
+                    )
                 pending = state.objects("questions").mapNotNull(::parseQuestion)
                 answered.retainAll(pending.map { it.id }.toSet())
                 questionsLoaded = true
@@ -139,6 +150,7 @@ class AddonCore(
                 Slice.SLICE_SSH -> ssh.map { Update(ssh = it) }
                 Slice.SLICE_CLAUDE -> claude.map { Update(claude = it) }
                 Slice.SLICE_SETTINGS -> settings.map { Update(settings = it) }
+                Slice.SLICE_ANTIGRAVITY -> antigravity.map { Update(antigravity = it) }
                 Slice.SLICE_QUESTIONS ->
                     questions.map { all ->
                         Update(questions = if (scope.isEmpty()) all else all.copy(questions = all.questions.filter { it.card_id == scope }))
@@ -179,6 +191,7 @@ class AddonCore(
         command.sign_out_of_claude?.let { return signOutOfClaude() }
         command.change_setting?.let { return changeSetting(it) }
         command.name_conversation?.let { return nameConversation(it, user) }
+        command.order_boards?.let { return orderBoards(it, user) }
         command.answer_question?.let { return answer(it, user) }
         command.add_repository?.let { return addRepository(it) }
         dreamfall.execute(command, user)?.let { return it }
@@ -507,6 +520,15 @@ class AddonCore(
         return Result()
     }
 
+    /** The bridge keeps one board order for both pages and every device. */
+    private suspend fun orderBoards(order: OrderBoards, user: String): Result {
+        if (order.board_ids.isEmpty() || order.board_ids.any { it.isBlank() }) invalid("Which boards, in which order?")
+        val saved = bridge.write("boards/order", buildJsonObject { putJsonArray("ids") { order.board_ids.forEach { add(JsonPrimitive(it)) } } }, user)
+        settingsJson = settingsJson?.let { JsonObject(it + ("board_order" to (saved["board_order"] ?: return@let it))) }
+        publishSettings()
+        return Result()
+    }
+
     private suspend fun changeSetting(change: SettingChange): Result {
         change.title_model?.let { model ->
             val known = settingsJson.objects("title_models").map { it.str("id") }
@@ -556,6 +578,7 @@ class AddonCore(
                         options = (RETENTION_DAYS + days).distinct().sorted().map { Option(it.toString(), retentionLabel(it)) },
                     ),
                 titles_daemon_id = d.str("titles_daemon_id"),
+                board_order = d.strings("board_order"),
             )
     }
 
@@ -619,7 +642,8 @@ class AddonCore(
 
     companion object {
         /** What the core follows of the bridge's state. */
-        private val STREAMED = listOf("questions", "claude_auth", "dreamfall", "dreamfall_cards", "projects", "boards", "harnesses")
+        private val STREAMED =
+            listOf("questions", "claude_auth", "dreamfall", "dreamfall_cards", "projects", "boards", "harnesses", "quota", "backends")
         /** Slices the bridge does not push are read again when a page opens them after this long. */
         val STALE: Duration = 15.seconds
         /** `dieter daemon enroll` waits for the authorization about as long as a device code lives. */

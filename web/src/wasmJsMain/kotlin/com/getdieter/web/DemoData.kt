@@ -5,6 +5,7 @@ import com.getdieter.api.v1.Card
 import com.getdieter.api.v1.Checkout
 import com.getdieter.api.v1.Conversation
 import com.getdieter.api.v1.Label
+import com.getdieter.api.v1.MessagePart
 import com.getdieter.api.v1.Project
 import com.getdieter.api.v1.Subagent
 import com.getdieter.api.v1.PullRequestSummary
@@ -12,11 +13,14 @@ import com.getdieter.api.v1.TaskPlan
 import com.getdieter.api.v1.TaskPlanItem
 import com.getdieter.api.v1.TaskPlanPhase
 import com.getdieter.api.v1.TokenUsage
+import com.getdieter.api.v1.ToolOutput
+import com.getdieter.api.v1.UiMessage
 import com.getdieter.api.v1.WorkspaceSummary
 import com.getdieter.client.v1.*
 import com.getdieter.core.board.Lanes
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
+import okio.ByteString.Companion.encodeUtf8
 
 /** Demo slices, shaped like what the core publishes for a small two-machine account. */
 class DemoData {
@@ -35,13 +39,14 @@ class DemoData {
     private val infra = Label(id = "l-infra", name = "Infra", color = "#F5A623")
 
     private fun checkouts(project: String, vararg machines: String) =
-        machines.map { Checkout(id = "$project-$it", project_id = project, daemon_id = it, name = project, path = "~/$project") }
+        // absolute, as daemons report them: links in an agent's mail resolve against this
+        machines.map { Checkout(id = "$project-$it", project_id = project, daemon_id = it, name = project, path = "/home/demo/$project") }
 
     private val projects =
         listOf(
             Project(id = "p-addon", name = "dieter-addon", path = "~/dieter-addon", board_count = 1, card_count = 5, chat_count = 1, base_branch = "main", checkouts = checkouts("dieter-addon", "daemon-desktop", "daemon-ha")),
             Project(id = "p-home", name = "Home-Assistant-Sem2", path = "~/Home-Assistant-Sem2", board_count = 1, card_count = 3, chat_count = 1, base_branch = "main", checkouts = checkouts("Home-Assistant-Sem2", "daemon-ha")),
-            Project(id = "p-dieter", name = "dieter", path = "~/dieter", board_count = 1, card_count = 2, base_branch = "main", checkouts = checkouts("dieter", "daemon-desktop")),
+            Project(id = "p-dieter", name = "dieter", path = "~/dieter", board_count = 3, card_count = 2, base_branch = "main", checkouts = checkouts("dieter", "daemon-desktop")),
         )
 
     private val boards =
@@ -49,6 +54,8 @@ class DemoData {
             Board(id = "b-addon", project_id = "p-addon", name = "Add-on", lanes = Lanes.DEFAULT, labels = listOf(ui, bug, infra)),
             Board(id = "b-home", project_id = "p-home", name = "Automations", lanes = Lanes.DEFAULT, labels = listOf(ha, bug)),
             Board(id = "b-dieter", project_id = "p-dieter", name = "Upstream", lanes = Lanes.DEFAULT, labels = listOf(ui, infra)),
+            Board(id = "b-releases", project_id = "p-dieter", name = "Releases", lanes = Lanes.DEFAULT),
+            Board(id = "b-site", project_id = "p-dieter", name = "Website", lanes = Lanes.DEFAULT),
         )
 
     private fun card(
@@ -296,11 +303,11 @@ class DemoData {
     private fun toolStep(id: String, title: String, status: ToolCallStatus, label: String, attention: Boolean = false) =
         TimelineStep(id = id, kind = TimelineStepKind.TIMELINE_STEP_KIND_TOOL, tool_title = title, tool_status = status, tool_status_label = label, tool_attention = attention)
 
-    private fun userItem(id: String, text: String, minutesAgo: Int) =
+    private fun userItem(id: String, text: String, minutesAgo: Int, attachments: List<TimelineStep> = emptyList()) =
         TimelineItem(
             id = id,
             user = true,
-            groups = listOf(TimelineStepGroup(id = "$id-g", steps = listOf(textStep("$id-t", text)))),
+            groups = listOf(TimelineStepGroup(id = "$id-g", steps = attachments + textStep("$id-t", text))),
             created_at_millis = millis(minutesAgo),
             copyable = true,
             delivery = MessageDelivery.MESSAGE_DELIVERY_SYNCED,
@@ -355,12 +362,18 @@ class DemoData {
                         )
                     ),
             ),
-            userItem("w3", "Nice. Does Sora load inside the Ingress iframe, and how big is the bundle?", 4),
+            userItem(
+                "w3", "Nice. Does Sora load inside the Ingress iframe, and how big is the bundle?", 4,
+                attachments = listOf(TimelineStep(id = "w3-a", kind = TimelineStepKind.TIMELINE_STEP_KIND_ATTACHMENT, message_id = "m-w3", part_index = 0)),
+            ),
             assistantItem(
                 "w4", 1,
                 tools = listOf(toolStep("w4-a", "./gradlew wasmJsBrowserDistribution", ToolCallStatus.TOOL_CALL_STATUS_RUNNING, "Running")),
                 toolSummary = "Running 1 command",
-                steps = listOf(textStep("w4-t", "Sora comes from Compose resources, so it is served next to the bundle and works in the iframe. The development build is about 50 MB of wasm; I'm building the optimized one now to get the real number.")),
+                steps = listOf(
+                    toolStep("w4-s", "Screenshot of next/ in the iframe", ToolCallStatus.TOOL_CALL_STATUS_COMPLETED, "Done")
+                        .copy(message_id = "m-w4", part_index = 0),
+                    textStep("w4-t", "Sora comes from Compose resources, so it is served next to the bundle and works in the iframe. The development build is about 50 MB of wasm; I'm building the optimized one now to get the real number.")),
             ),
         )
 
@@ -430,12 +443,55 @@ class DemoData {
             else emptyList()
     }
 
+    /** The parts the web conversation's attachment and screenshot steps point at. */
+    private val webMessages =
+        listOf(
+            UiMessage(
+                id = "m-w3",
+                role = "user",
+                parts = listOf(MessagePart(type = "file", media_type = "image/png", filename = "ingress.png", url = "data:image/png;base64,${DemoImages.INGRESS}")),
+            ),
+            UiMessage(
+                id = "m-w4",
+                role = "assistant",
+                parts =
+                    listOf(
+                        MessagePart(
+                            type = "tool-browser_take_screenshot",
+                            tool_call_id = "call-shot",
+                            tool_name = "browser_take_screenshot",
+                            state = "output-available",
+                            has_output = true,
+                            output_preview = """[{"type":"text","text":"Took the screenshot"},{"type":"image","data":"${DemoImages.SCREENSHOT.take(40)}""",
+                            payload_revision = "r1",
+                        )
+                    ),
+            ),
+        )
+
+    /** A tool's whole output, as the core loads it when its row is opened. */
+    fun toolOutput(load: LoadToolOutput): ToolOutput? =
+        if (load.tool_call_id != "call-shot") null
+        else
+            ToolOutput(
+                card_id = load.card_id,
+                message_id = load.message_id,
+                tool_call_id = load.tool_call_id,
+                tool_name = "browser_take_screenshot",
+                state = "output-available",
+                input_json = """{"fullPage":false}""".encodeUtf8(),
+                output_json =
+                    """[{"type":"text","text":"Took the screenshot"},{"type":"image","data":"${DemoImages.SCREENSHOT}","mimeType":"image/png"}]""".encodeUtf8(),
+                revision = load.revision,
+            )
+
     private fun conversation(cardId: String): ConversationSlice? {
         val card = allCards.firstOrNull { it.id == cardId } ?: return null
         val running = card.lane == "running"
         val timeline = (if (card.id == "c-web") webTimeline else genericTimeline(card)) + extraTurns[card.id].orEmpty()
         return ConversationSlice(
             card_id = card.id,
+            messages = if (card.id == "c-web") webMessages else emptyList(),
             daemon_id = card.owner_daemon_id,
             card = card,
             project = projects.firstOrNull { it.id == card.project_id },

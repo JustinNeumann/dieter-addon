@@ -39,7 +39,14 @@ message Command {
     ChangeInstructions change_instructions = 19;
     // Has the add-on name a task or chat created without a title (SettingsSlice.titles_daemon_id).
     NameConversation name_conversation = 20;
+    // Puts a project's boards in this order, for every device (SettingsSlice.board_order).
+    OrderBoards order_boards = 21;
   }
+}
+
+message OrderBoards {
+  // A project's boards, as dragged.
+  repeated string board_ids = 1;
 }
 
 message NameConversation {
@@ -242,6 +249,8 @@ enum Slice {
   SLICE_DREAMFALL_FORM = 9;
   // The account's agent instructions.
   SLICE_INSTRUCTIONS = 10;
+  // Antigravity's quota groups, which only the add-on reads (Usage).
+  SLICE_ANTIGRAVITY = 11;
 }
 
 message Update {
@@ -260,7 +269,33 @@ message Update {
     IdeaSlice idea = 11;
     DreamfallFormSlice dreamfall_form = 12;
     InstructionsSlice instructions = 13;
+    AntigravitySlice antigravity = 14;
   }
+}
+
+// Antigravity's quota as the add-on's agy reports it: models share a weekly and a 5-hour window per group.
+message AntigravitySlice {
+  // The add-on has Antigravity credentials (the option antigravity_token).
+  bool configured = 1;
+  repeated AntigravityGroup groups = 2;
+}
+
+message AntigravityGroup {
+  // "Gemini"
+  string name = 1;
+  // The model families sharing it: "Gemini Flash", "Gemini Pro".
+  repeated string models = 2;
+  // Percent left in its tightest window.
+  int32 remaining = 3;
+  repeated AntigravityWindow windows = 4;
+}
+
+message AntigravityWindow {
+  // "Week", "5h"
+  string name = 1;
+  int32 remaining = 2;
+  // RFC 3339, empty when agy reports none.
+  string resets_at = 3;
 }
 
 enum Tone {
@@ -374,6 +409,8 @@ message SettingsSlice {
   // The add-on's machine while it names new tasks and chats there (Ollama through Home Assistant); empty when
   // Dieter's auto-title does.
   string titles_daemon_id = 5;
+  // Boards in the order dragged on either page; boards not in it follow in Dieter's order.
+  repeated string board_order = 6;
 }
 
 message InstructionsSlice {

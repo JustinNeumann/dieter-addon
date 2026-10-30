@@ -67,6 +67,13 @@ other hosts (not only Home Assistant) offer Dieter in a browser.
 - **The project used last.** Every app already remembers the project last created in (`CreationPreferences.project_id`)
   and `remember_creation` exists, but nothing reports opening a project. The fork reports opens from navigation, lists
   the project first ("Last used") and opens it when the Projects tab is chosen from another tab.
+- **Images in the chat.** The apps show an attached image as a file tile and a tool's screenshot only as base64 in
+  the tool sheet. The fork draws an attached image as itself (`decodeToImageBitmap`, common since Compose 1.6), adds
+  `Attachments.bytes` (data or base64 data URL) and `ToolImages` (the image hint in `output_preview`, the images in
+  the output, the output text with each image's base64 replaced) to the core, loads the output of an image tool step
+  for the timeline, and shows the images above the tool sheet's output. Any app's attachment viewer then opens them.
+- **Board order is the add-on's.** Dieter has no board order; the fork's `MobileExtensions.boardOrder` lets a host
+  supply one (sort plus a move), and Projects then drags board rows after a long press, as the board drags cards.
 
 ## Security notes for a web host
 

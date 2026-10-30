@@ -11,11 +11,14 @@ import com.getdieter.addon.v1.Enrollment
 import com.getdieter.addon.v1.Failure
 import com.getdieter.addon.v1.GatewaySlice
 import com.getdieter.addon.v1.NameConversation
+import com.getdieter.addon.v1.OrderBoards
 import com.getdieter.addon.v1.SettingChange
 import com.getdieter.addon.v1.Slice
 import com.getdieter.addon.v1.Step
 import com.getdieter.addon.v1.SubmitClaudeCode
 import com.getdieter.addon.v1.TestSsh
+import com.getdieter.addon.v1.AntigravitySlice
+import com.getdieter.addon.v1.AntigravityWindow
 import com.getdieter.addon.v1.Tone
 import com.getdieter.addon.v1.Update
 import kotlin.test.Test
@@ -238,6 +241,52 @@ class AddonCoreTest {
         )
         assertEquals(Failure.Kind.KIND_INVALID, core.fails(Command(name_conversation = NameConversation("", true, "Hi", "Hi"))).kind)
         assertEquals(1, bridge.sent("POST titles").size)
+    }
+
+    @Test
+    fun antigravitysQuotaGroupsComeFromTheBridge() = runTest {
+        val core = core()
+        val seen = watch(core, Slice.SLICE_ANTIGRAVITY)
+        bridge.state.emit(json("""{"questions":[],"backends":[{"id":"openai_codex"}],"quota":[]}"""))
+        runCurrent()
+        assertEquals(AntigravitySlice(), seen.last().antigravity)
+        bridge.state.emit(
+            json(
+                """{"questions":[],"backends":[{"id":"antigravity","name":"Antigravity"}],
+                   "quota":[{"provider":"anthropic_claude","windows":[{"id":"five_hour","remaining":40}]},
+                            {"provider":"antigravity","windows":[
+                              {"label":"Gemini · Week","remaining":80,"resets_at":"2026-11-02T00:00:00Z","group":"Gemini","models":["Gemini Flash","Gemini Pro"]},
+                              {"label":"Gemini · 5h","remaining":35,"resets_at":"2026-10-30T18:00:00Z","group":"Gemini","models":["Gemini Flash","Gemini Pro"]},
+                              {"label":"Argon · Week","remaining":100,"resets_at":null,"group":"Argon","models":["Argon"]}]}]}"""
+            )
+        )
+        runCurrent()
+        val shown = seen.last().antigravity!!
+        assertTrue(shown.configured)
+        assertEquals(listOf("Gemini" to 35, "Argon" to 100), shown.groups.map { it.name to it.remaining })
+        assertEquals(listOf("Gemini Flash", "Gemini Pro"), shown.groups.first().models)
+        assertEquals(
+            listOf(AntigravityWindow("Week", 80, "2026-11-02T00:00:00Z"), AntigravityWindow("5h", 35, "2026-10-30T18:00:00Z")),
+            shown.groups.first().windows,
+        )
+        assertEquals("", shown.groups.last().windows.single().resets_at)
+        assertEquals(emptyList(), shown.groups.last().models)
+    }
+
+    @Test
+    fun boardsKeepOneOrderForBothPagesAndEveryDevice() = runTest {
+        bridge.answer("GET settings", """{"title_model":"openai","worktree_retention_days":14,"board_order":["b2"],"title_models":[]}""")
+        bridge.answer("POST boards/order", """{"ok":true,"board_order":["b3","b1","b2"]}""")
+        val core = core()
+        val seen = watch(core, Slice.SLICE_SETTINGS)
+        assertEquals(listOf("b2"), seen.last().settings!!.board_order)
+        core.dispatch(Command(order_boards = OrderBoards(listOf("b3", "b1"))))
+        assertEquals("""{"ids":["b3","b1"]}""", bridge.sent("POST boards/order").single().toString())
+        runCurrent()
+        assertEquals(listOf("b3", "b1", "b2"), seen.last().settings!!.board_order)
+        assertEquals(Failure.Kind.KIND_INVALID, core.fails(Command(order_boards = OrderBoards(emptyList()))).kind)
+        // dragged ones first, the rest (new boards) after them in Dieter's order
+        assertEquals(listOf("b2", "b1", "b4", "b5"), AddonRules.inBoardOrder(listOf("b1", "b4", "b2", "b5"), listOf("b2", "b1")) { it })
     }
 
     @Test

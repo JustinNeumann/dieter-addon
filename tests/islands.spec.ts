@@ -1,7 +1,7 @@
 // Phase 2 step 3: mail bodies and Markdown files as HTML islands (real DOM in the Compose layout),
 // diagrams through the offline renderer, and Compose's menus, sheets and modals kept above them.
 import { test, expect } from "@playwright/test";
-import { open, aria, tap, hit } from "./helpers";
+import { open, aria, tap, hit, settle } from "./helpers";
 
 test("mail body is real HTML with the Markdown profile", async ({ page }) => {
   await open(page, "tab mail; mail Dependency audit");
@@ -70,4 +70,16 @@ test("Markdown files are islands, plain text stays Compose's editor", async ({ p
   await open(page, "file notes.txt");
   await expect(page.locator(".dieter-island")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "File contents" })).toHaveCount(1);
+});
+
+test("a relative link in an agent's mail opens the file in the sender's checkout; one leaving it stays text", async ({ page }) => {
+  await open(page, "tab mail; mail Dependency audit");
+  const island = page.locator(".dieter-island");
+  const links = island.locator("p").last().locator("a");
+  await expect(links).toHaveText(["the checklist", "the changelog"]);
+  await expect(island.locator("p").last()).toContainText("the shared secrets are outside the checkout");
+  await links.last().click();
+  await settle(page, 800);
+  expect(await aria(page)).toContain("CHANGELOG.md");
+  await expect(page.locator(".dieter-island h1")).toHaveText("Changelog");
 });

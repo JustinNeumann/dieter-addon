@@ -1,9 +1,12 @@
 package com.getdieter.addon.core
 
+import com.getdieter.addon.v1.AntigravityGroup
+import com.getdieter.addon.v1.AntigravityWindow
 import com.getdieter.addon.v1.Answer
 import com.getdieter.addon.v1.DreamfallSettings
 import com.getdieter.addon.v1.InstructionsKind
 import com.getdieter.addon.v1.Question
+import kotlinx.serialization.json.JsonObject
 import com.getdieter.addon.v1.QuestionItem
 
 /**
@@ -22,6 +25,31 @@ object AddonRules {
     private val TIMEZONE = Regex("""^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$|^UTC$""")
 
     fun isTimezone(zone: String): Boolean = TIMEZONE.matches(zone)
+
+    /**
+     * Antigravity's groups from the bridge's quota windows (`{group, label: "Gemini · Week", remaining, resets_at,
+     * models}`), in agy's order; a group's remaining is its tightest window's.
+     */
+    fun antigravityGroups(windows: List<JsonObject>): List<AntigravityGroup> =
+        windows.groupBy { it.str("group") }.filterKeys { it.isNotEmpty() }.map { (name, mine) ->
+            val shown =
+                mine.map {
+                    AntigravityWindow(
+                        name = it.str("label").removePrefix("$name · "),
+                        remaining = (it.int("remaining") ?: 0).coerceIn(0, 100),
+                        resets_at = it.str("resets_at"),
+                    )
+                }
+            // a group that names no families lists only itself
+            val models = mine.first().strings("models").takeUnless { it == listOf(name) }.orEmpty()
+            AntigravityGroup(name, models, shown.minOf { it.remaining }, shown)
+        }
+
+    /** [items] (boards, by [id]) in [order]; the ones not in it follow in their own order, as the bridge sorts them. */
+    fun <T> inBoardOrder(items: List<T>, order: List<String>, id: (T) -> String): List<T> {
+        val rank = order.withIndex().associate { it.value to it.index }
+        return items.withIndex().sortedWith(compareBy({ rank[id(it.value)] ?: rank.size }, { it.index })).map { it.value }
+    }
 
     /** The blocks the instructions for every agent must keep exactly once (Dieter refuses the text otherwise). */
     val INSTRUCTION_BLOCKS = listOf("{{project.instructions_block}}", "{{labels.instructions_block}}")

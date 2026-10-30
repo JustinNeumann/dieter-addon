@@ -24,6 +24,8 @@ class DemoMailFiles {
         val body: String,
         var read: Boolean = false,
         var flagged: Boolean = false,
+        /** The sender's checkout, which relative links in [body] resolve against. */
+        val checkout: String = "",
     )
 
     private val messages =
@@ -56,7 +58,11 @@ class DemoMailFiles {
                 - Run the e2e suite before the release
                 - Bump the add-on revision
                 - Mention the advisory in the changelog
+
+                The release steps are in [the checklist](notes.txt) and [the changelog](docs/CHANGELOG.md);
+                [the shared secrets](../secrets.txt) are outside the checkout.
                 """.trimIndent(),
+                checkout = "dieter-addon-daemon-desktop",
             ),
             Message(
                 "m-build", "Nightly build: bundle size and timings", "Nightly build",
@@ -131,7 +137,7 @@ class DemoMailFiles {
                 sender_style = MailSenderStyle.MAIL_SENDER_STYLE_CARD, harness = "claude-code", initials = m.initials,
                 sent_label = "Today ${m.time}", read = m.read, flagged = m.flagged, folder = MailFolder.MAIL_FOLDER_INBOX,
                 body = m.body, can_open_conversation = false, open_conversation_unavailable = "Demo message",
-                machine_name = "workstation",
+                machine_name = "workstation", checkout_id = m.checkout,
             )
         }
         return MailSlice(

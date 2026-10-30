@@ -43,6 +43,7 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
             remember.project_id.ifEmpty { null }?.let { project = it }
             publish(Slice.SLICE_CREATION, "")
         }
+        command.load_tool_output?.let { return Result(tool_output = data.toolOutput(it)) }
         command.files?.let { files ->
             extras.filesCommand(files)
             publish(Slice.SLICE_FILES, files.scope)

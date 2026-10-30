@@ -34,7 +34,11 @@ internal fun addonExtensions(): MobileExtensions =
                         ExtensionSection("gateway") { GatewaySection(it) },
                         ExtensionSection("ssh") { SshKeySection(it) },
                     ),
-                ToolPage.USAGE to listOf(ExtensionSection("claude") { ClaudeAccountSection(it) }),
+                ToolPage.USAGE to
+                    listOf(
+                        ExtensionSection("antigravity") { AntigravitySection(it) },
+                        ExtensionSection("claude") { ClaudeAccountSection(it) },
+                    ),
                 ToolPage.SETTINGS to
                     listOf(
                         ExtensionSection("addon-settings") { AddonSettingsSection(it) },
@@ -57,4 +61,5 @@ internal fun addonExtensions(): MobileExtensions =
             ),
         boardRenderer = dreamfallBoards(),
         conversationNamer = { rememberConversationNamer(it) },
+        boardOrder = { rememberBoardOrder(it) },
     )
