@@ -63,16 +63,15 @@ Endpoints:
                               daemon under its placeholder title: Ollama names it in the background (as POST /api/card)
   GET|POST /api/prompts       Agent instructions: answered by the operator (OPERATOR_PATHS), forwarded as they are
   POST /api/page-load         the page's start on a device (time, files downloaded): one line in the log, by the operator
-  GET  /api/claude/login      add-on only: state of a running `claude auth login` {running, url, done, auth}
-  POST /api/claude/login      start the sign-in; returns the link the user opens on claude.com
-  POST /api/claude/login/code {code}  hand the code from claude.com to the CLI; writes /data/.claude/.credentials.json
-  POST /api/claude/login/cancel, POST /api/claude/logout
+  GET|POST /api/claude/login, POST /api/claude/login/code|cancel, POST /api/claude/logout   add-on only: its own Claude
+                              Code sign-in, answered by the operator (ClaudeLogin.kt); the bridge probes the quota again
+  GET  /api/gateway, POST /api/gateway/enroll|enroll/cancel|unenroll   add-on only: the daemon's gateway enrollment,
+                              answered by the operator (Enrollment.kt)
+  GET  /api/ssh, POST /api/ssh/test   add-on only: the add-on's SSH key and a connection test, by the operator (Ssh.kt)
   GET  /api/questions         questions the agents wait on {questions: [{id, session, input, created_at}]} (also in /api/state)
   POST /api/questions         {id, session, input}  the harness worker registers a question (DIETER_QUESTIONS_URL)
   GET  /api/questions/ID      {done: false} | {done: true, output}  the worker polls for the answer
   POST /api/questions/ID/answer  {action: answered|partially-answered|declined, answers: {qid: {optionIds, freeform?}}}
-  GET  /api/ssh               add-on only: the add-on's SSH public key {public_key, fingerprint}
-  POST /api/ssh/test          {target: "user@host"}  BatchMode ssh with that key; {ok, output|error}
   GET  /api/mail/ID           one message of Dieter Mail {header, body} (the headers are in /api/state: mail)
   POST /api/mail/mark         {ids, read?, flagged?, folder?: inbox|archive|trash}  dieter mail mark
   POST /api/mail/delete       {ids} | {empty_trash: true}  delete for good
@@ -83,7 +82,6 @@ import concurrent.futures
 import hashlib
 import ipaddress
 import mimetypes
-import pty
 import json
 import os
 import queue
@@ -533,7 +531,13 @@ def order_boards(boards, order=None):
 OPERATOR_URL = os.environ.get("DIETER_OPERATOR_URL", "http://127.0.0.1:8096/")
 OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",)),
                   ("GET", ("settings",)), ("POST", ("settings",)), ("POST", ("boards", "order")),
-                  ("POST", ("project",)), ("POST", ("page-load",))}
+                  ("POST", ("project",)), ("POST", ("page-load",)),
+                  ("GET", ("ssh",)), ("POST", ("ssh", "test")),
+                  ("GET", ("claude", "login")), ("POST", ("claude", "login")), ("POST", ("claude", "login", "code")),
+                  ("POST", ("claude", "login", "cancel")), ("POST", ("claude", "logout")),
+                  ("GET", ("gateway",)), ("POST", ("gateway", "enroll")), ("POST", ("gateway", "enroll", "cancel")),
+                  ("POST", ("gateway", "unenroll"))}
+ENROLLED = {"started": None}   # the enrollment whose success the bridge followed up already
 
 
 def operator_request(method, path, body=None, headers=(), timeout=660):
@@ -553,8 +557,21 @@ def operator_request(method, path, body=None, headers=(), timeout=660):
 
 def after_operator(path, before, answer):
     """What the bridge still does after the operator changed something it reads: the title model's entity is looked
-    up again, a new retention sweeps now instead of at the next hour, a new board order reaches the pages at once."""
-    if path == ("settings",):
+    up again, a new retention sweeps now instead of at the next hour, a new board order reaches the pages at once.
+    After a Claude sign-in or sign-out (the operator restarts the daemon with it) the quota is probed again; after an
+    enrollment (seen in the status the page polls) or unenrollment the pages get the daemon's new state."""
+    if path in (("claude", "login", "code"), ("claude", "logout")) and answer.get("ok"):
+        QUOTA_GEN[0] += 1
+        QUOTA_CACHE.clear()
+        threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.poll_slow()), daemon=True).start()
+    elif path == ("gateway",):
+        enroll = answer.get("enroll") or {}
+        if (enroll.get("done") or {}).get("ok") and enroll.get("started") != ENROLLED["started"]:
+            ENROLLED["started"] = enroll.get("started")
+            threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.touch()), daemon=True).start()
+    elif path == ("gateway", "unenroll"):
+        threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.touch()), daemon=True).start()
+    elif path == ("settings",):
         TITLER["at"] = 0
         if settings()["worktree_retention_days"] != before.get("worktree_retention_days"):
             HOUSEKEEPING_WAKE.set()
@@ -668,14 +685,6 @@ def daemon_wait_healthy(timeout=180):
     return False
 
 
-def restart_daemon():
-    """The operator stops the daemon and starts it again with fresh credentials (it rewrites the env file first)."""
-    try:
-        operator_request("POST", "/api/daemon/restart", {}, timeout=20)
-    except (urllib.error.URLError, OSError) as e:
-        log("daemon: restart: operator unreachable:", e)
-
-
 def housekeeping_loop():
     """Remove the work folders of worktree cards that were Done (or archived; on a Dreamfall Implementation board: started)
     and untouched for the retention set in Settings (14 days; 0 keeps everything), once an hour and right after the setting changes. The daemon keeps every
@@ -759,232 +768,6 @@ def claude_refresh_if_due(margin_s=300):
     os.replace(tmp, CLAUDE_CRED_FILE)
     log("claude: access token renewed")
     return True
-
-
-class ClaudeLogin:
-    """Drives `claude auth login` in a pty: the CLI prints the sign-in link and waits for the code the
-    user gets after signing in on claude.com. One attempt at a time."""
-    lock = threading.Lock()
-    proc = None
-    fd = None
-    url = None
-    output = ""
-    done = None        # {"ok": bool, "error": str|None} once the CLI exited
-    started = 0
-
-    @classmethod
-    def start(cls):
-        with cls.lock:
-            cls.cancel()
-            cls.url, cls.output, cls.done, cls.started = None, "", None, time.time()
-            env = {**os.environ, "HOME": "/data", "TERM": "dumb", "BROWSER": "/bin/false", "NO_COLOR": "1"}
-            env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
-            pid, fd = pty.fork()
-            if pid == 0:  # child
-                try:
-                    os.chdir("/data")
-                    os.execvpe("claude", ["claude", "auth", "login", "--claudeai"], env)
-                finally:
-                    os._exit(127)
-            cls.proc, cls.fd = pid, fd
-            threading.Thread(target=cls._reader, args=(pid, fd), daemon=True).start()
-        end = time.time() + 20
-        while time.time() < end and not cls.url and cls.done is None:
-            time.sleep(0.2)
-        return cls.status()
-
-    @classmethod
-    def _reader(cls, pid, fd):
-        while True:
-            try:
-                chunk = os.read(fd, 4096)
-            except OSError:
-                chunk = b""
-            if not chunk:
-                break
-            cls.output += chunk.decode(errors="replace")
-            if not cls.url:
-                m = re.search(r"https://claude\.com/[^\s\x1b\x07]+", cls.output)
-                if m:
-                    cls.url = m.group(0)
-        try:
-            _, st = os.waitpid(pid, 0)
-            rc = os.waitstatus_to_exitcode(st)
-        except ChildProcessError:
-            rc = -1
-        clean = re.sub(r"\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]", "", cls.output)
-        tail = " ".join(l.strip() for l in clean.splitlines()[-4:] if l.strip())
-        ok = rc == 0 and claude_credentials() is not None
-        err = None if ok else re.sub(r"\bcode=\S+", "code=…", tail)[-200:] or f"claude auth login exited with {rc}"
-        cls.done = {"ok": ok, "error": err}
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        with cls.lock:
-            if cls.proc == pid:
-                cls.proc, cls.fd = None, None
-        if ok:
-            log("claude: signed in via claude auth login")
-            on_claude_login_changed()
-
-    @classmethod
-    def code(cls, code):
-        if cls.fd is None or cls.done is not None:
-            return {"ok": False, "error": "no sign-in in progress; start again"}
-        code = code.strip()
-        if not code:
-            return {"ok": False, "error": "code required"}
-        try:
-            os.write(cls.fd, (code + "\n").encode())
-        except OSError as e:
-            return {"ok": False, "error": f"could not hand the code to claude: {e}"}
-        end = time.time() + 45
-        while time.time() < end and cls.done is None:
-            time.sleep(0.3)
-        if cls.done is None:
-            return {"ok": False, "error": "claude did not finish the sign-in in time"}
-        return cls.done
-
-    @classmethod
-    def cancel(cls):
-        if cls.proc is not None:
-            try:
-                os.kill(cls.proc, 9)
-            except OSError:
-                pass
-
-    @classmethod
-    def status(cls):
-        return {"running": cls.proc is not None and cls.done is None, "url": cls.url, "done": cls.done,
-                "auth": claude_auth_status()}
-
-
-class Enroll:
-    """Drives `dieter daemon enroll` (blocks until the user authorizes the daemon with GitHub at the
-    gateway): prints the verification URL and user code, then "Enrolled NAME as ID.". One at a time;
-    on success the daemon is restarted so it connects to the gateway."""
-    lock = threading.Lock()
-    proc = None
-    url = None
-    code = None
-    output = ""
-    done = None
-    started = 0
-    gateway = ""
-
-    @classmethod
-    def start(cls, gateway, name):
-        gateway = (gateway or "").strip().rstrip("/")
-        name = re.sub(r"[^A-Za-z0-9 ._-]", "", (name or "").strip())[:40] or "home-assistant"
-        if not re.match(r"^https://[A-Za-z0-9.-]+(:\d{2,5})?$", gateway):
-            raise CliError("the gateway must be an https origin such as https://gateway.example.net:4443")
-        with cls.lock:
-            if cls.proc is not None and cls.done is None:
-                return cls.status()
-            cls.url, cls.code, cls.output, cls.done, cls.started, cls.gateway = None, None, "", None, time.time(), gateway
-            cls.proc = subprocess.Popen([DIETER, "--store", DIETER_HOME, "daemon", "enroll", "--gateway", gateway, "--name", name, "--no-open"],
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env={**os.environ, "HOME": "/data"})
-            threading.Thread(target=cls._reader, args=(cls.proc,), daemon=True).start()
-        end = time.time() + 25
-        while time.time() < end and not cls.url and cls.done is None:
-            time.sleep(0.2)
-        return cls.status()
-
-    @classmethod
-    def _reader(cls, proc):
-        for line in proc.stdout:
-            cls.output += line
-            if not cls.url:
-                m = re.search(r"(https://\S+)", cls.output.split("Authorize this daemon with GitHub:")[-1]) if "Authorize this daemon" in cls.output else None
-                if m:
-                    cls.url = m.group(1)
-            if not cls.code:
-                m = re.search(r"Code:\s*([A-Za-z0-9-]{4,})", cls.output)
-                if m:
-                    cls.code = m.group(1)
-        rc = proc.wait()
-        ok = rc == 0 and "Enrolled " in cls.output
-        m = re.search(r"Enrolled (.+?) as (\S+?)\.", cls.output)
-        tail = " ".join(l.strip() for l in cls.output.splitlines()[-3:] if l.strip())[-300:]
-        cls.done = {"ok": ok, "error": None if ok else (tail or f"enroll exited with {rc}"), "daemon_name": m.group(1) if m else "", "daemon_id": m.group(2) if m else ""}
-        with cls.lock:
-            if cls.proc is proc:
-                cls.proc = None
-        if ok:
-            log("gateway: enrolled as", cls.done["daemon_id"], "at", cls.gateway)
-            restart_daemon()
-            threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.touch()), daemon=True).start()
-
-    @classmethod
-    def unenroll(cls):
-        """`dieter daemon unenroll`: drop the enrollment key and credential (the daemon was removed from the
-        account's roster, so it cannot be approved again); the next enrollment makes a new key. Projects stay."""
-        with cls.lock:
-            if cls.proc is not None and cls.done is None:
-                raise CliError("an enrollment is in progress")
-        p = subprocess.run([DIETER, "--store", DIETER_HOME, "daemon", "unenroll"], capture_output=True, text=True, timeout=60,
-                           env={**os.environ, "HOME": "/data"})
-        if p.returncode != 0:
-            raise CliError((p.stderr or p.stdout).strip()[:300] or f"unenroll exited with {p.returncode}")
-        cls.url, cls.code, cls.output, cls.done = None, None, "", None
-        log("gateway: unenrolled")
-        restart_daemon()
-        threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.touch()), daemon=True).start()
-        return {"ok": True}
-
-    @classmethod
-    def cancel(cls):
-        if cls.proc is not None:
-            try:
-                cls.proc.kill()
-            except OSError:
-                pass
-
-    @classmethod
-    def status(cls):
-        return {"running": cls.proc is not None and cls.done is None, "url": cls.url, "code": cls.code, "done": cls.done, "gateway": cls.gateway}
-
-
-def gateway_status():
-    """Enrollment of the add-on's daemon: from `dieter daemon status --format json`, plus the options."""
-    out = {"option_url": (OPTS.get("gateway_url") or "").strip(), "host_ip": (OPTS.get("gateway_host_ip") or "").strip(),
-           "name": (OPTS.get("machine_name") or "home-assistant").strip() or "home-assistant", "enrolled": False}
-    try:
-        st = run(["--store", DIETER_HOME, "daemon", "status", "--format", "json"], timeout=20) or {}
-        if isinstance(st, dict):
-            out.update({"enrolled": bool(st.get("enrolled")), "daemon_id": st.get("daemonId") or "", "daemon_name": st.get("daemonName") or "",
-                        "url": st.get("gatewayUrl") or "", "state": st.get("gatewayState") or "", "last_error": st.get("gatewayLastError") or "",
-                        "connected_at": st.get("gatewayConnectedAt")})
-    except CliError as e:
-        out["error"] = str(e)
-    if out["enrolled"]:
-        try:
-            out["trust"] = _enum((run(["--store", DIETER_HOME, "device", "status", "--format", "json"], timeout=20) or {}).get("state"), "TRUST_STATE_")
-        except CliError:
-            pass
-    out["enroll"] = Enroll.status()
-    return out
-
-
-def on_claude_login_changed():
-    """After a sign-in or sign-out: the operator restarts the daemon with a rewritten env file (the login takes
-    precedence over the option token), so the harness picks it up; the quota is probed again."""
-    QUOTA_GEN[0] += 1
-    QUOTA_CACHE.clear()
-    restart_daemon()
-    threading.Thread(target=lambda: (time.sleep(3), daemon_wait_healthy(), STATE.poll_slow()), daemon=True).start()
-
-
-def claude_logout():
-    ClaudeLogin.cancel()
-    try:
-        os.remove(CLAUDE_CRED_FILE)
-    except OSError:
-        pass
-    log("claude: signed out")
-    on_claude_login_changed()
-    return claude_auth_status()
 
 
 def cached_quota(provider, probe):
@@ -1235,59 +1018,6 @@ def pending_questions():
             if now - q["created"] > QUESTION_TTL_S:
                 del QUESTIONS[qid]
         return [{k: q[k] for k in ("id", "session", "input", "created_at")} for q in QUESTIONS.values() if q["output"] is None]
-
-
-SSH_DIR = "/data/.ssh"                                   # HOME=/data: ssh and git find it without any env
-SSH_KEY = os.path.join(SSH_DIR, "id_ed25519")
-SSH_TARGET_RE = re.compile(r"^(?:[A-Za-z0-9._-]{1,64}@)?[A-Za-z0-9][A-Za-z0-9.:-]{0,253}(?::\d{1,5})?$")
-
-
-def setup_ssh():
-    """One ed25519 key for this add-on in /data/.ssh (survives updates), generated on first start.
-    Users authorize its public key on the machines Dieter should reach (Git remotes, other daemons);
-    first connections record the host key (accept-new), later ones verify it."""
-    os.makedirs(SSH_DIR, mode=0o700, exist_ok=True)
-    os.chmod(SSH_DIR, 0o700)
-    if not os.path.exists(SSH_KEY):
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "dieter@home-assistant", "-f", SSH_KEY],
-                       check=True, capture_output=True, text=True, timeout=60)
-        log("ssh: generated", SSH_KEY)
-    cfg = os.path.join(SSH_DIR, "config")
-    want = ("# written by the Dieter add-on\n"
-            "Host *\n"
-            f"  IdentityFile {SSH_KEY}\n"
-            "  IdentitiesOnly yes\n"
-            "  StrictHostKeyChecking accept-new\n"
-            f"  UserKnownHostsFile {SSH_DIR}/known_hosts\n"
-            "  ServerAliveInterval 30\n")
-    if not os.path.exists(cfg) or open(cfg).read() != want:
-        with open(os.open(cfg, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
-            f.write(want)
-
-
-def ssh_public_key():
-    try:
-        key = open(SSH_KEY + ".pub").read().strip()
-    except FileNotFoundError:
-        return {"public_key": None, "fingerprint": None}
-    fp = subprocess.run(["ssh-keygen", "-l", "-f", SSH_KEY + ".pub"], capture_output=True, text=True, timeout=10)
-    return {"public_key": key, "fingerprint": (fp.stdout.split() + [None, None])[1] if fp.returncode == 0 else None}
-
-
-def ssh_test(target):
-    """`ssh -o BatchMode=yes target uname -n` with the add-on's key: tells whether the key is authorized."""
-    target = (target or "").strip()
-    if not SSH_TARGET_RE.match(target):
-        return {"ok": False, "error": "target must be user@host or host (optionally :port)"}
-    host, _, port = target.rpartition(":") if re.search(r":\d{1,5}$", target) else (target, "", "")
-    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", *(["-p", port] if port else []), host, "uname", "-n"]
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env={**os.environ, "HOME": "/data"})
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "timeout after 30 s"}
-    if p.returncode == 0:
-        return {"ok": True, "output": p.stdout.strip()[:200]}
-    return {"ok": False, "error": (p.stderr.strip().splitlines() or ["ssh failed"])[-1][:300]}
 
 
 PUBLISH_MODES = ("manual", "pull_request", "push_base")   # Dieter's remote publish modes of a board or card
@@ -2505,9 +2235,10 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, OSError) as e:
             log("operator:", method, u.path, e)
             return self.send_json({"error": "the add-on's operator is not running yet; try again in a moment"}, 503)
-        if method == "POST" and status == 200:
+        path = tuple(p for p in u.path.split("/") if p)[1:]
+        if status == 200 and (method == "POST" or path == ("gateway",)):
             try:
-                after_operator(tuple(p for p in u.path.split("/") if p)[1:], before, json.loads(raw))
+                after_operator(path, before, json.loads(raw))
             except Exception as e:
                 log("operator: after", u.path, e)
         self.send_response(status)
@@ -2875,8 +2606,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not MAIL_ID.match(parts[2]):
                     return self.send_json({"error": "bad mail id"}, 400)
                 return self.send_json(Mail.show(parts[2]))
-            if parts[1:] == ["gateway"] and ADDON:
-                return self.send_json(gateway_status())
             if parts[1:] == ["schedules", "preview"]:
                 return self.send_json(schedule_preview(q.get("cron", [""])[0], q.get("tz", ["UTC"])[0]))
             if len(parts) == 3 and parts[1] == "schedules":
@@ -2898,10 +2627,6 @@ class Handler(BaseHTTPRequestHandler):
             if parts[1:] == ["events"]:
                 fields = [f for f in ",".join(q.get("fields", [])).split(",") if re.match(r"^[a-z_]{1,32}$", f)]
                 return self.stream_events(fields or None)
-            if parts[1:] == ["claude", "login"]:
-                return self.send_json(ClaudeLogin.status())
-            if parts[1:] == ["ssh"] and ADDON:
-                return self.send_json(ssh_public_key())
             if parts[1:] == ["questions"]:
                 return self.send_json({"questions": pending_questions()})
             if len(parts) == 3 and parts[1] == "questions":
@@ -2970,13 +2695,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(Mail.mark(body))
             if parts[1:] == ["mail", "delete"]:
                 return self.send_json(Mail.delete(body))
-            if parts[1:] == ["gateway", "enroll"] and ADDON:
-                return self.send_json(Enroll.start(body.get("url") or OPTS.get("gateway_url"), body.get("name") or OPTS.get("machine_name")))
-            if parts[1:] == ["gateway", "unenroll"] and ADDON:
-                return self.send_json(Enroll.unenroll())
-            if parts[1:] == ["gateway", "enroll", "cancel"] and ADDON:
-                Enroll.cancel()
-                return self.send_json({"ok": True})
             if parts[1:] == ["devices", "approve"]:
                 return self.send_json(device_approve(body.get("code")))
             if len(parts) == 4 and parts[1] == "devices" and parts[3] == "revoke":
@@ -3001,20 +2719,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(question_register(body))
             if len(parts) == 4 and parts[1] == "questions" and parts[3] == "answer":
                 return self.send_json(question_answer(parts[2], body))
-            if parts[1:] == ["ssh", "test"] and ADDON:
-                return self.send_json(ssh_test(body.get("target") or ""))
-            if parts[1:2] == ["claude"] and ADDON:
-                action = "/".join(parts[2:])
-                if action == "login":
-                    return self.send_json(ClaudeLogin.start())
-                if action == "login/code":
-                    return self.send_json({**ClaudeLogin.code(body.get("code") or ""), "auth": claude_auth_status()})
-                if action == "login/cancel":
-                    ClaudeLogin.cancel()
-                    return self.send_json({"ok": True})
-                if action == "logout":
-                    return self.send_json({"ok": True, "auth": claude_logout()})
-                return self.send_json({"error": "not found"}, 404)
             if len(parts) == 4 and parts[1] in ("card", "chat") and parts[2].startswith("c_"):
                 kind, cid, action = parts[1], parts[2], parts[3]
                 if action == "send":
@@ -3310,11 +3014,8 @@ def main():
     if ADDON:
         log(f"dieter bridge (add-on) on {BIND}:{PORT}, store {DIETER_HOME}")
         os.makedirs(DIETER_HOME, mode=0o700, exist_ok=True)
-        try:
-            setup_ssh()
-        except Exception as e:
-            log("ssh: setup failed:", e)
-        # the operator writes what the options configure, stages the harness runtime and starts the daemon
+        # the operator makes the SSH key, writes what the options configure, stages the harness runtime and starts
+        # the daemon
         threading.Thread(target=housekeeping_loop, daemon=True).start()
 
         def after_daemon():

@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.16 (2026-10-30)
+
+- **The bridge into Kotlin, step 5 of 10:** the Claude sign-in (Tools → Usage), the gateway enrollment and the
+  add-on's SSH key with its connection test (Tools → Machines) belong to the operator now. The page, its buttons and
+  the files stay the same (`/data/.claude/.credentials.json`, `/data/.ssh`); the sign-in still runs
+  `claude auth login` in a terminal, and a sign-in, sign-out or enrollment still restarts the daemon.
+
 ## 0.6.431.15 (2026-10-30)
 
 - **Tools → Schedules shows every project's schedules**, each under its project's name. Before, it showed only the
@@ -11,8 +18,7 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
   chat you started; cards a schedule created don't count) instead of the first project in the list.
 - A Dreamfall board takes the whole width on a tablet or PC again, like on the old page, whether it is opened from
   Projects or from Tools → Dreamfall. Before, it was squeezed into the 400 px list column.
-- **Usage → Antigravity:** each quota group has an *Include in summary* switch.
- A group that is switched off stays on
+- **Usage → Antigravity:** each quota group has an *Include in summary* switch. A group that is switched off stays on
   the page but no longer pulls down the Antigravity bar in the summary.
 
 ## 0.6.431.14 (2026-10-30)
