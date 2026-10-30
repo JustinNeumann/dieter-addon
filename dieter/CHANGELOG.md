@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.22 (2026-10-30)
+
+- A retired board whose cards are all archived no longer stays in Projects with "0 cards". The daemon already
+  allowed retiring such a board (fork release antigravity.7), but the page still counted the archived cards as
+  keeping it, as upstream does, and showed it as if it could not be retired. The page now decides as the daemon
+  does: an unarchived card, on any machine, still keeps a board visible.
+
 ## 0.6.431.21 (2026-10-30)
 
 - **The bridge into Kotlin, step 9 of 10:** the board's live state is the operator's now: the polls and the
