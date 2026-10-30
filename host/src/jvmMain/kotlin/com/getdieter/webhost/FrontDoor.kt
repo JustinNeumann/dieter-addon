@@ -315,7 +315,7 @@ internal class FrontDoor(
         fun homeAssistantRoute(method: String, parts: List<String>): Boolean = parts.none { it == "." || it == ".." || '%' in it } && when (method) {
             "GET" -> parts == listOf("api", "ha") || parts == listOf("api", "state")
             "POST" -> parts == listOf("api", "card") || parts == listOf("api", "focus") ||
-                parts.size == 4 && parts[0] == "api" && parts[3] == "send" ||
+                parts.size == 4 && parts[0] == "api" && (parts[1] == "card" || parts[1] == "chat") && parts[3] == "send" ||
                 parts.size == 4 && parts[0] == "api" && parts[1] == "card" && parts[3] == "move"
             else -> false
         }

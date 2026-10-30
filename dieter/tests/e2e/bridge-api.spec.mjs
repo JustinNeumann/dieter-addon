@@ -152,6 +152,41 @@ test("the operator (127.0.0.1:8096): agents register and poll questions, nothing
   expect((await request.get("api/questions")).status()).toBe(200);                   // the page, through the web host
 });
 
+test("the Supervisor token reaches the web host only: no agent finds it, and its relay passes only the operator's calls", async () => {
+  // tests/run.sh sets SUPERVISOR_TOKEN as the Supervisor does; the option agents_home_assistant is off. (docker exec
+  // passes the container's environment on, which the daemon never does for agents: the checks run without it.)
+  const sh = (cmd, user) => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "env", "-u", "SUPERVISOR_TOKEN", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
+  const token = "e2e-supervisor-token-2718";
+  expect(sh(`grep -l ${token} /proc/[0-9]*/environ 2>/dev/null | xargs -r -n1 dirname | xargs -r -I{} cat {}/comm 2>/dev/null; true`, "dieter")).toBe("");
+  expect(sh(`grep -l ${token} /proc/[0-9]*/environ 2>/dev/null | wc -l`, "root")).not.toBe("0");   // the check would see it: root sees the web host's
+  expect(sh(`grep -rl ${token} /data /run /tmp /etc 2>/dev/null; true`, "dieter")).toBe("");
+  expect(sh("cat /run/s6/container_environment/SUPERVISOR_TOKEN >/dev/null 2>&1 && echo read || echo denied", "dieter")).toBe("denied");
+  expect(sh("cat /data/.claude/CLAUDE.md", "dieter")).toContain("The agents have no access to Home Assistant here");
+  const relay = (path, body) => sh(`curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST -H 'Content-Type: application/json' -d '${body}' http://127.0.0.1:8097/core/api/${path}`, "dieter");
+  expect(relay("services/rest_command/dieter_send_message", '{"card":"c_1","message":"hi"}')).toBe("403");
+  expect(relay("services/homeassistant/restart", "{}")).toBe("403");
+  expect(relay("template", '{"template":"{{ states | list }}"}')).toBe("403");
+  expect(relay("events/dieter_question", '{"card_id":"c_1"}')).toBe("502");               // passed on; no Supervisor here
+});
+
+test("questions: the poll token is the asking worker's; an id still waiting cannot be registered again", async ({ request }) => {
+  const sh = (cmd) => execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
+  const id = `toolu_e2e_${stamp}`.replace(/[^A-Za-z0-9_]/g, "_");
+  const body = (q) => JSON.stringify({ id, session: "c_e2e_tokens", input: { questions: [{ id: "q1", question: q, options: [{ id: "a" }] }] } });
+  const register = (q) => sh(`curl -s -w ' %{http_code}' -X POST -H 'Content-Type: application/json' -d '${body(q)}' http://127.0.0.1:8096/api/questions`);
+  const first = register("Which?");
+  expect(first.endsWith(" 200")).toBe(true);
+  const token = JSON.parse(first.slice(0, -4)).token;
+  expect(token.length).toBeGreaterThan(20);
+  expect(register("Your password?").endsWith(" 409")).toBe(true);
+  const poll = (header) => sh(`curl -s -o /dev/null -w '%{http_code}' ${header} http://127.0.0.1:8096/api/questions/${id}`);
+  expect(poll("")).toBe("404");
+  expect(poll("-H 'X-Question-Token: guess'")).toBe("404");
+  expect(poll(`-H 'X-Question-Token: ${token}'`)).toBe("200");
+  expect((await request.post(`api/questions/${id}/answer`, { data: { action: "declined" } })).status()).toBe(200);
+  expect(sh(`curl -s -H 'X-Question-Token: ${token}' http://127.0.0.1:8096/api/questions/${id}`)).toContain('"action":"declined"');
+});
+
 test("the API key reaches the web host only: options.json is root's, the operator reads a copy without it", async () => {
   const sh = (cmd, user) => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
   expect(sh("stat -c '%U %a' /data/options.json", "root")).toBe("root 600");
@@ -197,8 +232,8 @@ test("Settings (api/settings, api/boards/order): title models, work folder reten
   const before = await get();
   expect(["openai", "ollama"]).toContain(before.title_model);
   expect(before.title_models.map((m) => m.id)).toEqual(["openai", "ollama"]);
-  expect(before.title_models[1].available).toBe(false);                  // no Home Assistant behind the e2e image
-  expect(before.title_models[1].detail).toBe("Works in the Home Assistant add-on only");
+  expect(before.title_models[1].available).toBe(false);                  // a Supervisor token (run.sh), but no Home Assistant behind it
+  expect(before.title_models[1].detail).toBe("No AI Task entity of the Ollama integration found; OpenAI titles instead");
   expect(before.titles_daemon_id).toBe("");
   expect(Number.isInteger(before.worktree_retention_days)).toBe(true);
   for (const bad of [{ worktree_retention_days: -1 }, { worktree_retention_days: 1.5 }, { worktree_retention_days: "x" }, { title_model: "gpt" }]) {

@@ -39,6 +39,9 @@ class Request(
 /** Nothing at this path (an unknown question); answered with 404 and the message. */
 class NotFound(message: String) : Exception(message)
 
+/** The request clashes with what exists (a question id still in use); answered with 409 and the message. */
+class Conflict(message: String) : Exception(message)
+
 /** Server-Sent Events to one client: each [send] is flushed at once; it throws once the client has left. */
 class Sse(private val out: java.io.OutputStream) {
     fun send(event: String, data: JsonElement) {
@@ -91,6 +94,8 @@ class Routes {
                 400 to errorAnswer(e.message)
             } catch (e: NotFound) {
                 404 to errorAnswer(e.message)
+            } catch (e: Conflict) {
+                409 to errorAnswer(e.message)
             } catch (e: CliError) {
                 502 to errorAnswer(e.message)
             }

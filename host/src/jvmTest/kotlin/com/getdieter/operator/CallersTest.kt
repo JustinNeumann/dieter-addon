@@ -65,7 +65,7 @@ class CallersTest {
         val agents = serve(Callers(setOf(me + 1)))
         try {
             assertEquals(200, call(agents.address.port, "POST", "questions", question))
-            assertEquals(200, call(agents.address.port, "GET", "questions/toolu_1"))
+            assertEquals(404, call(agents.address.port, "GET", "questions/toolu_1"))   // allowed; without its token, unknown
             assertEquals(403, call(agents.address.port, "GET", "questions"))
             assertEquals(403, call(agents.address.port, "POST", "questions/toolu_1/answer", answer))
             assertEquals(403, call(agents.address.port, "POST", "gateway/unenroll", "{}"))

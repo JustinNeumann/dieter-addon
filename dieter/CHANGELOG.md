@@ -2,6 +2,24 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.27 (2026-10-30)
+
+- **The add-on's Supervisor token no longer reaches the agents by default.** Home Assistant treats it as its
+  Supervisor user, an administrator, so an agent holding it could call the add-on's own rest_commands (Home
+  Assistant then calls port 8099 from `172.30.32.1`): post a message into any card as you, create and start a
+  task. The agents found it in `HASS_TOKEN`, and also in the operator's and the daemon's environment and in s6's
+  world-readable copy of the container's environment. Now only the web host (user `dieter-web`) gets it and relays
+  the operator's few Home Assistant calls (its three events, the Ollama entity lookup, task titles), refusing
+  anything else. The new option **Home Assistant for agents** (`agents_home_assistant`, off) gives the agents
+  `hass-cli` and `ha-logs` again; the docs say what that allows. Claude Code's note says when the agents have no
+  Home Assistant.
+- **Questions: the answer goes only to the worker that asked.** A registration gets a random token the worker
+  sends back with every poll (the add-on's copy of the harness worker; fork `host-questions.mjs`). An id still in
+  use cannot be registered again (409), so nobody can swap a waiting question's text. The event `dieter_question`
+  no longer carries the question's id (it was not documented, and the package does not use it).
+- Home Assistant's follow-up route on 8099 takes only `card` and `chat` (`POST /api/card|chat/<id>/send`).
+- The docs add that an add-on with the Supervisor's admin role can open an Ingress session of its own.
+
 ## 0.6.431.26 (2026-10-30)
 
 - **Agents can no longer act as you through the operator.** The operator (`127.0.0.1:8096`) runs as the agents'

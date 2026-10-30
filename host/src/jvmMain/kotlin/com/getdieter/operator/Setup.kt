@@ -97,11 +97,12 @@ class Setup(
     /** Tells Claude Code (global memory ~/.claude/CLAUDE.md) what the container offers. Written when missing or still
      *  one of the add-on's earlier texts; a file the user edited or emptied is kept. */
     fun claudeHint() {
-        if (supervisorToken.isNullOrEmpty()) return
-        val text = HINT
+        // the agents' Home Assistant access (option agents_home_assistant) decides the note's first section
+        val text = if (supervisorToken.isNullOrEmpty()) HINT_WITHOUT_HA else HINT
         if (claudeHint.exists()) {
             val current = sha256(claudeHint.readBytes())
-            if (current == sha256(text.toByteArray()) || current !in HINT_EARLIER) return
+            val ours = HINT_EARLIER + sha256(HINT.toByteArray()) + sha256(HINT_WITHOUT_HA.toByteArray())
+            if (current == sha256(text.toByteArray()) || current !in ours) return
         }
         claudeHint.parentFile.mkdirs()
         claudeHint.writeText(text)
@@ -128,6 +129,15 @@ class Setup(
         }
 
         val HINT: String by lazy { Setup::class.java.getResource("/operator/claude-hint.md")!!.readText() }
+
+        /** The note when the agents have no Home Assistant access: its Home Assistant section says so. */
+        val HINT_WITHOUT_HA: String by lazy {
+            HINT.substring(0, HINT.indexOf("# Home Assistant")) +
+                "# Home Assistant\n\nThis container is the Dieter add-on inside Home Assistant. The agents have no access " +
+                "to Home Assistant here: the add-on's option \"Home Assistant for agents\" is off, so `hass-cli` and " +
+                "`ha-logs` are not signed in. When a task needs Home Assistant, say so in your reply; do not look for " +
+                "a token.\n\n" + HINT.substring(HINT.indexOf("# Images in the chat"))
+        }
 
         /** Earlier texts of that file: a file with one of these is the add-on's and gets replaced, an edited one is kept. */
         val HINT_EARLIER = setOf(
