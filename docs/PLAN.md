@@ -509,7 +509,8 @@ Ingress on 8099 and answers Home Assistant. Its areas move to the operator one a
 with the e2e suite green, and the last one deletes `dieter/bridge/` and Python from the image:
 
 1. ✅ 0.6.431.10: the operator (run.sh starts it, the bridge forwards) and Agent instructions (`api/prompts`)
-2. Settings, title model, board order (`/data/bridge_settings.json`; the titles and housekeeping read it)
+2. ✅ 0.6.431.11: settings, title model, board order (`/data/bridge_settings.json`, written by the operator; the bridge's
+   titles, housekeeping and state stream read it, and the bridge follows a change after the forward: `after_operator`)
 3. Projects: clone, new repository, adoption
 4. Claude sign-in, gateway enrollment, SSH key
 5. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments

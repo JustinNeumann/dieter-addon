@@ -127,3 +127,26 @@ test("Agent instructions (api/prompts): the daemon's templates, refusals with th
   expect(reset.chat_skill).toBe(before.chat_skill);
   expect(reset.template).toBe(before.template);
 });
+
+test("Settings (api/settings, api/boards/order): title models, work folder retention and board order, with refusals", async ({ request }) => {
+  const get = async () => (await request.get("api/settings")).json();
+  const before = await get();
+  expect(["openai", "ollama"]).toContain(before.title_model);
+  expect(before.title_models.map((m) => m.id)).toEqual(["openai", "ollama"]);
+  expect(before.title_models[1].available).toBe(false);                  // no Home Assistant behind the e2e image
+  expect(before.title_models[1].detail).toBe("Works in the Home Assistant add-on only");
+  expect(before.titles_daemon_id).toBe("");
+  expect(Number.isInteger(before.worktree_retention_days)).toBe(true);
+  for (const bad of [{ worktree_retention_days: -1 }, { worktree_retention_days: 1.5 }, { worktree_retention_days: "x" }, { title_model: "gpt" }]) {
+    const r = await request.post("api/settings", { data: bad });
+    expect(r.status(), JSON.stringify(bad)).toBe(400);
+  }
+  expect((await (await request.post("api/settings", { data: { worktree_retention_days: "45" } })).json()).worktree_retention_days).toBe(45);
+  expect((await get()).worktree_retention_days).toBe(45);
+  await request.post("api/settings", { data: { worktree_retention_days: before.worktree_retention_days } });
+  for (const bad of [{}, { ids: [] }, { ids: [""] }]) expect((await request.post("api/boards/order", { data: bad })).status(), JSON.stringify(bad)).toBe(400);
+  const order = await (await request.post("api/boards/order", { data: { ids: [`b-e2e-${stamp}`] } })).json();
+  expect(order.ok).toBe(true);
+  expect(order.board_order[0]).toBe(`b-e2e-${stamp}`);
+  expect(order.board_order.slice(1)).toEqual(before.board_order.filter((x) => x !== `b-e2e-${stamp}`));
+});

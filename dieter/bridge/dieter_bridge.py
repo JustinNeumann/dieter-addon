@@ -55,13 +55,10 @@ Endpoints:
                               {folder}  new empty Git repository /data/projects/<folder> (existing folder adopted)
   POST /api/board             {project, name, workflow?: review|direct, publish?: manual|pull_request|push_base}  a new board of the project (like the app's New board)
   POST /api/board/ID/git      {publish: manual|pull_request|push_base}  the board's remote publish mode (cards inherit it)
-  POST /api/boards/order     {ids: [board id, ...]}  the boards' order on the page (dragged); kept in the settings file
+  POST /api/boards/order      {ids: [board id, ...]}  the boards' order on the page (dragged): answered by the operator
   POST /api/focus             {id}   remember which card the next page load should open (push deep link)
   GET  /api/focus?consume=1   {id|null} and forget it (valid 15 min)
-  GET  /api/settings          {title_model, title_models: [{id, name, available, detail}], worktree_retention_days,
-                              titles_daemon_id: the add-on's daemon while Ollama names its new cards, else ""}
-  POST /api/settings          {title_model: openai|ollama}  who titles cards created without a title;
-                              {worktree_retention_days: 0..3650}  days a finished card's work folder is kept (0: forever)
+  GET|POST /api/settings      title model, work folder retention, board order: answered by the operator (Settings.kt)
   POST /api/titles            {kind: card|chat, id, prompt, provisional}  a card or chat the new page created on this
                               daemon under its placeholder title: Ollama names it in the background (as POST /api/card)
   GET|POST /api/prompts       Agent instructions: answered by the operator (OPERATOR_PATHS), forwarded as they are
@@ -522,6 +519,7 @@ TITLE_PENDING = {}                                # card/chat id -> provisional 
 
 
 def settings():
+    """The add-on's settings as the operator writes them (Settings.kt; this reads the file on every use)."""
     try:
         d = json.load(open(SETTINGS_FILE))
     except (OSError, ValueError):
@@ -533,34 +531,6 @@ def settings():
             "worktree_retention_days": days if isinstance(days, int) and not isinstance(days, bool) and 0 <= days <= RETENTION_MAX_DAYS else RETENTION_DEFAULT_DAYS}
 
 
-def settings_save(cur):
-    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-    tmp = SETTINGS_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(cur, f)
-    os.replace(tmp, SETTINGS_FILE)
-
-
-def settings_update(body):
-    cur = settings()
-    if "title_model" in body:
-        if body["title_model"] not in TITLE_MODELS:
-            raise ValueError("title_model: " + " or ".join(TITLE_MODELS))
-        cur["title_model"] = body["title_model"]
-        TITLER["at"] = 0                          # look the entity up again
-    if "worktree_retention_days" in body:
-        d = body["worktree_retention_days"]
-        if isinstance(d, str) and d.strip().isdigit():
-            d = int(d)
-        if not isinstance(d, int) or isinstance(d, bool) or not 0 <= d <= RETENTION_MAX_DAYS:
-            raise ValueError(f"worktree_retention_days: whole days, 0 (keep everything) to {RETENTION_MAX_DAYS}")
-        if d != cur["worktree_retention_days"]:
-            HOUSEKEEPING_WAKE.set()
-        cur["worktree_retention_days"] = d
-    settings_save(cur)
-    return settings_view()
-
-
 def order_boards(boards, order=None):
     """Boards in the order dragged on the page (settings' board_order); boards not in it (new ones) follow
     in the daemon's order, so a new board shows up last in its project."""
@@ -568,33 +538,23 @@ def order_boards(boards, order=None):
     return [b for _, b in sorted(enumerate(boards), key=lambda x: (rank.get(x[1].get("id"), len(rank)), x[0]))]
 
 
-def board_order_update(body):
-    ids = body.get("ids")
-    if not isinstance(ids, list) or not ids or not all(isinstance(x, str) and x for x in ids):
-        raise ValueError("ids: list of board ids required")
-    cur = settings()
-    # Ids of boards not on the page (another project's, retired) keep their rank after the given ones
-    cur["board_order"] = list(dict.fromkeys(ids + [x for x in cur["board_order"] if x not in ids]))
-    settings_save(cur)
-    STATE.reorder_boards(cur["board_order"])
-    return {"ok": True, "board_order": cur["board_order"]}
-
-
-def settings_view():
-    entity = ollama_entity()
-    names = entity and settings()["title_model"] == "ollama"
-    return {**settings(), "titles_daemon_id": local_daemon_info()[0] if names else "", "title_models": [
-        {"id": "openai", "name": TITLE_MODELS["openai"], "available": True, "detail": "Dieter's auto-title (GPT Spark)"},
-        {"id": "ollama", "name": TITLE_MODELS["ollama"], "available": bool(entity),
-         "detail": entity or ("No AI Task entity of the Ollama integration found; OpenAI titles instead" if ADDON and SUPERVISOR_TOKEN
-                              else "Works in the Home Assistant add-on only")}]}
-
-
 # The operator (Kotlin, host/…/operator, docs/PLAN.md Step 2) takes over the bridge one area at a time; run.sh
 # starts it as this same user on loopback. Until it serves port 8099 itself, the bridge forwards the moved paths
 # to it: (method, path below /api/). Agent instructions (api/prompts) moved first.
 OPERATOR_URL = os.environ.get("DIETER_OPERATOR_URL", "http://127.0.0.1:8096/")
-OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",))}
+OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",)),
+                  ("GET", ("settings",)), ("POST", ("settings",)), ("POST", ("boards", "order"))}
+
+
+def after_operator(path, before, answer):
+    """What the bridge still does after the operator changed something it reads: the title model's entity is looked
+    up again, a new retention sweeps now instead of at the next hour, a new board order reaches the pages at once."""
+    if path == ("settings",):
+        TITLER["at"] = 0
+        if settings()["worktree_retention_days"] != before.get("worktree_retention_days"):
+            HOUSEKEEPING_WAKE.set()
+    elif path == ("boards", "order") and isinstance(answer.get("board_order"), list):
+        STATE.reorder_boards(answer["board_order"])
 
 
 def ollama_entity():
@@ -2909,6 +2869,7 @@ class Handler(BaseHTTPRequestHandler):
     def forward_operator(self, method, u, body):
         """A path the operator answers: passed on with its query, body and the Home Assistant user, answered as it answers."""
         data = json.dumps(body).encode() if body is not None else None
+        before = settings()
         req = urllib.request.Request(OPERATOR_URL.rstrip("/") + u.path + (f"?{u.query}" if u.query else ""), data=data, method=method)
         req.add_header("Content-Type", "application/json")
         for h in ("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name"):
@@ -2922,6 +2883,11 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, OSError) as e:
             log("operator:", method, u.path, e)
             return self.send_json({"error": "the add-on's operator is not running yet; try again in a moment"}, 503)
+        if method == "POST" and status == 200:
+            try:
+                after_operator(tuple(p for p in u.path.split("/") if p)[1:], before, json.loads(raw))
+            except Exception as e:
+                log("operator: after", u.path, e)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
@@ -3302,8 +3268,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"rev": rev, **data})
             if parts[1:] == ["ha"]:
                 return self.send_json(self.ha_summary())
-            if parts[1:] == ["settings"]:
-                return self.send_json(settings_view())
             if parts[1:] == ["focus"]:
                 fid = FOCUS["id"] if FOCUS["id"] and time.time() - FOCUS["at"] < FOCUS_TTL_S else None
                 if q.get("consume", ["0"])[0] == "1":
@@ -3414,10 +3378,6 @@ class Handler(BaseHTTPRequestHandler):
                 res = board_git(parts[2], body)
                 STATE.refresh(wait=True)
                 return self.send_json(res)
-            if parts[1:] == ["settings"]:
-                return self.send_json(settings_update(body))
-            if parts[1:] == ["boards", "order"]:
-                return self.send_json(board_order_update(body))
             if parts[1:] == ["focus"]:
                 fid = str(body.get("id") or "").strip()
                 if not fid.startswith("c_"):

@@ -1,4 +1,5 @@
-"""Unit tests of the bridge's titles for conversations the new page creates (POST /api/titles, titles_daemon_id).
+"""Unit tests of the bridge's titles for conversations the new page creates (POST /api/titles), and what it does after
+the operator changed the settings.
 Run: python3 -m unittest discover -s dieter/tests -p 'titles_test.py'"""
 import os
 import sys
@@ -14,13 +15,21 @@ def settings(model):
 
 
 class Titles(unittest.TestCase):
-    def test_settings_name_the_daemon_only_while_ollama_names_tasks(self):
-        with mock.patch.object(br, "ollama_entity", lambda: "ai_task.ollama"), mock.patch.object(br, "settings", lambda: settings("ollama")):
-            self.assertEqual("d_here", br.settings_view()["titles_daemon_id"])
-        with mock.patch.object(br, "ollama_entity", lambda: "ai_task.ollama"), mock.patch.object(br, "settings", lambda: settings("openai")):
-            self.assertEqual("", br.settings_view()["titles_daemon_id"])
-        with mock.patch.object(br, "ollama_entity", lambda: None), mock.patch.object(br, "settings", lambda: settings("ollama")):
-            self.assertEqual("", br.settings_view()["titles_daemon_id"])
+    def test_after_the_operator_changed_settings_the_bridge_follows(self):
+        # titles_daemon_id and the settings themselves are the operator's now (host/…/operator/Settings.kt, SettingsTest)
+        br.HOUSEKEEPING_WAKE.clear()
+        br.TITLER["at"] = 123
+        with mock.patch.object(br, "settings", lambda: settings("ollama")):
+            br.after_operator(("settings",), settings("openai"), {})
+            self.assertEqual(0, br.TITLER["at"])                        # the entity is looked up again
+            self.assertFalse(br.HOUSEKEEPING_WAKE.is_set())             # same retention: no sweep
+            br.after_operator(("settings",), {**settings("openai"), "worktree_retention_days": 30}, {})
+            self.assertTrue(br.HOUSEKEEPING_WAKE.is_set())
+        orders = []
+        with mock.patch.object(br.STATE, "reorder_boards", orders.append):
+            br.after_operator(("boards", "order"), settings("openai"), {"ok": True, "board_order": ["b2", "b1"]})
+            br.after_operator(("prompts",), settings("openai"), {"board_order": ["x"]})
+        self.assertEqual([["b2", "b1"]], orders)
 
     def test_a_named_card_is_renamed_in_the_background_like_one_created_here(self):
         started = []

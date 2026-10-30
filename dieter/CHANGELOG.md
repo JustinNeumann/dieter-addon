@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.11 (2026-10-30)
+
+- **The bridge into Kotlin, step 2 of 9:** the add-on's settings (Tools → Settings: Task titles, Keep finished work
+  folders) and the board order dragged in Projects are kept by the operator now. The file stays
+  `/data/bridge_settings.json`, so nothing is lost or changes on the page.
+
 ## 0.6.431.10 (2026-10-30)
 
 - **The bridge into Kotlin, step 1 of 8:** the add-on gets its *operator*, the Kotlin half of the bridge (same jar
