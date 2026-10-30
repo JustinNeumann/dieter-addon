@@ -2646,6 +2646,18 @@ def dreamfall_post(path, body, user):
         raise ValueError(str(e))
 
 
+def dreamfall_cards(data):
+    """The open cards on Dreamfall stage boards (ideas and run cards) with the start of their brief: what the new
+    page's add-on core draws Dreamfall boards from, without the rest of the cards."""
+    boards = {s.get("board_id") for p in (data.get("dreamfall") or {}).get("pipelines") or [] for s in p.get("stages") or []}
+    return [{**c, "initial_prompt": (c.get("initial_prompt") or "")[:1200]}
+            for c in data.get("cards") or [] if c.get("board_id") in boards and not c.get("archived")]
+
+
+# /api/events?fields=: keys computed from the state instead of taken from it
+DERIVED_FIELDS = {"dreamfall_cards": dreamfall_cards}
+
+
 def dreamfall_detail(cid):
     rev, data = STATE.snapshot()
     d = DREAMFALL.detail(cid, data.get("cards") or [])
@@ -3300,7 +3312,8 @@ class Handler(BaseHTTPRequestHandler):
                     FOCUS["id"] = None
                 return self.send_json({"id": fid})
             if parts[1:] == ["events"]:
-                return self.stream_events()
+                fields = [f for f in ",".join(q.get("fields", [])).split(",") if re.match(r"^[a-z_]{1,32}$", f)]
+                return self.stream_events(fields or None)
             if parts[1:] == ["claude", "login"]:
                 return self.send_json(ClaudeLogin.status())
             if parts[1:] == ["ssh"] and ADDON:
@@ -3602,10 +3615,17 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     # ---- streams
-    def stream_events(self):
+    def stream_events(self, fields=None):
+        """The page's live state. `fields` (the new page: questions, dreamfall, ...) keeps only those keys, so a
+        change costs a few kB instead of the full state; DERIVED_FIELDS are computed from it."""
+        def only(data):
+            return {k: DERIVED_FIELDS[k](data) if k in DERIVED_FIELDS else data.get(k) for k in fields}
+        def pick(rev, data):
+            return {"rev": rev, **(only(data) if fields else data)}
         self.start_sse()
         rev, data = STATE.snapshot()
-        self.sse("state", {"rev": rev, **data})
+        self.sse("state", pick(rev, data))
+        sent = json.dumps(only(data), sort_keys=True, default=str) if fields else None
         last_beat = last_push = time.time()
         while True:
             new = STATE.wait_change(rev, 15)
@@ -3614,8 +3634,16 @@ class Handler(BaseHTTPRequestHandler):
                 # 1.5 s, each a full state of ~800 KB the page parses and draws again. One push per PUSH_GAP_S.
                 time.sleep(max(0.0, last_push + PUSH_GAP_S - time.time()))
                 rev, data = STATE.snapshot()
-                self.sse("state", {"rev": rev, **data})
-                last_push = time.time()
+                if fields:
+                    now = json.dumps(only(data), sort_keys=True, default=str)
+                    if now == sent:                # nothing the subscriber asked for changed
+                        if time.time() - last_beat > 14:
+                            self.sse("ping", {"t": time.time()})
+                            last_beat = time.time()
+                        continue
+                    sent = now
+                self.sse("state", pick(rev, data))
+                last_push = last_beat = time.time()
             elif time.time() - last_beat > 14:
                 self.sse("ping", {"t": time.time()})
                 last_beat = time.time()

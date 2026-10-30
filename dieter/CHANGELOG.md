@@ -2,6 +2,38 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.4 (2026-10-30)
+
+- **New page (`next/`), dieter-addon-kotlin 0.4.0: the add-on's own features.**
+  - Tools → Machines: enroll this add-on with your gateway, and see its SSH key with a connection test.
+  - Tools → Usage: sign in to Claude Code.
+  - Tools → Settings: the title model and how long finished work folders are kept.
+  - Agent questions: under "Waiting for your answer" in the Inbox and in the conversation.
+  - Projects → Add: Clone repository and New empty repository.
+  - **Dreamfall:** Tools → Dreamfall lists the boards; a stage board opened from Projects shows its Dreamfall board
+    with the funnel and the three stages side by side (tabs on phones). Ideas open with their brief, where they
+    came from and their trail; Pick (own worktree or the project folder, start now or later), Park, Promote,
+    Release, Back to the queue, Start and Review work as here. The ⋮ menu runs a stage, pauses the schedules, opens
+    the settings or a stage as a Kanban board, and removes the Dreamfall. New boards come from Tools → Dreamfall or
+    Projects → Add. "New idea" on Enumeration adds one by hand to the queue. Run times show in the board's time
+    zone; a new board starts in the browser's.
+  - The browser's Back button closes a sheet or goes back a screen.
+  - Attach opens the browser's file dialog (up to 4 files, 5 MB each, 6 MB in total). An attachment or file preview
+    opens in a new tab, or downloads when the browser cannot show the type. Share on a mail message uses the phone's
+    share sheet, and on a computer downloads the message as Markdown.
+- **How it works:** these features run in a new *add-on core* inside the web host, which talks to the bridge over
+  loopback. The page only shows what that core sends, as Dieter's own screens do with Dieter's core.
+- **Sign-in on the new page:** each attempt returns to the address the page was opened through. The fallback of
+  pasting the address you landed on into the gateway field is gone (see the documentation).
+- **Links:** `<HA>/app/<slug>/next/card/<id>` opens the Inbox when the card no longer exists;
+  `…/next/dreamfall/<id>` and `…/next/idea/<id>` open a Dreamfall board or an idea. A push notification tapped while
+  the new page is open opens its card there, as on this page.
+- **Bridge:** `/api/events?fields=a,b` streams only those parts of the state, and only when they change. The web
+  host follows questions, the Claude sign-in and Dreamfall this way; `dreamfall_cards` is the open cards of the
+  stage boards with the start of their brief.
+- **Known limit:** after a menu or dialog closes, screen readers keep seeing it until the next one opens. This is a
+  bug in Compose Multiplatform 1.12, fixed in 1.13.
+
 ## 0.6.431.3 (2026-10-29)
 
 - **New page (`next/`), dieter-addon-kotlin 0.3.0:** text in mail, files, tool output and subagent details can be
