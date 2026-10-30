@@ -516,7 +516,10 @@ with the e2e suite green, and the last one deletes `dieter/bridge/` and Python f
 4. ✅ 0.6.431.13: the add-on's start and the daemon: harness runtime staging and the managed Bun, what the options
    configure (provider env file, git and gh, Claude Code's note, Antigravity), the daemon started and restarted (after
    a sign-in or enrollment the bridge asks: `daemon/restart`); moved ahead of the sign-in, which restarts the daemon
-5. Claude sign-in, gateway enrollment, SSH key
+5. ✅ 0.6.431.16: Claude sign-in, gateway enrollment, SSH key (`api/claude/…`, `api/gateway…`, `api/ssh…`; the key is
+   made at the operator's start). The bridge only follows up: the quota is probed again after a sign-in or sign-out,
+   and the pages get the daemon's state after an enrollment (seen in the `gateway` status the page polls meanwhile)
+
 6. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments
 7. Dreamfall: the API, and the agents' `dreamfall` command (a mode of the jar instead of `dreamfall.py`; its records
    stay in Dieter's key-value store)

@@ -4,7 +4,9 @@ import java.io.File
 import java.net.InetSocketAddress
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -24,7 +26,7 @@ import kotlinx.serialization.json.put
  *   DIETER_RUNTIME_SRC     the runtime sources of that build, default /opt/dieter-runtime
  *   DIETER_DAEMON_ADDR     the daemon's API, default 127.0.0.1:4242; BRIDGE_PORT  the bridge's port, default 8099
  * In the add-on it also starts the daemon and keeps it running, after staging the harness runtime and writing what
- * the options configure (Setup).
+ * the options configure (Setup), and owns the add-on's SSH key, its Claude sign-in and the gateway enrollment.
  */
 fun main() {
     val env = System.getenv()
@@ -41,14 +43,24 @@ fun main() {
     }
     val projects = Projects(dieter, File(env["DIETER_PROJECTS_DIR"] ?: "/data/projects"), options)
     val supervision = options()?.let { Supervision(it, env, home) }
-    val server = OperatorServer(InetSocketAddress(host, port), routes(dieter, settings, projects, supervision?.daemon)).start()
+    val access = supervision?.let { s ->
+        val restart = { s.daemon.restart(); Unit }
+        Access(
+            s.ssh,
+            ClaudeLogin(s.userHome, options, restart),
+            Enrollment(env["DIETER_BIN"] ?: "/usr/local/bin/dieter", home, s.userHome, dieter, options, restart),
+        )
+    }
+    val server = OperatorServer(InetSocketAddress(host, port), routes(dieter, settings, projects, supervision?.daemon, access)).start()
     Log.line("listening on $host:${server.address.port}")
     supervision?.let { Thread.ofPlatform().name("supervisor").start(it::run) }
 }
 
 /** The add-on's start: the setup the options ask for, the harness runtime, then the daemon for good. */
 class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
-    private val setup = Setup(options, File(env["HOME"] ?: "/data"), env["SUPERVISOR_TOKEN"])
+    val userHome = File(env["HOME"] ?: "/data")
+    val ssh = Ssh(userHome)
+    private val setup = Setup(options, userHome, env["SUPERVISOR_TOKEN"])
     private val harness = env["DIETER_VERSION"]?.takeIf { it.isNotBlank() }?.let {
         Harness(home, it, Harness.machine(), File(env["DIETER_RUNTIME_SRC"] ?: "/opt/dieter-runtime"))
     }
@@ -66,6 +78,7 @@ class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
 
     fun run() {
         daemon.stopStrays()
+        step("ssh") { ssh.setup() }
         step("setup") { setup.git() }
         step("claude hint") { setup.claudeHint() }
         step("env") { setup.antigravity() }
@@ -102,10 +115,15 @@ class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
     }
 }
 
-/** Every path the operator answers, under /api/ like the bridge's. */
-fun routes(dieter: Dieter, settings: Settings, projects: Projects, daemon: DaemonSupervisor? = null): Routes {
+/** The add-on's ways in and out: its SSH key, its Claude sign-in and its daemon's gateway enrollment. */
+class Access(val ssh: Ssh, val claude: ClaudeLogin, val enrollment: Enrollment)
+
+/** Every path the operator answers, under /api/ like the bridge's; [access] only in the add-on. */
+fun routes(dieter: Dieter, settings: Settings, projects: Projects, daemon: DaemonSupervisor? = null, access: Access? = null): Routes {
     val prompts = Prompts(dieter)
-    return Routes()
+    val ok = buildJsonObject { put("ok", true) }
+    fun Request.text(key: String) = (body[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    val routes = Routes()
         .get("prompts") { prompts.view() }
         .post("prompts") { prompts.update(it.body) }
         .get("settings") { settings.view() }
@@ -118,4 +136,19 @@ fun routes(dieter: Dieter, settings: Settings, projects: Projects, daemon: Daemo
             val restarted = (daemon ?: throw BadRequest("the daemon is supervised in the add-on only")).restart()
             buildJsonObject { put("ok", true); put("restarted", restarted) }
         }
+    if (access == null) return routes
+    val (ssh, claude, enrollment) = Triple(access.ssh, access.claude, access.enrollment)
+    return routes
+        .get("ssh") { ssh.publicKey() }
+        .post("ssh/test") { ssh.test(it.text("target")) }
+        .get("claude/login") { claude.status() }
+        .post("claude/login") { claude.start() }
+        .post("claude/login/code") { JsonObject(claude.code(it.text("code")) + ("auth" to claude.auth())) }
+        .post("claude/login/cancel") { claude.cancel(); ok }
+        .post("claude/logout") { buildJsonObject { put("ok", true); put("auth", claude.logout()) } }
+        .get("gateway") { enrollment.gateway() }
+        .post("gateway/enroll") { enrollment.enroll(it.body) }
+        .post("gateway/enroll/cancel") { enrollment.cancel(); ok }
+        .post("gateway/unenroll") { enrollment.unenroll() }
 }
+
