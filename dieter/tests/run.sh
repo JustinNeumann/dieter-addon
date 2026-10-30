@@ -21,12 +21,12 @@ echo "building image…"
 docker build -q --build-arg BUILD_ARCH=amd64 ${MOUNTED:+--build-arg DIETER_WEB=mounted} -t "$IMAGE" .. >/dev/null
 docker rm -f dieter-e2e >/dev/null 2>&1 || true
 pkill -f '^node ingress-proxy.mjs' >/dev/null 2>&1 || true
-docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" ${MOUNTED:+-v "$WEB_BUNDLE:/opt/web:ro" -v "$WEB_HOST_JAR:/opt/web-host/dieter-web-host.jar:ro"} "$IMAGE" >/dev/null
+docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e BRIDGE_INGRESS_NETS=127.0.0.2/32 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" ${MOUNTED:+-v "$WEB_BUNDLE:/opt/web:ro" -v "$WEB_HOST_JAR:/opt/web-host/dieter-web-host.jar:ro"} "$IMAGE" >/dev/null
 cleanup() { kill "${PROXY:-}" 2>/dev/null || true; [ -n "${E2E_KEEP:-}" ] || docker rm -f dieter-e2e >/dev/null 2>&1 || true; }   # E2E_KEEP=1 leaves the container for `docker logs dieter-e2e`
 trap cleanup EXIT
 echo "waiting for the bridge and daemon (first run stages the harness runtime, ~800 MB)…"
 for i in $(seq 1 180); do
-  if curl -sf http://127.0.0.1:18099/api/state 2>/dev/null | grep -q '"id": "mock"'; then break; fi
+  if curl -sf http://127.0.0.1:18099/api/state 2>/dev/null | grep -qE '"id": ?"mock"'; then break; fi
   sleep 5
   [ "$i" = 180 ] && { echo "add-on did not become ready"; docker logs dieter-e2e | tail -20; exit 1; }
 done

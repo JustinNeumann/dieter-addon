@@ -7,7 +7,8 @@
 import http from "node:http";
 import net from "node:net";
 
-const TARGET = { host: "127.0.0.1", port: Number(process.env.BRIDGE_PORT || 18099) };
+// from 127.0.0.2, the address run.sh lets reach the page's core (BRIDGE_INGRESS_NETS) as the Supervisor's network does
+const TARGET = { host: "127.0.0.1", port: Number(process.env.BRIDGE_PORT || 18099), localAddress: "127.0.0.2" };
 const PREFIX = "/api/hassio_ingress/t0ken";
 const PORT = Number(process.env.PROXY_PORT || 18100);
 
@@ -43,7 +44,7 @@ const server = http
 server.on("upgrade", (req, socket, head) => {
   if (!req.url.startsWith(PREFIX)) return socket.destroy();
   const path = req.url.slice(PREFIX.length) || "/";
-  const upstream = net.connect(TARGET.port, TARGET.host, () => {
+  const upstream = net.connect(TARGET, () => {
     const headers = upstreamHeaders(req);
     upstream.write(`GET ${path} HTTP/1.1\r\n` + Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\r\n") + "\r\n\r\n");
     if (head && head.length) upstream.write(head);
