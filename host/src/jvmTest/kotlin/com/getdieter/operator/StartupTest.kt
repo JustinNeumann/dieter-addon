@@ -124,17 +124,17 @@ class StartupTest {
     }
 
     @Test
-    fun `the daemon gets the bridge's question relay, Home Assistant, the runtime and the env file's tokens`() {
+    fun `the daemon gets the operator's question relay, Home Assistant, the runtime and the env file's tokens`() {
         val runtime = File(home, "rt").apply { mkdirs(); File(this, "runner.mjs").writeText("") }
         val env = Supervision.daemonEnvironment(mapOf("SUPERVISOR_TOKEN" to "s", "DIETER_HARNESS_ENV" to "X"), runtime, mapOf("OPENAI_API_KEY" to "k"))
         assertEquals(
             mapOf(
-                "DIETER_QUESTIONS_URL" to "http://127.0.0.1:8099/api/questions", "HASS_SERVER" to "http://supervisor/core", "HASS_TOKEN" to "s",
+                "DIETER_QUESTIONS_URL" to "http://127.0.0.1:8096/api/questions", "HASS_SERVER" to "http://supervisor/core", "HASS_TOKEN" to "s",
                 "DIETER_HARNESS_ENV" to "X,DIETER_QUESTIONS_URL,HASS_SERVER,HASS_TOKEN", "DIETER_HARNESS_RUNTIME_DIR" to runtime.path, "OPENAI_API_KEY" to "k",
             ),
             env,
         )
-        val plain = Supervision.daemonEnvironment(mapOf("BRIDGE_PORT" to "4250"), File(home, "none"), emptyMap())
+        val plain = Supervision.daemonEnvironment(mapOf("DIETER_OPERATOR_ADDR" to "127.0.0.1:4250"), File(home, "none"), emptyMap())
         assertEquals(mapOf("DIETER_QUESTIONS_URL" to "http://127.0.0.1:4250/api/questions", "DIETER_HARNESS_ENV" to "DIETER_QUESTIONS_URL"), plain)
     }
 

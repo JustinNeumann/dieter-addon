@@ -1,10 +1,10 @@
-# Dieter coding agents as a Home Assistant add-on. Runs the Dieter daemon (store /data/dieter) and the
-# bridge (bridge/dieter_bridge.py) that serves the page behind Ingress and the HA sensors.
+# Dieter coding agents as a Home Assistant add-on. Runs the Dieter daemon (store /data/dieter), the operator
+# that supervises it and answers the add-on's API, and the web host that serves the page behind Ingress.
 # Version: <bundled Dieter release>.<add-on revision>; bump it for every change that should reach
 # installs (the Supervisor pulls image:<version> built by .github/workflows/builder.yaml). For a local
 # build on the device (DEPLOY.md) drop the image: line, otherwise the Supervisor pulls instead of building.
 name: Dieter
-version: "0.6.431.22"
+version: "0.6.431.23"
 slug: dieter
 description: Dieter coding agents (daemon + page) behind Home Assistant Ingress
 url: https://github.com/JustinNeumann/dieter-addon

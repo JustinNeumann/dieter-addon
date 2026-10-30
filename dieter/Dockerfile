@@ -16,7 +16,7 @@ ARG RUNTIME_SOURCES_SHA=d68763f51e2656dff84e6f3d5753183050cb23e0ccf4e3bfc559004e
 ARG NODE_VERSION=22.23.4
 
 # glibc base (musl breaks the OMP harness; trixie for Python 3.13, which hass-cli needs); git, tmux and
-# python3 for the daemon and the bridge, openssh-client for Git over SSH and for reaching other machines
+# python3 for the daemon and the agents, openssh-client for Git over SSH and for reaching other machines
 # with the add-on's key (/data/.ssh), python3-venv for hass-cli; the GitHub CLI (below) for the daemon's
 # pull-request operations and the agents
 RUN apt-get update \
@@ -141,8 +141,8 @@ RUN set -eu; \
 
 # The page (Dieter's Compose UI in the browser, Kotlin/Wasm) and the web host (its core on the JVM), built from this
 # repository (web/, host/, addon/) by tools/addon-dist.sh into web-dist/; the Builder workflow runs it before the image
-# build. The same files for every architecture. The bridge serves the page at /next/ and relays next/core and
-# next/signin to the web host, which run.sh starts as user dieter-web on loopback with Debian's headless Java 21.
+# build. The same files for every architecture. The web host serves the page at /next/ and its core at next/core on
+# the Ingress port; run.sh starts it as user dieter-web with Debian's headless Java 21, and the operator as dieter.
 # DIETER_WEB=mounted builds without them (tests/run.sh mounts a build over /opt/web and the jar).
 RUN set -eu; \
     apt-get update; \
@@ -163,7 +163,6 @@ RUN set -eu; \
 
 # the fork release this image carries: the operator stages its harness runtime (harness-staged/<version>)
 ENV DIETER_VERSION=${DIETER_VERSION}
-COPY bridge/ /opt/bridge/
 # the operator's helper scripts (the Claude quota probe for a setup-token login)
 COPY operator/ /opt/operator/
 # dreamfall: the command of the Dreamfall stage agents, a mode of the operator's jar (DreamfallCommand; they run it

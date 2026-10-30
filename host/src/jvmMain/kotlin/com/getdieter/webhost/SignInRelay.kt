@@ -9,7 +9,7 @@ import java.net.URI
  * GitHub sign-in for a core that lives on a server. The core chooses where the gateway sends the browser
  * back for each attempt: the address the page is on (BeginSignIn.redirect_uri, which the page fills in),
  * or the add-on's pinned one (RuntimeConfig). The gateway accepts only addresses it lists
- * (DIETER_NATIVE_REDIRECT_URIS). The bridge relays that request to this host, which hands it to the core
+ * (DIETER_NATIVE_REDIRECT_URIS). That request reaches this host's front door (next/signin), which hands it to the core
  * under its configured callback address, the way an app hands over the URL its system delivered.
  *
  * The session then belongs to the add-on, not to a browser: signing in once (e.g. from a desktop
@@ -37,7 +37,7 @@ internal class SignInRelay(private val api: ClientApi, private val callback: Str
     }
 }
 
-/** The page the browser lands on after the gateway (served through the bridge at next/signin). */
+/** The page the browser lands on after the gateway (served by the front door at next/signin). */
 internal fun signInPage(ok: Boolean, message: String): String {
     val text = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     val title = if (ok) "Signed in" else "Sign-in failed"

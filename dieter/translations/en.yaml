@@ -25,4 +25,4 @@ configuration:
     description: "Repositories to clone into /data/projects and register with Dieter: name, git_url, branch (optional)."
   log_level:
     name: Log level
-    description: Bridge log level.
+    description: Log level (debug adds the web host's core debug lines).

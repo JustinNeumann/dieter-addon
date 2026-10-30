@@ -1,4 +1,4 @@
-%% Dieter as a Home Assistant add-on on the Pi (2026-10-27). Render with any Mermaid viewer.
+%% Dieter as a Home Assistant add-on on the Pi (2026-10-30, 0.6.431.23). Render with any Mermaid viewer.
 flowchart LR
   subgraph Phone["Phone / any browser"]
     HAApp["HA Companion app or browser\n(HA login, no Tailscale)"]
@@ -14,7 +14,8 @@ flowchart LR
     Core["Home Assistant core\n2026.10.4"]
     Ingress["Supervisor Ingress proxy\n172.30.32.2"]
     subgraph Addon["Add-on 4d8f2a84_dieter (image ghcr.io/justinneumann/dieter)"]
-      B["bridge · dieter_bridge.py\n0.0.0.0:8099 · REST + SSE\nserves the page · /api/ha · /api/focus · /api/project\n/api/questions (agent questions) · /api/upload (attachments)\n/api/project|card/<id>/files, /file (browse checkouts)\n/api/schedules (list, create, run, pause, history)\n/api/devices (trust state, approve a code, revoke)\n/api/gateway (enroll the daemon)"]
+      W["web host · front door (user dieter-web)\n0.0.0.0:8099 · the page (next/)\nits core with the gateway session (next/core, Ingress only)\n/api/ → operator"]
+      O["operator (user dieter) · 127.0.0.1:8096 · REST + SSE\n/api/ha · /api/card · /api/focus · /api/state · /api/events\n/api/questions (agent questions) · /api/upload (attachments)\n/api/project · /api/dreamfall · /api/settings · /api/prompts\n/api/gateway · /api/claude · /api/ssh\nsupervises the daemon"]
       D["dieter daemon 0.6.431-antigravity.8\n(fork release: upstream + Antigravity)\n127.0.0.1:4242 · unenrolled · DIETER_HOME=/data/dieter"]
       HR["staged harness runtime\n/data/dieter/harness-staged/0.6.431-antigravity.6\n(node_modules + Bun from the fork release, sha256-pinned;\nsources from the image; older versions pruned)"]
       BUN["managed Bun for OMP\n/data/dieter/runtime/tools/bun/1.4.3\n(seeded from the staged Bun)"]
@@ -29,18 +30,19 @@ flowchart LR
   HAApp -->|LAN or Nabu Casa| Core
   NC --- Core
   Core -->|sidebar panel /4d8f2a84_dieter\n/api/hassio_ingress/token/| Ingress
-  Ingress -->|"X-Ingress-Path, logged-in users only"| B
-  B -->|"dieter CLI (--store /data/dieter)"| D
+  Ingress -->|"X-Ingress-Path, logged-in users only"| W
+  W -->|"/api/ (loopback)"| O
+  O -->|"dieter CLI (--store /data/dieter)"| D
   D -->|DIETER_HARNESS_RUNTIME_DIR| HR
-  HR -.->|"DIETER_QUESTIONS_URL: question → answer"| B
+  HR -.->|"DIETER_QUESTIONS_URL: question → answer"| O
   HR --> CLI
-  B -.->|"seeds at startup"| BUN
+  O -.->|"seeds at startup"| BUN
   D -->|"OMP runs on"| BUN
   CLI -->|HTTPS| LLM
   D --> R
   R -->|"clone · push branches · PRs (gh: daemon create_pr/merge_pr, agents)"| GH
   ENV -.-> D
-  B -->|"events via Supervisor\nPOST /core/api/events/..."| Core
-  Core -->|"http://4d8f2a84-dieter:8099/api/ha"| B
+  O -->|"events via Supervisor\nPOST /core/api/events/..."| Core
+  Core -->|"http://4d8f2a84-dieter:8099/api/ha"| W
   Pkg --> Push
-  B -.->|"harness runtime download (once, 775 MB)"| GH
+  O -.->|"harness runtime download (once, 775 MB)"| GH

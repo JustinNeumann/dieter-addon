@@ -20,43 +20,44 @@ import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 
 /**
- * The web host of the Dieter add-on (see proto/dieter/web/v1/host.proto). Environment:
+ * The web host of the Dieter add-on (see proto/dieter/web/v1/host.proto), and the add-on's front door on its port
+ * ([FrontDoor]). Environment:
  *   DIETER_WEB_HOST_STATE    state directory (device key, session, settings), default /data/web-host
- *   DIETER_WEB_HOST_BIND     default 127.0.0.1;  DIETER_WEB_HOST_PORT  default 8097
- *   DIETER_WEB_HOST_SECRET_FILE  file with the per-boot secret the bridge presents, "-" for stdin (unset: no check, tests only)
+ *   BRIDGE_BIND, BRIDGE_PORT the front door, default 0.0.0.0:8099 (the add-on's Ingress port)
+ *   BRIDGE_INGRESS_NETS      address ranges besides the Supervisor's network that reach the page's core (e2e only)
+ *   DIETER_WEB_DIR           the page's bundle, default /opt/web
+ *   DIETER_OPERATOR_URL      the operator, which answers /api/, default http://127.0.0.1:8096/
  *   DIETER_WEB_SIGN_IN_CALLBACK  pins the sign-in callback (https://<HA>/app/<slug>/next/signin); else the page tells it
- *   DIETER_WEB_BRIDGE_URL        the add-on's bridge API for the add-on core, default http://127.0.0.1:8099/api/
- *   DIETER_WEB_DEVICE_NAME       how this device appears in the account's device list
+ *   DIETER_WEB_BRIDGE_URL    the API the add-on core calls, default the operator's (…/api/)
+ *   DIETER_WEB_DEVICE_NAME   how this device appears in the account's device list
  *   DIETER_WEB_HOST_VERBOSE=1    core debug logs
  */
 fun main() {
     val env = System.getenv()
     Log.verbose = env["DIETER_WEB_HOST_VERBOSE"] == "1"
     val state = File(env["DIETER_WEB_HOST_STATE"] ?: "/data/web-host")
-    // "-" reads the secret from standard input (run.sh pipes it; reopening /dev/stdin after the user switch is denied)
-    val secret =
-        env["DIETER_WEB_HOST_SECRET_FILE"]
-            ?.let { if (it == "-") System.`in`.bufferedReader().readLine().orEmpty() else File(it).readText() }
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-    if (secret == null) Log.line("no DIETER_WEB_HOST_SECRET_FILE: every local process may connect (tests only)")
-    WebHostServer(state, env, secret, env["DIETER_WEB_HOST_BIND"] ?: "127.0.0.1", env["DIETER_WEB_HOST_PORT"]?.toInt() ?: 8097)
-        .start()
+    val ingress = listOf(Net.SUPERVISOR) + Net.list(env["BRIDGE_INGRESS_NETS"])
+    WebHostServer(
+        state, env, env["BRIDGE_BIND"] ?: "0.0.0.0", env["BRIDGE_PORT"]?.toInt() ?: 8099,
+        allowed = { it.isLoopbackAddress || it in Net.SUPERVISOR },   // Ingress, Home Assistant core, the add-on's own processes
+        ingress = { a -> ingress.any { a in it } },                     // the page's core: never loopback, where the agents are
+    ).start()
 }
 
-/** Dieter's core and the add-on core, plus the WebSocket server in front of them. */
+/** Dieter's core and the add-on core, behind the add-on's front door. */
 class WebHostServer(
     state: File,
     env: Map<String, String>,
-    secret: String?,
     bind: String,
     port: Int,
+    allowed: (java.net.InetAddress) -> Boolean,
+    ingress: (java.net.InetAddress) -> Boolean,
 ) {
     val runtime: CoreRuntime
     private val api: ClientApi
     val addon: AddonCore
     private val commands = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val server: WebSocketServer
+    private val server: FrontDoor
     private val signIn: SignInRelay
     private val foreground: Foreground
 
@@ -99,8 +100,9 @@ class WebHostServer(
             )
         api = ClientApi(runtime)
         signIn = SignInRelay(api, callback ?: SignInRelay.INTERNAL_CALLBACK)
+        val operator = java.net.URI.create(env["DIETER_OPERATOR_URL"] ?: "http://127.0.0.1:8096/")
         addon = AddonCore(
-            OkHttpBridge(env["DIETER_WEB_BRIDGE_URL"] ?: "http://127.0.0.1:8099/api/"),
+            OkHttpBridge(env["DIETER_WEB_BRIDGE_URL"] ?: (operator.toString().trimEnd('/') + "/api/")),
             commands,
             offsetSeconds = { at, zone ->
                 val id = runCatching { java.time.ZoneId.of(zone) }.getOrDefault(java.time.ZoneId.systemDefault())
@@ -110,7 +112,7 @@ class WebHostServer(
         )
         foreground = Foreground(api, commands, env["DIETER_WEB_HOST_IDLE_MS"]?.toLongOrNull() ?: 120_000)
         server =
-            WebSocketServer(bind, port, secret, onHttp = ::http) { ws ->
+            FrontDoor(bind, port, File(env["DIETER_WEB_DIR"] ?: "/opt/web"), operator, allowed, ingress, onSignIn = ::signIn) { ws ->
                 val user = ws.headers["x-remote-user-display-name"] ?: ws.headers["x-remote-user-name"].orEmpty()
                 val hello = Hello(BuildInfo.DIETER_RELEASE, BuildInfo.VERSION, user)
                 CoreConnection(api, runtime, addon, commands, ws, hello, foreground).run()
@@ -118,20 +120,16 @@ class WebHostServer(
         Log.line("Dieter core ${BuildInfo.DIETER_RELEASE}, web host ${BuildInfo.VERSION}, state $state")
     }
 
-    /** GET …/signin?code=…&state=…: the gateway's redirect, relayed by the bridge. */
-    private fun http(path: String, headers: Map<String, String>): HttpReply? {
-        if (path.substringBefore('?').endsWith("/signin")) {
-            val query = path.substringAfter('?', "")
-            val page =
-                try {
-                    kotlinx.coroutines.runBlocking { signIn.complete(query) }
-                    signInPage(true, "Dieter on this Home Assistant is signed in. Every device that opens it uses this sign-in.")
-                } catch (failure: com.getdieter.core.client.ClientFailure) {
-                    signInPage(false, failure.failure.message.ifEmpty { "The gateway did not accept the sign-in." })
-                }
-            return HttpReply(200, "text/html; charset=utf-8", page)
-        }
-        return null
+    /** GET next/signin?code=…&state=…: the gateway's redirect after sign-in. */
+    private fun signIn(query: String): HttpReply {
+        val page =
+            try {
+                kotlinx.coroutines.runBlocking { signIn.complete(query) }
+                signInPage(true, "Dieter on this Home Assistant is signed in. Every device that opens it uses this sign-in.")
+            } catch (failure: com.getdieter.core.client.ClientFailure) {
+                signInPage(false, failure.failure.message.ifEmpty { "The gateway did not accept the sign-in." })
+            }
+        return HttpReply(200, "text/html; charset=utf-8", page)
     }
 
     /** Starts the core and the server; returns the bound port. */

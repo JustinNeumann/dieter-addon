@@ -7,7 +7,7 @@
 #   index.html and composeResources/ has a hashed name and can be cached as immutable.
 # - Every .wasm gets a .wasm.gz next to it: Home Assistant's Ingress strips Accept-Encoding and
 #   does not compress application/wasm, so the loader fetches the .gz and inflates it in the
-#   browser (DecompressionStream). For direct (non-Ingress) access the bridge also negotiates
+#   browser (DecompressionStream). For direct (non-Ingress) access the web host also negotiates
 #   Content-Encoding with .gz / .br copies of the larger text and font files.
 # - Output: <output dir>/dieter-web-<version>.tar.gz and SHA256SUMS (reproducible tar).
 set -euo pipefail

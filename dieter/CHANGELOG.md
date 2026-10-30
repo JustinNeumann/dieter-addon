@@ -2,6 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.23 (2026-10-30)
+
+- **The bridge into Kotlin, step 10 of 10:** the add-on's front door on the Ingress port is the web host now. It
+  serves the page and its core itself and passes `/api/` (Home Assistant's sensor and rest_commands, the page's
+  add-on features) to the operator, with the same paths and answers. The Python bridge is gone from the image.
+- The page's core no longer needs a secret between two processes: it lives in the web host, which agents can
+  neither read nor reach (its core answers only Home Assistant's Ingress).
+- The web host's log lines show local time, like the rest of the log (they were in UTC).
+
 ## 0.6.431.22 (2026-10-30)
 
 - A retired board whose cards are all archived no longer stays in Projects with "0 cards". The daemon already

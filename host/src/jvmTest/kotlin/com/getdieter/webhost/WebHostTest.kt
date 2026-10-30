@@ -39,7 +39,8 @@ import okio.ByteString.Companion.toByteString
 
 /** The browser's side of host.proto against a real core (signed out, no network needed). */
 class WebHostTest {
-    private val secret = "test-secret"
+    /** whether the caller counts as Home Assistant's Ingress (in the add-on: the Supervisor's network) */
+    @Volatile private var fromIngress = true
     private lateinit var host: WebHostServer
     private var port = 0
     private val http = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
@@ -83,8 +84,8 @@ class WebHostTest {
     fun start() {
         bridge.start()
         val state = Files.createTempDirectory("web-host").toFile()
-        val env = mapOf("DIETER_WEB_BRIDGE_URL" to "http://127.0.0.1:${bridge.address.port}/api/")
-        host = WebHostServer(state, env, secret, "127.0.0.1", 0)
+        val env = mapOf("DIETER_OPERATOR_URL" to "http://127.0.0.1:${bridge.address.port}/", "DIETER_WEB_DIR" to state.path)
+        host = WebHostServer(state, env, "127.0.0.1", 0, allowed = { true }, ingress = { fromIngress })
         port = host.start()
     }
 
@@ -129,11 +130,10 @@ class WebHostTest {
         }
     }
 
-    private fun connect(secret: String? = this.secret, path: String = "/next/core"): Client {
+    private fun connect(path: String = "/next/core"): Client {
         val client = Client(LinkedBlockingQueue(), LinkedBlockingQueue())
         val request =
             Request.Builder().url("ws://127.0.0.1:$port$path").apply {
-                secret?.let { header("X-Dieter-Web-Secret", it) }
                 header("X-Remote-User-Display-Name", "Ada")
             }.build()
         client.socket =
@@ -212,11 +212,10 @@ class WebHostTest {
     }
 
     @Test
-    fun theSecretIsRequired() {
-        for (secret in listOf(null, "wrong")) {
-            val failure = connect(secret).failures.poll(10, TimeUnit.SECONDS)
-            assertEquals(403, failure?.code, "secret $secret")
-        }
+    fun theCoreAnswersIngressOnly() {
+        fromIngress = false   // e.g. an agent on loopback
+        assertEquals(403, connect().failures.poll(10, TimeUnit.SECONDS)?.code)
+        fromIngress = true
         assertEquals(404, connect(path = "/elsewhere").failures.poll(10, TimeUnit.SECONDS)?.code)
     }
 
@@ -254,14 +253,15 @@ class WebHostTest {
     }
 
     @Test
-    fun theCallbackRouteNeedsAnAttemptAndTheSecret() {
-        fun get(secret: String?): Pair<Int, String> {
-            val request = Request.Builder().url("http://127.0.0.1:$port/next/signin?code=abc&state=xyz")
-                .apply { secret?.let { header("X-Dieter-Web-Secret", it) } }.build()
+    fun theCallbackRouteNeedsAnAttemptAndIngress() {
+        fun get(): Pair<Int, String> {
+            val request = Request.Builder().url("http://127.0.0.1:$port/next/signin?code=abc&state=xyz").build()
             return http.newCall(request).execute().use { it.code to it.body.string() }
         }
-        assertEquals(403, get(null).first)
-        val (status, body) = get(secret)
+        fromIngress = false
+        assertEquals(403, get().first)
+        fromIngress = true
+        val (status, body) = get()
         assertEquals(200, status)
         assertTrue("Sign-in failed" in body && "No sign-in is in progress" in body, body)
     }

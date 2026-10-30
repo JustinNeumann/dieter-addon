@@ -544,7 +544,13 @@ with the e2e suite green, and the last one deletes `dieter/bridge/` and Python f
    `homeassistant/packages/dieter.yaml` does not change. Dreamfall's `record` call is gone: a card made on a stage
    board gets its record from the create itself. The bridge forwards every `/api/` path; the classic page's own
    endpoints (files, diffs, devices, machines, mail) are dropped
-10. Ingress on 8099, the page's files and the relay to the web host; then `dieter/bridge/` goes
+10. ✅ 0.6.431.23: Ingress on 8099, the page's files, the add-on's root, the WebSocket echo and `/api/` to the
+    operator are the **web host's** front door (`FrontDoor`), not the operator's (decided 2026-10-30): the operator
+    runs as the agents' user, whose processes can read a JVM of that user (attach API, heap dump), so it must not
+    hold the web host's secret. The web host (`dieter-web`) serves the page's core in-process instead, for the
+    Supervisor's network only (agents reach loopback), so neither the secret nor its loopback port 8097 is needed
+    any more. `dieter/bridge/` and its Python are gone (python3 stays in the image for the daemon, hass-cli and the
+    agents)
 
 The e2e contract tests (`dieter/tests/e2e/bridge-api.spec.mjs`, `dreamfall-api.spec.mjs`) pin what Home Assistant and
 the agents rely on; they run unchanged against every step.
@@ -567,7 +573,7 @@ the agents rely on; they run unchanged against every step.
 
 - Spike: `~/dieter/spike/web` (README, `build.gradle.kts`, `DemoData.kt`, `watch.sh`, `ha/dashboard.py`)
 - Add-on: [JustinNeumann/dieter-addon](https://github.com/JustinNeumann/dieter-addon): `dieter/DOCS.md`, `dieter/bridge/app.js` (removed in 0.6.431.9),
-  `dieter/bridge/dieter_bridge.py`, `dieter/tests/e2e/*.spec.mjs`, `docs/dreamfall/CONCEPT.md`
+  `dieter/bridge/dieter_bridge.py` (removed in 0.6.431.23), `dieter/tests/e2e/*.spec.mjs`, `docs/dreamfall/CONCEPT.md`
 - Dieter: [dbpprt/dieter](https://github.com/dbpprt/dieter): `apps/kotlin/ui/.../store/MobileCore.kt`, `navigation/Navigation.kt`,
   `core/runtime/.../platform/Platform.kt`, `CoreRuntime.kt` (loopback routes)
 - [Compose Multiplatform 1.9: Compose for Web Beta](https://blog.jetbrains.com/kotlin/2025/09/compose-multiplatform-1-9-0-compose-for-web-beta/)

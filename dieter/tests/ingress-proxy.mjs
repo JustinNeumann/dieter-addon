@@ -1,4 +1,4 @@
-// Stand-in for the Supervisor's Ingress proxy for local end-to-end tests: serves the bridge under
+// Stand-in for the Supervisor's Ingress proxy for local end-to-end tests: serves the add-on under
 // /api/hassio_ingress/<token>/, adds X-Ingress-Path and forwards request bodies chunked (as the
 // Supervisor does), streams SSE through, passes WebSocket upgrades on and, like Home Assistant,
 // drops Accept-Encoding (HA compresses at its border instead) and names the signed-in person on every
