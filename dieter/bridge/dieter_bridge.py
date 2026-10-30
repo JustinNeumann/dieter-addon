@@ -59,9 +59,12 @@ Endpoints:
   POST /api/boards/order     {ids: [board id, ...]}  the boards' order on the page (dragged); kept in the settings file
   POST /api/focus             {id}   remember which card the next page load should open (push deep link)
   GET  /api/focus?consume=1   {id|null} and forget it (valid 15 min)
-  GET  /api/settings          {title_model, title_models: [{id, name, available, detail}], worktree_retention_days}
+  GET  /api/settings          {title_model, title_models: [{id, name, available, detail}], worktree_retention_days,
+                              titles_daemon_id: the add-on's daemon while Ollama names its new cards, else ""}
   POST /api/settings          {title_model: openai|ollama}  who titles cards created without a title;
                               {worktree_retention_days: 0..3650}  days a finished card's work folder is kept (0: forever)
+  POST /api/titles            {kind: card|chat, id, prompt, provisional}  a card or chat the new page created on this
+                              daemon under its placeholder title: Ollama names it in the background (as POST /api/card)
   GET  /api/prompts           the daemon's prompt templates {template, board_skill, chat_skill, variables,
                               overrides: [{kind: project|board, id, name, project?}]} (dieter prompt show)
   POST /api/prompts           {template?, board_skill?, chat_skill?: text, reset?: [key]}  dieter prompt update
@@ -581,7 +584,8 @@ def board_order_update(body):
 
 def settings_view():
     entity = ollama_entity()
-    return {**settings(), "title_models": [
+    names = entity and settings()["title_model"] == "ollama"
+    return {**settings(), "titles_daemon_id": local_daemon_info()[0] if names else "", "title_models": [
         {"id": "openai", "name": TITLE_MODELS["openai"], "available": True, "detail": "Dieter's auto-title (GPT Spark)"},
         {"id": "ollama", "name": TITLE_MODELS["ollama"], "available": bool(entity),
          "detail": entity or ("No AI Task entity of the Ollama integration found; OpenAI titles instead" if ADDON and SUPERVISOR_TOKEN
@@ -704,6 +708,21 @@ def retitle(kind, cid, prompt, entity):
         log("title:", cid, entity, e)
     finally:
         TITLE_PENDING.pop(cid, None)
+
+
+def name_later(b):
+    """POST /api/titles: a card or chat another client (the new page) created on this daemon under its provisional
+    title, without Dieter's auto-title, because Ollama names them here."""
+    kind, cid = b.get("kind"), str(b.get("id") or "")
+    prompt, provisional = str(b.get("prompt") or ""), str(b.get("provisional") or "")
+    if kind not in ("card", "chat") or not QUESTION_ID_RE.match(cid) or not prompt.strip() or not provisional.strip():
+        raise ValueError("titles: {kind: card|chat, id, prompt, provisional}")
+    entity = title_entity()
+    if not entity:
+        raise ValueError("Ollama no longer names new tasks; this one keeps its first line as title")
+    TITLE_PENDING[cid] = provisional
+    threading.Thread(target=retitle, args=(kind, cid, prompt, entity), daemon=True).start()
+    return {"ok": True}
 
 
 # --------------------------------------------------------------------------- daemon (add-on only)
@@ -3378,6 +3397,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.create(parts[1], body))
             if parts[1:] == ["schedules"]:
                 return self.send_json(schedule_create(body))
+            if parts[1:] == ["titles"]:
+                return self.send_json(name_later(body))
             if parts[1:] == ["mail", "mark"]:
                 return self.send_json(Mail.mark(body))
             if parts[1:] == ["mail", "delete"]:
