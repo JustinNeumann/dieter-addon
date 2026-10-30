@@ -190,3 +190,26 @@ test("Settings: agent instructions are edited and reset through the add-on core"
   await tap(page, page.getByRole("button", { name: "Reset", exact: true }));
   await expect.poll(async () => (await prompts()).board_skill, { timeout: 20_000 }).not.toContain(stamp);
 });
+
+test("Projects: a board dragged after a long press keeps its place for every device (the bridge's board order)", async ({ page, request }) => {
+  // the demo's dieter project has Upstream, Releases and Website; start from that order
+  expect((await request.post("api/boards/order", { data: { ids: ["b-dieter", "b-releases", "b-site"] } })).ok()).toBeTruthy();
+  const shown = async () => {
+    const tree = await aria(page);
+    return ["Upstream", "Releases", "Website"].sort((a, b) => tree.indexOf(`button "${a}`) - tree.indexOf(`button "${b}`));
+  };
+  await open(page, "script=tab%20projects");
+  await expect.poll(shown).toEqual(["Upstream", "Releases", "Website"]);
+  const row = (name) => page.getByRole("button", { name: new RegExp(`^${name} \\d`) }).first();
+  const from = await row("Website").boundingBox(), to = await row("Upstream").boundingBox();
+  await page.mouse.move(from.x + 60, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(900); // the long press
+  await page.mouse.move(from.x + 60, to.y + to.height / 3, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(async () => (await (await request.get("api/settings")).json()).board_order.slice(0, 3), { timeout: 15_000 })
+    .toEqual(["b-site", "b-dieter", "b-releases"]);
+  await expect.poll(shown).toEqual(["Website", "Upstream", "Releases"]);
+  await open(page, "script=tab%20projects"); // kept: another load (device) shows the same order
+  await expect.poll(shown).toEqual(["Website", "Upstream", "Releases"]);
+});
