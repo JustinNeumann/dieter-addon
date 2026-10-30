@@ -42,11 +42,15 @@ class StartupTest {
     fun `Claude's note is written in the add-on when missing, and one the user edited or emptied is kept`() {
         val note = File(home, ".claude/CLAUDE.md")
         Setup(JsonObject(emptyMap()), home, supervisorToken = null).claudeHint()
-        assertFalse(note.exists(), "outside the add-on (no Supervisor token)")
+        assertEquals(Setup.HINT_WITHOUT_HA, note.readText(), "agents without Home Assistant (option off)")
+        assertTrue("hass-cli state list" !in note.readText() && "A Markdown image in your reply stays a link" in note.readText())
         val setup = Setup(JsonObject(emptyMap()), home, supervisorToken = "t")
         setup.claudeHint()
-        assertEquals(Setup.HINT, note.readText())
+        assertEquals(Setup.HINT, note.readText(), "the option turned on: the note with hass-cli")
         assertTrue("A Markdown image in your reply stays a link" in Setup.HINT)
+        Setup(JsonObject(emptyMap()), home, supervisorToken = null).claudeHint()
+        assertEquals(Setup.HINT_WITHOUT_HA, note.readText(), "and off again")
+        setup.claudeHint()
 
         note.writeText("# mine\n")
         setup.claudeHint()

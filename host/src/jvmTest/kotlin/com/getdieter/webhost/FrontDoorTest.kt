@@ -143,7 +143,7 @@ class FrontDoorTest {
             "POST" to "/api/chat/c_1/send", "POST" to "/api/card/c_1/move", "POST" to "/api/focus")
         for ((method, path) in routes) call(method, path).use { assertEquals(200, it.code, "$method $path") }
         val others = listOf("GET" to "/api/questions", "POST" to "/api/questions/q1/answer", "POST" to "/api/gateway/unenroll",
-            "POST" to "/api/card/c_1/archive", "GET" to "/next/", "GET" to "/", "GET" to "/next/signin?code=a")
+            "POST" to "/api/card/c_1/archive", "POST" to "/api/dreamfall/c_1/send", "GET" to "/next/", "GET" to "/", "GET" to "/next/signin?code=a")
         for ((method, path) in others) call(method, path).use { assertEquals(403, it.code, "$method $path") }
         assertEquals("HTTP/1.1 403 Forbidden", raw("POST /api/x/../send HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"))
         // only Ingress names a Home Assistant user

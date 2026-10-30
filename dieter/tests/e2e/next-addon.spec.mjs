@@ -2,6 +2,7 @@
 // bridge, the Compose UI only draws its slices and sends its commands. `?demo` keeps Dieter's data in the page
 // (no gateway account in the test); the add-on features reach the real web host, bridge, daemon and mock harness.
 import { test, expect } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 
 const stamp = Date.now().toString(36);
 const aria = (page) => page.locator("body").ariaSnapshot();
@@ -121,7 +122,12 @@ test("Questions: the Inbox lists the waiting conversation; the answer and a decl
   for (const q of (await (await request.get("api/questions")).json()).questions.filter((q) => q.session === cardId))
     await request.post(`api/questions/${q.id}/answer`, { data: { action: "declined" } }); // left by an earlier run
   const ask = (id) => request.post("api/questions", { data: { id, session: cardId, input: { allowPartialAnswers: false, questions: [{ id: "question-1", question: "Which colour?", header: "Colour", options: [{ id: "red", label: "Red" }, { id: "blue", label: "Blue", description: "calm" }], allowFreeForm: true }] } } });
-  expect((await ask(`q-${stamp}-1`)).ok()).toBeTruthy();
+  // the worker polls with the token its registration returned
+  const tokens = {};
+  const register = async (id) => { const r = await ask(id); tokens[id] = (await r.json()).token; return r; };
+  const poll = (id) => JSON.parse(execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "curl", "-s", "-H", `X-Question-Token: ${tokens[id]}`,
+    `http://127.0.0.1:8096/api/questions/${id}`]).toString());   // as the harness worker polls, on the operator
+  expect((await register(`q-${stamp}-1`)).ok()).toBeTruthy();
   await open(page, "");
   await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Waiting for your answer");
   await tap(page, page.getByRole("button", { name: /Compose web UI behind Ingress Which colour\?/ }));
@@ -130,14 +136,14 @@ test("Questions: the Inbox lists the waiting conversation; the answer and a decl
   await typeInto(page, page.getByRole("textbox", { name: "Or your own answer" }), "and green");
   await tap(page, page.getByRole("button", { name: "Answer", exact: true }));
   await expect
-    .poll(async () => (await request.get(`api/questions/q-${stamp}-1`)).json(), { timeout: 15_000 })
+    .poll(async () => poll(`q-${stamp}-1`), { timeout: 15_000 })
     .toEqual({ done: true, output: { action: "answered", answers: { "question-1": { optionIds: ["blue"], freeform: "and green" } } } });
   await expect.poll(() => aria(page)).not.toContain("The agent asks");
   // a second question, declined
-  expect((await ask(`q-${stamp}-2`)).ok()).toBeTruthy();
+  expect((await register(`q-${stamp}-2`)).ok()).toBeTruthy();
   await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("The agent asks");
   await tap(page, page.getByRole("button", { name: "Decline", exact: true }));
-  await expect.poll(async () => (await (await request.get(`api/questions/q-${stamp}-2`)).json()).output?.action, { timeout: 15_000 }).toBe("declined");
+  await expect.poll(async () => poll(`q-${stamp}-2`).output?.action, { timeout: 15_000 }).toBe("declined");
 });
 
 test("Projects: Add → New empty repository creates and registers a project", async ({ page, request }) => {

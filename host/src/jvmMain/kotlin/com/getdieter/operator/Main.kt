@@ -27,7 +27,8 @@ import kotlinx.serialization.json.put
  *   DIETER_OPTIONS_FILE    the add-on's options, default /data/options.json (missing: not an add-on); run.sh passes
  *                          a copy without api_key, which only the web host gets
  *   DIETER_PROJECTS_DIR    where repositories go, default /data/projects
- *   SUPERVISOR_TOKEN       Home Assistant through the Supervisor (set inside the add-on)
+ *   SUPERVISOR_TOKEN       the add-on's token, only with the option agents_home_assistant (run.sh): the agents' hass-cli
+ *   DIETER_HA_RELAY_URL    the web host's Home Assistant relay, which the operator's events and titles go through
  *   DIETER_VERSION         the fork release in the image, whose harness runtime is staged (the Dockerfile sets it)
  *   DIETER_RUNTIME_SRC     the runtime sources of that build, default /opt/dieter-runtime
  *   DIETER_DAEMON_ADDR     the daemon's API, default 127.0.0.1:4242
@@ -41,7 +42,7 @@ fun main() {
     val bin = env["DIETER_BIN"] ?: "/usr/local/bin/dieter"
     val dieter = ProcessDieter(bin)
     val home = File(env["DIETER_HOME"] ?: "/data/dieter")
-    val ha = HomeAssistant.supervisor(env)
+    val ha = HomeAssistant.of(env)
     val settings = Settings(File(env["BRIDGE_SETTINGS_FILE"] ?: "/data/bridge_settings.json"), OllamaEntity(ha)) {
         Settings.localDaemonId(home)
     }
@@ -225,7 +226,7 @@ fun routes(
         val card = board?.snapshot()?.second?.let { it.objs("cards") + it.objs("chats") }?.firstOrNull { it.field("id") == session }
         val asked = input.objs("questions")
         val event = buildJsonObject {
-            put("id", body.field("id")); put("card_id", session); put("title", card?.field("title")?.ifEmpty { null } ?: session)
+            put("card_id", session); put("title", card?.field("title")?.ifEmpty { null } ?: session)
             put("question", asked.firstOrNull()?.field("question").orEmpty().take(300)); put("count", asked.size)
         }
         live?.ha?.let { ha -> Thread.ofVirtual().start { runCatching { ha.post("events/dieter_question", event, java.time.Duration.ofSeconds(10)) }.onFailure { Log.line("ha event dieter_question: ${it.message}") } } }
@@ -260,7 +261,7 @@ fun routes(
         // agents' questions: the harness worker registers and polls (DIETER_QUESTIONS_URL), the page answers
         .get("questions") { questions.pending() }
         .post("questions") { r -> questions.register(r.body).also { board?.touch(); questionEvent(r.body) } }
-        .get("questions/{id}") { questions.poll(it.params.getValue("id")) ?: throw NotFound("no such question") }
+        .get("questions/{id}") { questions.poll(it.params.getValue("id"), it.headers["x-question-token"].orEmpty()) ?: throw NotFound("no such question") }
         .post("questions/{id}/answer") { r -> questions.answer(r.params.getValue("id"), r.body).also { board?.touch() } }
         .post("dreamfall") { r ->
             dreamfall {

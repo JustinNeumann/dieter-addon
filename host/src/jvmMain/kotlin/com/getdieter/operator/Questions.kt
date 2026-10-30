@@ -16,15 +16,19 @@ import kotlinx.serialization.json.putJsonArray
  * Questions agents wait on. The harness worker registers one (DIETER_QUESTIONS_URL) and polls for the answer, which
  * the person gives on the page (the add-on core) or declines. Kept in memory, like the bridge did: an agent turn does
  * not outlive the add-on, and a question nobody answered is forgotten after a day.
+ *
+ * A question's id is its tool call's id, which others can learn (the transcript, the page's state), and agents may
+ * register and poll: so a registration gets a random token that only the asking worker knows, and the answer goes
+ * only to a poll that brings it back; an id still in use cannot be registered again.
  */
 class Questions(private val now: () -> Long = System::currentTimeMillis) {
-    private class Question(val id: String, val session: String, val input: JsonObject, val createdAt: String, val created: Long) {
+    private class Question(val id: String, val session: String, val input: JsonObject, val createdAt: String, val created: Long, val token: String) {
         var output: JsonObject? = null
     }
 
     private val questions = linkedMapOf<String, Question>()
 
-    /** {id, session, input}: the worker's question, its tool call id as id and the card as session. */
+    /** {id, session, input}: the worker's question, its tool call id as id and the card as session; {ok, token}. */
     @Synchronized
     fun register(body: JsonObject): JsonObject {
         val id = body.text("id")
@@ -34,10 +38,15 @@ class Questions(private val now: () -> Long = System::currentTimeMillis) {
         if (!SESSION.matches(session)) throw BadRequest("invalid session")
         if ((input?.get("questions") as? JsonArray).isNullOrEmpty()) throw BadRequest("input.questions required")
         if (input.toString().length > 64_000) throw BadRequest("question too large")
-        questions[id] = Question(id, session, input, ZonedDateTime.now().format(STAMP), now())
+        questions[id]?.let { if (now() - it.created <= TTL_MS) throw Conflict("question $id is already registered") }
+        val token = ByteArray(24).also(RANDOM::nextBytes).let { java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
+        questions[id] = Question(id, session, input, ZonedDateTime.now().format(STAMP), now(), token)
         val first = ((input["questions"] as JsonArray).firstOrNull() as? JsonObject)?.text("question").orEmpty()
         Log.line("question $id: $session asks: ${first.take(80)}")
-        return buildJsonObject { put("ok", true) }
+        return buildJsonObject {
+            put("ok", true)
+            put("token", token)
+        }
     }
 
     /** {action, answers?}: the person's answer; the worker's next poll takes it. */
@@ -59,10 +68,12 @@ class Questions(private val now: () -> Long = System::currentTimeMillis) {
         return buildJsonObject { put("ok", true) }
     }
 
-    /** The worker's poll: {done: false} until answered, then the answer once (the question is forgotten); null if unknown. */
+    /** The worker's poll with its [token]: {done: false} until answered, then the answer once (the question is
+     *  forgotten); null if unknown or the token is not the question's. */
     @Synchronized
-    fun poll(id: String): JsonObject? {
+    fun poll(id: String, token: String): JsonObject? {
         val q = questions[id] ?: return null
+        if (!java.security.MessageDigest.isEqual(q.token.toByteArray(), token.toByteArray())) return null
         val output = q.output ?: return buildJsonObject { put("done", false) }
         questions.remove(id)
         return buildJsonObject {
@@ -110,6 +121,7 @@ class Questions(private val now: () -> Long = System::currentTimeMillis) {
         val ID = Regex("^[A-Za-z0-9_.:-]{1,128}$")
         val SESSION = Regex("^[A-Za-z0-9._-]{1,80}$")
         val ACTIONS = listOf("answered", "partially-answered", "declined", "cancelled")
+        private val RANDOM = java.security.SecureRandom()
         const val TTL_MS = 24 * 3600 * 1000L
         private val STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssZ")
     }

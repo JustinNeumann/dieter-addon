@@ -50,21 +50,32 @@ class QuestionsTest {
 
     @Test
     fun theWorkerWaitsForTheAnswerGivenOnThePageAndGetsItOnce() {
-        assertEquals(200, call("POST", "questions", question).first)
+        val registered = call("POST", "questions", question)
+        assertEquals(200, registered.first)
+        val token = mapOf("X-Question-Token" to registered.second["token"]!!.jsonPrimitive.content)
+        assertTrue(token.values.single().length >= 30, "a random token")
         val pending = call("GET", "questions").second["questions"]!!.jsonArray
+        assertTrue("token" !in pending[0].jsonObject, "the page's list does not show the token")
         assertEquals(listOf("toolu_1"), pending.map { it.jsonObject["id"]!!.jsonPrimitive.content })
         assertEquals("c_card1", pending[0].jsonObject["session"]!!.jsonPrimitive.content)
         assertTrue(pending[0].jsonObject["created_at"]!!.jsonPrimitive.content.matches(Regex("\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d[+-]\\d{4}")))
-        assertEquals("""{"done":false}""", call("GET", "questions/toolu_1").second.toString())
+        assertEquals("""{"done":false}""", call("GET", "questions/toolu_1", headers = token).second.toString())
+        // the id alone is no way in: another poll gets nothing, another registration of the id is refused
+        assertEquals(404, call("GET", "questions/toolu_1").first)
+        assertEquals(404, call("GET", "questions/toolu_1", headers = mapOf("X-Question-Token" to "guess")).first)
+        assertEquals(409, call("POST", "questions", question.replace("Which colour?", "Your password?")).first)
+        assertEquals("Which colour?", call("GET", "questions").second["questions"]!!.jsonArray[0].jsonObject["input"]!!.jsonObject["questions"]!!.jsonArray[0].jsonObject["question"]!!.jsonPrimitive.content)
 
         val answer = """{"action": "answered", "answers": {"q1": {"optionIds": ["red", 2, 2.5, true, null], "freeform": "  "}, "q2": {"optionIds": []}, "q3": "x"}}"""
         assertEquals(200, call("POST", "questions/toolu_1/answer", answer).first)
         assertEquals(0, call("GET", "questions").second["questions"]!!.jsonArray.size, "answered: no longer waiting for the person")
         assertEquals((400 to "already answered"), call("POST", "questions/toolu_1/answer", """{"action": "declined"}""").let { it.first to it.second["error"]!!.jsonPrimitive.content })
 
-        val polled = call("GET", "questions/toolu_1")
+        assertEquals(404, call("GET", "questions/toolu_1").first, "not to a poll without the token")
+        val polled = call("GET", "questions/toolu_1", headers = token)
         assertEquals("""{"done":true,"output":{"action":"answered","answers":{"q1":{"optionIds":["red","2"]}}}}""", polled.second.toString())
-        assertEquals(404 to "no such question", call("GET", "questions/toolu_1").let { it.first to it.second["error"]!!.jsonPrimitive.content }, "handed over once")
+        assertEquals(404 to "no such question", call("GET", "questions/toolu_1", headers = token).let { it.first to it.second["error"]!!.jsonPrimitive.content }, "handed over once")
+        assertEquals(200, call("POST", "questions", question).first, "a handed-over id may come again")
     }
 
     @Test

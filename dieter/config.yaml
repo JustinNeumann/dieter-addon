@@ -4,7 +4,7 @@
 # installs (the Supervisor pulls image:<version> built by .github/workflows/builder.yaml). For a local
 # build on the device (DEPLOY.md) drop the image: line, otherwise the Supervisor pulls instead of building.
 name: Dieter
-version: "0.6.431.26"
+version: "0.6.431.27"
 slug: dieter
 description: Dieter coding agents (daemon + page) behind Home Assistant Ingress
 url: https://github.com/JustinNeumann/dieter-addon
@@ -20,7 +20,7 @@ ingress_port: 8099
 ingress_stream: true
 panel_icon: mdi:robot
 panel_title: Dieter
-homeassistant_api: true   # HA events (notifications) and the agents' hass-cli go through the core proxy
+homeassistant_api: true   # HA events and titles (the web host relays them), and the agents' hass-cli when allowed
 hassio_api: false
 host_network: false
 options:
@@ -35,6 +35,7 @@ options:
   machine_name: "home-assistant"
   web_sign_in_callback: ""
   api_key: ""
+  agents_home_assistant: false
   projects: []
   log_level: info
 schema:
@@ -49,6 +50,7 @@ schema:
   machine_name: str?
   web_sign_in_callback: str?
   api_key: password?
+  agents_home_assistant: bool?
   projects:
     - name: str
       git_url: str

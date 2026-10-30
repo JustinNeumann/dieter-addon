@@ -64,7 +64,7 @@ class Titles(private val dieter: Dieter, private val ha: HomeAssistant?, private
             "services/ai_task/generate_data?return_response",
             buildJsonObject {
                 put("entity_id", entity)
-                put("task_name", "Dieter task title")
+                put("task_name", TASK_NAME)
                 put("instructions", instructions)
             },
             Duration.ofSeconds(TIMEOUT_S),
@@ -75,6 +75,7 @@ class Titles(private val dieter: Dieter, private val ha: HomeAssistant?, private
 
     companion object {
         const val MAX = 80
+        const val TASK_NAME = "Dieter task title"
         /** a cold Ollama loads the model first */
         const val TIMEOUT_S = 120L
         private val ID = Regex("^[A-Za-z0-9_.:-]{1,128}$")
