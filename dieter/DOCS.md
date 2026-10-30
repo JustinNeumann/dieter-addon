@@ -31,7 +31,7 @@ not be root anyway.
 |---|---|
 | `dieter daemon start --addr 127.0.0.1:4242` | store `/data/dieter`, started and restarted by the bridge |
 | bridge `/opt/bridge/dieter_bridge.py` | `0.0.0.0:8099` (Ingress port): serves the page and relays it to the web host; REST + SSE API for the web host and Home Assistant (`/api/ha`, the rest_commands) |
-| operator (same jar, `com.getdieter.operator`) | `127.0.0.1:8096`, user `dieter`: the bridge's duties already moved to Kotlin (Agent instructions, settings, board order so far); the bridge forwards them to it |
+| operator (same jar, `com.getdieter.operator`) | `127.0.0.1:8096`, user `dieter`: the bridge's duties already moved to Kotlin (Agent instructions, settings, board order, repositories so far); the bridge forwards them to it |
 | web host `/opt/web-host/dieter-web-host.jar` (Java 21) | loopback, user `dieter-web`: Dieter's core for the page (signed in to your gateway) and the add-on's own features; state in `/data/web-host` |
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the bridge on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR`; staged runtimes of earlier versions are removed, and the Bun it carries is installed as the daemon's managed Bun (`/data/dieter/runtime/tools/bun/<bun version>`), which Oh My Pi's model discovery would otherwise download the whole archive for |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |

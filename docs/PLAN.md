@@ -511,7 +511,8 @@ with the e2e suite green, and the last one deletes `dieter/bridge/` and Python f
 1. ✅ 0.6.431.10: the operator (run.sh starts it, the bridge forwards) and Agent instructions (`api/prompts`)
 2. ✅ 0.6.431.11: settings, title model, board order (`/data/bridge_settings.json`, written by the operator; the bridge's
    titles, housekeeping and state stream read it, and the bridge follows a change after the forward: `after_operator`)
-3. Projects: clone, new repository, adoption
+3. ✅ 0.6.431.12: projects: clone, new repository, adoption (`api/project`; the options' `projects` at start go through
+   the operator too)
 4. Claude sign-in, gateway enrollment, SSH key
 5. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments
 6. Dreamfall: the API, and the agents' `dreamfall` command (a mode of the jar instead of `dreamfall.py`; its records

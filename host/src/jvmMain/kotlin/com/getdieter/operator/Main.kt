@@ -2,6 +2,8 @@ package com.getdieter.operator
 
 import java.io.File
 import java.net.InetSocketAddress
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 /**
  * The add-on's operator: the half of the Python bridge already moved to Kotlin, one area per release
@@ -13,6 +15,8 @@ import java.net.InetSocketAddress
  *   DIETER_BIN             the Dieter CLI, default /usr/local/bin/dieter (DIETER_HOME and the daemon address
  *                          come from the environment, as for the bridge)
  *   BRIDGE_SETTINGS_FILE   the add-on's settings, default /data/bridge_settings.json
+ *   DIETER_OPTIONS_FILE    the add-on's options as the Supervisor writes them, default /data/options.json (missing:
+ *                          not an add-on); DIETER_PROJECTS_DIR  where repositories go, default /data/projects
  *   SUPERVISOR_TOKEN       Home Assistant through the Supervisor (set inside the add-on)
  */
 fun main() {
@@ -23,12 +27,18 @@ fun main() {
     val settings = Settings(File(env["BRIDGE_SETTINGS_FILE"] ?: "/data/bridge_settings.json"), OllamaEntity(HomeAssistant.supervisor(env))) {
         Settings.localDaemonId(home)
     }
-    val server = OperatorServer(InetSocketAddress(host, port), routes(dieter, settings)).start()
+    val optionsFile = File(env["DIETER_OPTIONS_FILE"] ?: "/data/options.json")
+    val options = {
+        if (!optionsFile.exists()) null
+        else runCatching { Json.parseToJsonElement(optionsFile.readText()) as? JsonObject }.getOrNull() ?: JsonObject(emptyMap())
+    }
+    val projects = Projects(dieter, File(env["DIETER_PROJECTS_DIR"] ?: "/data/projects"), options)
+    val server = OperatorServer(InetSocketAddress(host, port), routes(dieter, settings, projects)).start()
     Log.line("listening on $host:${server.address.port}")
 }
 
 /** Every path the operator answers, under /api/ like the bridge's. */
-fun routes(dieter: Dieter, settings: Settings): Routes {
+fun routes(dieter: Dieter, settings: Settings, projects: Projects): Routes {
     val prompts = Prompts(dieter)
     return Routes()
         .get("prompts") { prompts.view() }
@@ -36,4 +46,5 @@ fun routes(dieter: Dieter, settings: Settings): Routes {
         .get("settings") { settings.view() }
         .post("settings") { settings.update(it.body) }
         .post("boards/order") { settings.order(it.body) }
+        .post("project") { projects.add(it.body) }
 }

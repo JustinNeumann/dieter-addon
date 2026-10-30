@@ -51,7 +51,7 @@ Endpoints:
   POST /api/{card|chat}/ID/cancel     stop the running turn
   POST /api/{card|chat}/ID/archive
   POST /api/card/ID/read      {seq}  mark the displayed reply as seen (response_seq)
-  POST /api/project           {git_url, name?, branch?}  add-on only: clone into /data/projects/<name> and register
+  POST /api/project           {git_url, name?, branch?} | {folder}  a repository or folder: answered by the operator
                               {folder}  new empty Git repository /data/projects/<folder> (existing folder adopted)
   POST /api/board             {project, name, workflow?: review|direct, publish?: manual|pull_request|push_base}  a new board of the project (like the app's New board)
   POST /api/board/ID/git      {publish: manual|pull_request|push_base}  the board's remote publish mode (cards inherit it)
@@ -543,7 +543,23 @@ def order_boards(boards, order=None):
 # to it: (method, path below /api/). Agent instructions (api/prompts) moved first.
 OPERATOR_URL = os.environ.get("DIETER_OPERATOR_URL", "http://127.0.0.1:8096/")
 OPERATOR_PATHS = {("GET", ("prompts",)), ("POST", ("prompts",)),
-                  ("GET", ("settings",)), ("POST", ("settings",)), ("POST", ("boards", "order"))}
+                  ("GET", ("settings",)), ("POST", ("settings",)), ("POST", ("boards", "order")),
+                  ("POST", ("project",))}
+
+
+def operator_request(method, path, body=None, headers=(), timeout=660):
+    """(status, raw answer) of the operator for /api/…; raises URLError/OSError while it does not answer.
+    A clone may take its 10 minutes."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(OPERATOR_URL.rstrip("/") + path, data=data, method=method)
+    req.add_header("Content-Type", "application/json")
+    for k, v in headers:
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
 
 
 def after_operator(path, before, answer):
@@ -555,6 +571,8 @@ def after_operator(path, before, answer):
             HOUSEKEEPING_WAKE.set()
     elif path == ("boards", "order") and isinstance(answer.get("board_order"), list):
         STATE.reorder_boards(answer["board_order"])
+    elif path == ("project",):
+        STATE.refresh(wait=True)
 
 
 def ollama_entity():
@@ -1609,66 +1627,6 @@ def ssh_test(target):
     return {"ok": False, "error": (p.stderr.strip().splitlines() or ["ssh failed"])[-1][:300]}
 
 
-GIT_URL_RE = re.compile(r"^(https://[\w.\-]+(:\d+)?/[\w.\-/~]+|git@[\w.\-]+:[\w.\-/~]+|ssh://[\w.\-@]+(:\d+)?/[\w.\-/~]+)$")
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-
-
-def repo_name(url):
-    return re.sub(r"\.git$", "", url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1])
-
-
-def add_project(url, name="", branch=""):
-    """Clone a Git URL into /data/projects/<name> (if missing) and register it with the daemon.
-    Any number of repositories works; private GitHub repos use the add-on's github_token."""
-    url, name, branch = url.strip(), (name or "").strip() or repo_name(url.strip()), (branch or "").strip()
-    if not GIT_URL_RE.match(url):
-        raise ValueError("git_url must be an https://, ssh:// or git@host:path URL")
-    if not NAME_RE.match(name):
-        raise ValueError("name may contain letters, digits, . _ - (max 64)")
-    if branch and not re.match(r"^[\w./-]{1,100}$", branch):
-        raise ValueError("invalid branch")
-    os.makedirs(PROJECTS_DIR, exist_ok=True)
-    path = os.path.join(PROJECTS_DIR, name)
-    if not os.path.isdir(os.path.join(path, ".git")):
-        log(f"projects: cloning {url} -> {path}")
-        git(["clone", "--quiet", *(["--branch", branch] if branch else []), url, path])
-    known = {p.get("path"): p for p in unwrap(run(["project", "list", "--format", "json"], timeout=20), "projects")}
-    if path in known:
-        return {"ok": True, "id": known[path].get("id"), "name": known[path].get("name") or name, "existed": True}
-    args = ["project", "create", "--name", name, "--format", "json"]
-    if branch:
-        args += ["--base-branch", branch]
-    out = run(args + [path], timeout=60)
-    pid = (out.get("project") or out).get("id") if isinstance(out, dict) else out
-    log(f"projects: registered {name} as {pid}")
-    return {"ok": True, "id": pid, "name": name, "existed": False}
-
-
-def add_folder(name):
-    """New project without a remote: an empty Git repository in /data/projects/<name> (an existing folder
-    there is adopted and initialised if it is no repository yet), registered with the daemon."""
-    name = (name or "").strip()
-    if not NAME_RE.match(name):
-        raise ValueError("name may contain letters, digits, . _ - (max 64)")
-    os.makedirs(PROJECTS_DIR, exist_ok=True)
-    path = os.path.join(PROJECTS_DIR, name)
-    os.makedirs(path, exist_ok=True)
-    if not os.path.isdir(os.path.join(path, ".git")):
-        log(f"projects: initialising {path}")
-        git(["init", "--quiet", "--initial-branch=main"], cwd=path)
-        ident = []
-        if not (OPTS.get("git_user") or "").strip():
-            ident = ["-c", "user.name=Dieter", "-c", "user.email=dieter@home-assistant.local"]
-        git([*ident, "commit", "--quiet", "--allow-empty", "-m", "Initial commit"], cwd=path)
-    known = {p.get("path"): p for p in unwrap(run(["project", "list", "--format", "json"], timeout=20), "projects")}
-    if path in known:
-        return {"ok": True, "id": known[path].get("id"), "name": known[path].get("name") or name, "existed": True}
-    out = run(["project", "create", "--name", name, "--format", "json", path], timeout=60)
-    pid = (out.get("project") or out).get("id") if isinstance(out, dict) else out
-    log(f"projects: registered folder {name} as {pid}")
-    return {"ok": True, "id": pid, "name": name, "existed": False}
-
-
 PUBLISH_MODES = ("manual", "pull_request", "push_base")   # Dieter's remote publish modes of a board or card
 
 
@@ -1709,12 +1667,21 @@ def board_git(bid, b):
 
 
 def setup_projects():
-    """Projects from the add-on options (a convenience; more can be added from the page any time)."""
+    """Projects from the add-on options (a convenience; more can be added from the page any time), cloned and
+    registered by the operator (it may still be starting when the daemon is up: waits up to a minute for it)."""
     for pr in OPTS.get("projects") or []:
-        try:
-            add_project(pr.get("git_url") or "", pr.get("name") or "", pr.get("branch") or "")
-        except Exception as e:
-            log(f"projects: {pr.get('name') or pr.get('git_url')}: {e}")
+        body = {"git_url": pr.get("git_url") or "", "name": pr.get("name") or "", "branch": pr.get("branch") or ""}
+        for attempt in range(30):
+            try:
+                status, raw = operator_request("POST", "/api/project", body)
+            except (urllib.error.URLError, OSError) as e:
+                if attempt == 29:
+                    log(f"projects: {pr.get('name') or pr.get('git_url')}: operator unreachable ({e})")
+                time.sleep(2)
+                continue
+            if status != 200:
+                log(f"projects: {pr.get('name') or pr.get('git_url')}: {raw.decode(errors='replace')[:300]}")
+            break
 
 
 # --------------------------------------------------------------------------- workspace changes
@@ -2868,18 +2835,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def forward_operator(self, method, u, body):
         """A path the operator answers: passed on with its query, body and the Home Assistant user, answered as it answers."""
-        data = json.dumps(body).encode() if body is not None else None
         before = settings()
-        req = urllib.request.Request(OPERATOR_URL.rstrip("/") + u.path + (f"?{u.query}" if u.query else ""), data=data, method=method)
-        req.add_header("Content-Type", "application/json")
-        for h in ("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name"):
-            if self.headers.get(h):
-                req.add_header(h, self.headers.get(h))
+        headers = [(h, self.headers.get(h)) for h in ("X-Remote-User-Id", "X-Remote-User-Name", "X-Remote-User-Display-Name") if self.headers.get(h)]
         try:
-            with urllib.request.urlopen(req, timeout=180) as r:
-                status, raw = r.status, r.read()
-        except urllib.error.HTTPError as e:
-            status, raw = e.code, e.read()
+            status, raw = operator_request(method, u.path + (f"?{u.query}" if u.query else ""), body, headers)
         except (urllib.error.URLError, OSError) as e:
             log("operator:", method, u.path, e)
             return self.send_json({"error": "the add-on's operator is not running yet; try again in a moment"}, 503)
@@ -3361,15 +3320,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(device_revoke(parts[2]))
             if len(parts) == 4 and parts[1] == "schedules":
                 return self.send_json(schedule_action(parts[2], parts[3]))
-            if parts[1:] == ["project"]:
-                if not ADDON:
-                    return self.send_json({"error": "adding repositories works in the add-on only"}, 400)
-                if body.get("folder") and not body.get("git_url"):
-                    res = add_folder(body.get("folder"))
-                else:
-                    res = add_project(body.get("git_url") or "", body.get("name") or "", body.get("branch") or "")
-                STATE.refresh(wait=True)
-                return self.send_json(res)
             if parts[1:] == ["board"]:
                 res = create_board(body)
                 STATE.refresh(wait=True)
