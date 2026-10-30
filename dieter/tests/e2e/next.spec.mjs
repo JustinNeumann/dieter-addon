@@ -1,4 +1,4 @@
-// The new Compose page (dieter-addon-kotlin's Kotlin/Wasm bundle) at next/, behind the Ingress stand-in.
+// The add-on's page (the Kotlin/Wasm bundle of web/) at next/ and the root that forwards to it, behind the Ingress stand-in.
 import zlib from "node:zlib";
 import { execFileSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
@@ -61,21 +61,20 @@ test("a WebSocket passes Ingress (echo of text and a 100 kB binary frame)", asyn
   expect(result).toEqual({ text: "ping through ingress", size: 100_000 });
 });
 
-test("a browser without WebAssembly GC gets a message with a link to the classic page", async ({ page }) => {
+test("a browser without WebAssembly GC gets a message saying what it needs", async ({ page }) => {
   await page.addInitScript(() => { WebAssembly.validate = () => false; });
   await page.goto("next/");
-  await expect(page.locator("#loading")).toContainText("WebAssembly GC");
-  await page.locator("#loading a").click();
-  await expect(page).toHaveURL(/\/api\/hassio_ingress\/t0ken\/$/);
-  await expect(page.locator("#rail")).toBeVisible();
+  await expect(page.locator("#loading")).toContainText("needs WebAssembly GC");
+  await expect(page.locator("#loading a")).toHaveCount(0);
 });
 
-test("the classic page links to the new one (Tools → Preview → New page)", async ({ page }) => {
-  await page.goto("");
-  await page.locator('#rail [data-act="tab"][data-tab="tools"]').click();
-  await page.locator('[data-act="open-next"]').click();
-  await expect(page).toHaveURL(/\/api\/hassio_ingress\/t0ken\/next\/$/);
+test("the add-on's root opens the page in next/, keeping the query", async ({ page }) => {
+  await page.goto("?demo");
+  await expect(page).toHaveURL(/\/api\/hassio_ingress\/t0ken\/next\/\?demo$/);
   await started(page);
+  const root = await page.request.get("./");
+  expect(await root.text()).not.toContain("app.js");
+  expect((await page.request.get("app.js")).status()).toBe(404);
 });
 
 // colour of one screen pixel as #rrggbb (Compose draws into a canvas; there is no DOM to ask)
@@ -166,11 +165,10 @@ test("other deep links <HA>/app/<slug>/next/<route> become the page's ?route=", 
   await page.setContent('<iframe src="/api/hassio_ingress/t0ken/"></iframe>');
   const frame = () => page.frames().find((f) => f !== page.mainFrame());
   await expect.poll(() => frame()?.url(), { timeout: 20_000 }).toMatch(/\/t0ken\/next\/\?route=card%2Fc_123&x=1$/);
-  // the new page's own link back to the classic page does not bounce (referrer inside Ingress)
+  // the page navigating to the root itself does not replay the deep link (referrer inside Ingress)
   await frame().evaluate(() => { location.href = "../"; });
-  await expect.poll(() => frame()?.url(), { timeout: 20_000 }).toMatch(/\/t0ken\/$/);
-  await page.waitForTimeout(1500);
-  expect(frame().url()).toMatch(/\/t0ken\/$/);
+  await page.waitForTimeout(2500);
+  expect(frame().url()).toMatch(/\/t0ken\/next\/$/);
 });
 
 test("agents cannot use the web host: private state, no answer without the secret", async () => {

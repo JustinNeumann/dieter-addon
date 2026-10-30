@@ -2,20 +2,26 @@
 # End-to-end tests of the Dieter add-on: builds the amd64 image, starts it on the host network with
 # Dieter's deterministic mock harness, puts an Ingress-like proxy in front and runs Playwright.
 # Usage: tests/run.sh [playwright args]      E2E_DATA=<dir> keeps the staged runtime between runs,
-#        WEB_BUNDLE=<dir> mounts a local Compose bundle over /opt/web,
-#        WEB_HOST_JAR=<file> builds without downloading the web host and mounts this jar instead.
+#        The image takes the page and the web host from dieter/web-dist (tools/addon-dist.sh fills it; run.sh
+#        does that first when it is empty). WEB_BUNDLE=<dir> and WEB_HOST_JAR=<file> together build without them
+#        and mount an unpacked bundle (tools/package.sh) over /opt/web and the jar instead.
 set -euo pipefail
 cd "$(dirname "$0")"
 DATA="${E2E_DATA:-$HOME/.cache/dieter-addon-e2e/data}"
 IMAGE=dieter-addon-e2e
 mkdir -p "$DATA"
 [ -f "$DATA/options.json" ] || echo '{"git_user":"E2E","git_email":"e2e@example.invalid","github_token":"","claude_code_oauth_token":"","openai_api_key":"","antigravity_token":"","projects":[],"log_level":"info"}' > "$DATA/options.json"
+MOUNTED=
+if [ -n "${WEB_BUNDLE:-}" ] && [ -n "${WEB_HOST_JAR:-}" ]; then MOUNTED=1
+elif [ -n "${WEB_BUNDLE:-}${WEB_HOST_JAR:-}" ]; then echo "WEB_BUNDLE and WEB_HOST_JAR go together" >&2; exit 1
+elif [ ! -f ../web-dist/dieter-web.tar.gz ] || [ ! -f ../web-dist/dieter-web-host.jar ]; then
+  echo "building the page and the web host (tools/addon-dist.sh)…"; ../../tools/addon-dist.sh >/dev/null
+fi
 echo "building image…"
-docker build -q --build-arg BUILD_ARCH=amd64 ${WEB_HOST_JAR:+--build-arg DIETER_WEB_HOST_SHA=skip} -t "$IMAGE" .. >/dev/null
+docker build -q --build-arg BUILD_ARCH=amd64 ${MOUNTED:+--build-arg DIETER_WEB=mounted} -t "$IMAGE" .. >/dev/null
 docker rm -f dieter-e2e >/dev/null 2>&1 || true
 pkill -f '^node ingress-proxy.mjs' >/dev/null 2>&1 || true
-# WEB_BUNDLE=<dir> serves a local build of the Compose page (dieter-addon-kotlin: tools/package.sh) instead of the pinned one
-docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" ${WEB_BUNDLE:+-v "$WEB_BUNDLE:/opt/web:ro"} ${WEB_HOST_JAR:+-v "$WEB_HOST_JAR:/opt/web-host/dieter-web-host.jar:ro"} "$IMAGE" >/dev/null
+docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" ${MOUNTED:+-v "$WEB_BUNDLE:/opt/web:ro" -v "$WEB_HOST_JAR:/opt/web-host/dieter-web-host.jar:ro"} "$IMAGE" >/dev/null
 cleanup() { kill "${PROXY:-}" 2>/dev/null || true; [ -n "${E2E_KEEP:-}" ] || docker rm -f dieter-e2e >/dev/null 2>&1 || true; }   # E2E_KEEP=1 leaves the container for `docker logs dieter-e2e`
 trap cleanup EXIT
 echo "waiting for the bridge and daemon (first run stages the harness runtime, ~800 MB)…"

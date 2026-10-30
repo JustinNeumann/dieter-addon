@@ -2,6 +2,18 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.9 (2026-10-30)
+
+- **One page:** the add-on opens Dieter's Compose page directly; the classic page is gone. The sidebar entry,
+  `<HA>/app/<slug>/next/…` deep links and push notifications open the Compose page as before. Older browsers without
+  WebAssembly GC (iOS before 18.2) can no longer use the add-on.
+- **One repository:** the page and its web host are now built from this repository with every image (they lived in
+  dieter-addon-kotlin until 0.6.431.8), so they always match the add-on. Nothing changes for installs.
+- The bridge still runs: the web host reaches the add-on's features through it, and Home Assistant's sensor and
+  rest_commands (`homeassistant/packages/dieter.yaml`) talk to it unchanged. It moves into the web host step by step.
+- **Dreamfall:** a picked or promoted idea no longer shows up for a moment on its new stage without the verdict it
+  came with (the source's verdict is now recorded first).
+
 ## 0.6.431.8 (2026-10-30)
 
 - **New page (`next/`), dieter-addon-kotlin 0.4.5:**

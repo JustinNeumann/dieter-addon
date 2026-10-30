@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+// The browser <-> web host protocol: one WebSocket (binary frames), each frame one message below.
+// It carries the UI's core contract unchanged: `MobileCore.dispatch(Command)` and
+// `MobileCore.observe(Slice, scope)` of dieter.client.v1, the same contract the iOS app uses through
+// its byte bridge. The web host runs the Kotlin core (ClientApi) on the JVM next to the add-on's daemon,
+// and the add-on core (dieter.addon.v1) for the add-on's own features.
+package dieter.web.v1;
+
+import "dieter/addon/v1/addon.proto";
+import "dieter/client/v1/client.proto";
+
+option java_package = "com.getdieter.web.v1";
+
+// Browser -> web host.
+message ClientFrame {
+  oneof frame {
+    Dispatch dispatch = 1;
+    Observe observe = 2;
+    Unobserve unobserve = 3;
+    Ping ping = 4;
+    AddonDispatch addon_dispatch = 6;
+    AddonObserve addon_observe = 7;
+  }
+  // Context (the sign-in return address): BeginSignIn.redirect_uri carries it now.
+  reserved 5;
+}
+
+// Runs one command; answered by exactly one Replied with the same id.
+message Dispatch {
+  uint64 id = 1;
+  dieter.client.v1.Command command = 2;
+}
+
+// Starts observing a slice; every Update of it comes as Updated with this id. The first update is a
+// snapshot, as with ClientApi.observe. After a reconnect the browser observes again (new ids).
+message Observe {
+  uint64 id = 1;
+  dieter.client.v1.Slice slice = 2;
+  string scope = 3;
+}
+
+// Ends an observation of either core (one id sequence per connection).
+message Unobserve { uint64 id = 1; }
+
+// The add-on core's commands and slices (dieter/addon/v1/addon.proto), as Dispatch and Observe.
+message AddonDispatch {
+  uint64 id = 1;
+  dieter.addon.v1.Command command = 2;
+}
+
+message AddonObserve {
+  uint64 id = 1;
+  dieter.addon.v1.Slice slice = 2;
+  string scope = 3;
+}
+
+message Ping { uint64 id = 1; }
+
+// Web host -> browser.
+message HostFrame {
+  oneof frame {
+    Hello hello = 1;
+    Replied replied = 2;
+    Updated updated = 3;
+    Pong pong = 4;
+    AddonReplied addon_replied = 5;
+    AddonUpdated addon_updated = 6;
+  }
+}
+
+// First frame of every connection.
+message Hello {
+  // The Dieter release the host's core was built from.
+  string core_version = 1;
+  // This host's own version (the add-on's).
+  string host_version = 2;
+  // The Home Assistant user behind Ingress (X-Remote-User-Display-Name), if any.
+  string user_name = 3;
+  // pinned_sign_in_callback: the core decides the return address now.
+  reserved 4;
+}
+
+message Replied {
+  uint64 id = 1;
+  dieter.client.v1.Reply reply = 2;
+}
+
+message Updated {
+  uint64 id = 1;
+  dieter.client.v1.Update update = 2;
+}
+
+message Pong { uint64 id = 1; }
+
+message AddonReplied {
+  uint64 id = 1;
+  dieter.addon.v1.Reply reply = 2;
+}
+
+message AddonUpdated {
+  uint64 id = 1;
+  dieter.addon.v1.Update update = 2;
+}

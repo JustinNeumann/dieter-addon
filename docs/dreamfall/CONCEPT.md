@@ -1,8 +1,9 @@
 # Dreamfall: a multi-stage idea pipeline on Dieter boards
 
-Status: implemented in add-on 0.6.429.42 (`dieter/bridge/dreamfall.py`, the Dreamfall view in `app.js`, the
-`dreamfall` command; user documentation in `dieter/DOCS.md` → Dreamfall boards). This note keeps the design
-reasoning; the mockup (`mockup.html`, screenshots `board-*.png`, `phone-*.png`) predates the implementation.
+Status: implemented in add-on 0.6.429.42 (`dieter/bridge/dreamfall.py`, the `dreamfall` command, and a Dreamfall
+view of the classic page, which 0.6.431.9 replaced with the Compose screens `web/…/addon/Dreamfall*.kt`); user
+documentation in `dieter/DOCS.md` → Dreamfall boards. This note keeps the design reasoning; the screenshots of the
+mockup (`board-*.png`, `phone-*.png`, `page-*.png`) predate the implementation, the mockup itself is in the history.
 
 ## Answer to the two open choices
 
@@ -97,7 +98,7 @@ record.
 1. Pipeline record and a `New board → Dreamfall pipeline` sheet in the page that creates the three
    stage boards, the labels from the categories file and the two schedules (prompts from `sem2_ha`,
    generalised).
-2. Dreamfall view in `app.js` (funnel, stage columns, phone tabs) over the existing board data.
+2. Dreamfall view in the classic page's `app.js` (funnel, stage columns, phone tabs) over the existing board data.
 3. Provenance and Trail on the card screen; Pick button (copy to Implementation as Todo, record the pick).
 4. Stage prompt templates that write the card records and events; migration of the existing `sem2_ha`
    cards (their briefs already contain the "Triage" and "Found in run" lines to parse).

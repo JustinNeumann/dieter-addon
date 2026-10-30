@@ -5,3 +5,12 @@ __pycache__/
 *.pyc
 .written-from-pi
 .cache/
+# Kotlin build (page, web host, add-on core)
+.gradle/
+.kotlin/
+build/
+out/
+*.iml
+.idea/
+local.properties
+node_modules/

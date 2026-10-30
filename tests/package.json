@@ -1,0 +1,9 @@
+{
+  "name": "dieter-addon-page-tests",
+  "private": true,
+  "scripts": {
+    "test": "playwright test --grep-invert @measure",
+    "measure": "playwright test --grep @measure --workers 1"
+  },
+  "devDependencies": { "@playwright/test": "1.59.1" }
+}
