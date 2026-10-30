@@ -778,8 +778,9 @@ def transfer(p, src, dest_role, actor, name, verb, rationale="", score=None, run
                    event("transferred", actor, name, run=run, to=new_id, stage=dest_role))
         return cur
 
-    kv_update("c." + new_id, dest)
+    # the source's verdict first: whoever sees the copy's record (created_by) also sees the verdict it came with
     kv_update("c." + src["id"], source)
+    kv_update("c." + new_id, dest)
     if src["lane"] != "done":
         cli(["card", "move", "--lane", "done", src["id"]], timeout=30, parse=False)
     if start:
