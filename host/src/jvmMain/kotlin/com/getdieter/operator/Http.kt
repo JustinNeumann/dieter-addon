@@ -64,14 +64,14 @@ class Routes {
             return try {
                 200 to route.handle(Request(method, parts, params, query, headers, read))
             } catch (e: BadRequest) {
-                400 to error(e.message)
+                400 to errorAnswer(e.message)
             } catch (e: NotFound) {
-                404 to error(e.message)
+                404 to errorAnswer(e.message)
             } catch (e: CliError) {
-                502 to error(e.message)
+                502 to errorAnswer(e.message)
             }
         }
-        return if (other) 405 to error("method not allowed") else 404 to error("not found")
+        return if (other) 405 to errorAnswer("method not allowed") else 404 to errorAnswer("not found")
     }
 
     private fun Route.match(parts: List<String>): Map<String, String>? {
@@ -84,7 +84,7 @@ class Routes {
     }
 }
 
-fun error(message: String?) = buildJsonObject { put("error", message ?: "error") }
+fun errorAnswer(message: String?) = buildJsonObject { put("error", message ?: "error") }
 
 /** The JDK's HTTP server on loopback, one virtual thread per request, every answer JSON and never cached. */
 class OperatorServer(private val address: InetSocketAddress, private val routes: Routes) {
@@ -104,10 +104,10 @@ class OperatorServer(private val address: InetSocketAddress, private val routes:
                 val headers = exchange.requestHeaders.mapNotNull { (k, v) -> v.firstOrNull()?.let { k.lowercase() to it } }.toMap()
                 routes.answer(exchange.requestMethod, parts, query(uri.rawQuery), headers) { read(exchange) }
             } catch (e: BadRequest) {
-                400 to error(e.message)
+                400 to errorAnswer(e.message)
             } catch (e: Exception) {
                 Log.line("${exchange.requestMethod} ${exchange.requestURI.path}: $e")
-                500 to error(e.toString())
+                500 to errorAnswer(e.toString())
             }
         exchange.reply(status, answer)
     }

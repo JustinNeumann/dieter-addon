@@ -18,7 +18,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 class QuestionsTest {
-    private val noDieter = Dieter { _, _ -> error("not called") }
+    private val noDieter = Dieter { _, _ -> throw IllegalStateException("not called") }
     private var clock = System.currentTimeMillis()
     private val questions = Questions { clock }
     private val dir = kotlin.io.path.createTempDirectory("uploads").toFile()

@@ -17,8 +17,8 @@ import kotlinx.serialization.json.put
 /**
  * The add-on's own settings (Tools → Settings), kept in /data/bridge_settings.json: who titles a task created without
  * a title, how long a finished card's work folder is kept, the board order dragged on the page, and the Antigravity
- * quota groups left out of the Inbox's usage strip (Usage → Include in summary). The bridge's
- * titles, housekeeping and state stream read the same file on every use.
+ * quota groups left out of the Inbox's usage strip (Usage → Include in summary). The operator's titles and
+ * housekeeping and the bridge's state stream (the board order) read the same file on every use.
  */
 class Settings(private val file: File, private val ollama: OllamaEntity, private val daemonId: () -> String) {
     data class Values(val titleModel: String, val boardOrder: List<String>, val retentionDays: Int, val antigravityExcluded: List<String> = emptyList())
@@ -83,6 +83,9 @@ class Settings(private val file: File, private val ollama: OllamaEntity, private
             put("board_order", JsonArray(order.map(::JsonPrimitive)))
         }
     }
+
+    /** The Ollama AI Task entity that titles new tasks, or null when Dieter's auto-title does (or no entity exists). */
+    fun titleEntity(): String? = if (read().titleModel == "ollama") ollama.get() else null
 
     fun view(): JsonObject {
         val cur = read()

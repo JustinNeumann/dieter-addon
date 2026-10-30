@@ -114,6 +114,12 @@ class FakeStore : Dieter {
             }
             "board list" -> JsonObject(mapOf("boards" to JsonArray(boards.values.toList())))
             "board create" -> JsonObject(mapOf("board" to boards.getValue(board(opt("--project")!!, opt("--name")!!))))
+            "board show" -> JsonObject(mapOf("board" to (boards[args.last()] ?: throw CliError("error: board ${args.last()} not found")).updated("retirementRevision" to "rv")))
+            "board retire" -> {
+                check(opt("--revision") == "rv")
+                boards[args.last()] = boards.getValue(args.last()).updated("retired" to true)
+                null
+            }
             "schedule create" -> next("sch_").let { id ->
                 schedules[id] = args
                 JsonObject(mapOf("schedule" to buildJsonObject { put("id", id) }))
@@ -125,7 +131,7 @@ class FakeStore : Dieter {
             }
             "schedule delete" -> schedules.remove(args.last()).let { null }
             "schedule run" -> JsonPrimitive("started")
-            else -> error("unexpected: $args")
+            else -> throw IllegalStateException("unexpected: $args")
         }
     }
 }
@@ -316,8 +322,12 @@ class DreamfallTest {
         store.board("p_1", "Enumeration")
         val adopted = store.board("p_1", "Mine")
         val other = store.board("p_2", "Theirs")
+        val before = store.boards.keys.toSet()
         assertFailsWith<DreamfallError> { created("boards" to mapOf("navigation" to other)) }.also { assertEquals("board $other is not a board of this project", it.message) }
         assertTrue(store.kv.isEmpty())
+        val made = store.boards.keys - before
+        assertTrue(made.isNotEmpty() && made.all { store.boards.getValue(it)["retired"].truthy() }, "the boards it made are retired")
+        assertTrue(before.none { store.boards.getValue(it)["retired"].truthy() }, "the others stay")
         val p = created("boards" to mapOf("navigation" to adopted))
         assertEquals(adopted, Dreamfall.stage(p, "navigation")!!.field("board_id"))
         assertEquals("Dreamfall · Enumeration", store.boards.getValue(Dreamfall.stage(p, "enumeration")!!.field("board_id")).field("name"), "a taken name gets the board's")
