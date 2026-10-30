@@ -55,6 +55,15 @@ other hosts (not only Home Assistant) offer Dieter in a browser.
    sharer (Web Share where there is one, else a Markdown download) and the system Back (browser history through
    `NavigationEventInput`). Each is a few dozen lines in `web/src/wasmJsMain`.
 
+## Found while checking parity (not web-specific)
+
+- **Usage shows raw reset times.** `QuotaRows.window` copies `ProviderQuotaWindow.resets_at` into the row
+  (`QuotaRowsTest` expects the ISO stamp) and `UsageScreen` prints it as "resets 2026-10-30T01:29:59.711563+00:00".
+  The widget already formats it with `Quotas.resetText(it, now)`; the row could carry that text instead.
+- **A host's title model.** A host that names tasks itself (the add-on: Ollama through Home Assistant) cannot hook
+  New task: a task without a title always gets the daemon's auto-title. A creation hook in `MobileExtensions`
+  (a provisional title from the host, or a call after create) would cover it.
+
 ## Security notes for a web host
 
 - The host holds a full account session: it should run as its own OS user with private state and answer only

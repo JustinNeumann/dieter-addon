@@ -398,7 +398,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Vault / mail access switches | ✅ | verify | |
 | Attachments (≤ 4 × 5 MB, 6 MB total: the apps' `Attachments` limits) | ✅ | `rememberAttachmentPicker` web actual: `<input type=file multiple>` → `Attachments.part`, the apps' limit messages | `the Attach button does not break the form`; `Attach in New task takes files from the browser's file dialog`; `a file over the limit is refused with the apps' message` |
 | Draft survives live updates, Escape closes, X cancels | ✅ | verify on web | `typing in the form survives live updates…`, `Escape closes the form`, … |
-| **Title model** (OpenAI vs Ollama via HA AI Task) | ❌ | the bridge renames after creation; for cards created through the core, the bridge must see them (`housekeeping`-style watcher) or the web host calls the bridge after create | |
+| **Title model** (OpenAI vs Ollama via HA AI Task) | ❌ | the setting is on the new page, but a task created there without a title gets the daemon's auto-title (OpenAI) even with Ollama chosen: the classic page creates it under its first line and renames it. Needs a hook in the shared New task flow (title from a host, or "create, then call the host"), i.e. an extension point upstream | |
 
 #### F. Conversation
 
@@ -431,7 +431,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Machines | **SSH key** of the add-on, copy, connection test | ✅ add-on core (`ssh` slice, `TestSsh`) | extension section + bridge `ssh` endpoints | `Machines shows the add-on's own SSH key…` |
 | Files | browse, dotfiles, text/images, download | ✅ | "Open preview" goes through the attachment viewer: a new tab, or a download for types a browser does not show | `Files browses the project's checkout…` |
 | Schedules | list, create (presets, preview), run, pause, history, delete | ✅ | verify presets and next-run preview | `Schedules: create with the mock agent…` |
-| Usage | quotas (Claude, Codex, Antigravity groups) | ✅/🟡 | verify Antigravity's grouped windows from the fork | |
+| Usage | quotas (Claude, Codex, Antigravity groups) | ✅/🟡 | checked live (OpenAI, Claude accounts and windows, the add-on's Claude sign-in); no Antigravity account to check its groups. Reset times show as raw ISO stamps ("resets 2026-10-30T01:29:59…") in upstream's shared Usage screen, in every app: the core's `QuotaRows.window` passes `resets_at` through (its test expects that) while the widget uses `Quotas.resetText`. Upstream fix, see `docs/proposals/web-client.md` | |
 | Usage | **Claude sign-in** (`claude auth login`, paste code, cancel, logout) | ✅ add-on core (`claude` slice, sign-in/code/cancel/sign-out commands) | extension section + bridge `claude` endpoints | `Usage offers the Claude sign-in…` |
 | Changes | project changes | ✅ | none | |
 | Devices | trust state, approve code, remove | ✅ | none (refusal message when not enrolled) | `Devices shows the daemon's trust state…` |
