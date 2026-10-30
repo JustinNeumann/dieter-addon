@@ -1,9 +1,13 @@
 # Builds the add-on image the Supervisor pulls (config.yaml: image: ghcr.io/justinneumann/dieter).
 # First the page (Kotlin/Wasm) and the web host (JVM) from web/, host/ and addon/ with the fork submodule,
 # their tests and the page's browser tests; tools/addon-dist.sh hands both to the image build in dieter/web-dist.
-# Pushes to main then build aarch64 and amd64 on native runners, sign them with Cosign and publish the
-# multi-arch manifest ghcr.io/justinneumann/dieter:<version from dieter/config.yaml> (+ :latest);
-# pull requests only build. A version whose tag already exists is not pushed again, so bump
+# Then aarch64 and amd64 are built on native runners, signed with Cosign and published as the multi-arch
+# manifest ghcr.io/justinneumann/dieter:<version from dieter/config.yaml> (+ :latest on main).
+# A release is published before Home Assistant can offer it: the Supervisor reads config.yaml from main, so a
+# pull request (from this repository) that changes the version publishes that version's image already, labelled
+# with the tree it was built from (the pull request merged into main). After the merge, main publishes it only
+# when its tree differs (main moved in between) and otherwise just moves :latest. Other pull requests only
+# build, and on main a version whose tag already exists is not pushed again, so bump
 # config.yaml + CHANGELOG.md for every release (DEPLOY.md). One-time after the first run: make the
 # packages dieter, aarch64-dieter and amd64-dieter public (GitHub → Packages → Package settings).
 # Uses the composite actions of home-assistant/builder (the old builder action is deprecated).
@@ -30,7 +34,6 @@ env:
   ARCHITECTURES: '["aarch64", "amd64"]'
   IMAGE_NAME: dieter
   REGISTRY_PREFIX: ghcr.io/justinneumann   # registries want lowercase; github.repository_owner is not
-  PUBLISH: ${{ github.event_name != 'pull_request' }}
 
 permissions:
   contents: read
@@ -42,8 +45,14 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       version: ${{ steps.version.outputs.version }}
+      tree: ${{ steps.version.outputs.tree }}
+      publish: ${{ steps.release.outputs.publish }}
+      skip-existing: ${{ steps.release.outputs.skip-existing }}
+      latest: ${{ steps.release.outputs.latest }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # HEAD^1: main before this push, or the pull request's base (HEAD is their merge)
 
       - name: Get build matrix
         id: matrix
@@ -58,7 +67,38 @@ jobs:
         run: |
           version=$(python3 -c 'import yaml; print(yaml.safe_load(open("dieter/config.yaml"))["version"])')
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
           echo "add-on version ${version}"
+
+      # publish: push the images; skip-existing: keep a tag that exists (empty: overwrite it); latest: only move
+      # :latest to the version, which a pull request published already from the same tree.
+      - name: Decide what to publish
+        id: release
+        env:
+          EVENT: ${{ github.event_name }}
+          OWN_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TREE: ${{ steps.version.outputs.tree }}
+        run: |
+          yaml_version() { python3 -c 'import sys, yaml; print(yaml.safe_load(sys.stdin)["version"])'; }
+          before=$(git show 'HEAD^1:dieter/config.yaml' 2>/dev/null | yaml_version 2>/dev/null || true)
+          published=$(docker buildx imagetools inspect "${REGISTRY_PREFIX}/${IMAGE_NAME}:${VERSION}" \
+              --format '{{ json (index .Image "linux/amd64").Config.Labels }}' 2>/dev/null \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin).get("io.dieter.tree", ""))' 2>/dev/null || true)
+          publish=false skip="" latest=false
+          if [[ "$EVENT" == pull_request ]]; then
+            # a release not yet on main, from this repository (other repositories' tokens cannot push)
+            if [[ "$VERSION" != "$before" && "$OWN_PR" == true ]]; then publish=true; fi
+          elif [[ "$VERSION" == "$before" ]]; then
+            publish=true skip="$VERSION"             # no release: an existing tag stays as it is
+          elif [[ -n "$published" && "$published" == "$TREE" ]]; then
+            latest=true                              # the release's pull request published this tree already
+          else
+            publish=true                             # built here, or over a pull request's image of another tree
+          fi
+          echo "version ${before:-?} -> ${VERSION}, published tree ${published:-none}, this tree ${TREE}"
+          echo "publish=${publish} skip-existing=${skip:-none} latest=${latest}"
+          { echo "publish=${publish}"; echo "skip-existing=${skip}"; echo "latest=${latest}"; } >> "$GITHUB_OUTPUT"
 
   page:
     name: Build the page and the web host
@@ -167,26 +207,28 @@ jobs:
           image: ${{ matrix.image }}
           image-tags: |
             ${{ needs.init.outputs.version }}
-            latest
+            ${{ github.event_name != 'pull_request' && 'latest' || '' }}
           labels: |
             io.hass.type=addon
             io.hass.name=Dieter
             io.hass.description=Dieter coding agents (daemon + page) behind Home Assistant Ingress
             io.hass.url=https://github.com/JustinNeumann/dieter-addon
-          push: ${{ env.PUBLISH }}
-          skip-existing: ${{ needs.init.outputs.version }}
+            io.dieter.tree=${{ needs.init.outputs.tree }}
+          push: ${{ needs.init.outputs.publish }}
+          skip-existing: ${{ needs.init.outputs.skip-existing }}
           version: ${{ needs.init.outputs.version }}
 
   manifest:
     name: Publish multi-arch manifest
     needs: [init, build]
-    if: github.event_name != 'pull_request'
+    if: needs.init.outputs.publish == 'true' || needs.init.outputs.latest == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       packages: write
     steps:
       - name: Publish multi-arch manifest
+        if: needs.init.outputs.publish == 'true'
         uses: home-assistant/builder/actions/publish-multi-arch-manifest@2026.09.0
         with:
           architectures: ${{ env.ARCHITECTURES }}
@@ -195,5 +237,22 @@ jobs:
           registry-prefix: ${{ env.REGISTRY_PREFIX }}
           image-tags: |
             ${{ needs.init.outputs.version }}
-            latest
-          skip-existing: ${{ needs.init.outputs.version }}
+            ${{ github.event_name != 'pull_request' && 'latest' || '' }}
+          skip-existing: ${{ needs.init.outputs.skip-existing }}
+
+      - name: Log in to ghcr.io
+        if: needs.init.outputs.latest == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # the release's pull request published the version from this tree; :latest follows it here
+      - name: Move latest to the version
+        if: needs.init.outputs.latest == 'true'
+        env:
+          VERSION: ${{ needs.init.outputs.version }}
+        run: |
+          docker buildx imagetools create -t "${REGISTRY_PREFIX}/${IMAGE_NAME}:latest" "${REGISTRY_PREFIX}/${IMAGE_NAME}:${VERSION}"
+
