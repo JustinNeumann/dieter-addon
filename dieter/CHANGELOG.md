@@ -2,6 +2,25 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.8 (2026-10-30)
+
+- **New page (`next/`), dieter-addon-kotlin 0.4.5:**
+  - **Touch:** the browser no longer takes over a swipe on the page (iPadOS did, mid-swipe), so lists scroll on with
+    Compose; pinch-zoom still works.
+  - **Dreamfall in Projects:** a Dreamfall board's stage boards are one purple row with its ideas and a badge for
+    the ones waiting for you, as on this page; it opens the Dreamfall board.
+  - **Inbox:** Antigravity is the usage strip's third bar (its tightest quota group). The filters fit on one line on
+    phones and narrow panes, and wrap instead of being cut off.
+  - **Archive board** (board menu): Dieter retires a board without open cards; its archived cards stay with it.
+    The project lists it under "Archived boards" with Restore. A board with open cards or a schedule stays, and
+    the page says why.
+  - Still on Compose Multiplatform 1.12, so screen readers keep a closed popup's entries until a reload. 1.13
+    fixes that, but its beta 1.13.0-beta01 loses or reorders keys typed with a keyboard (the never-pinned 0.4.4
+    used it).
+- **Dieter fork release v0.6.431-antigravity.8:** a board whose cards are all archived can be retired (upstream
+  keeps any board an archived card points at, and Dieter can neither delete cards nor move them to another board).
+  Its archived cards and their conversations stay readable; tasks on a retired board don't start.
+
 ## 0.6.431.7 (2026-10-30)
 
 - **New page (`next/`), dieter-addon-kotlin 0.4.3:**
