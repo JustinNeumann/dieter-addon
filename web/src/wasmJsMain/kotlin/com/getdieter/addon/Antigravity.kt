@@ -9,6 +9,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.getdieter.addon.v1.AntigravityGroup
+import com.getdieter.addon.v1.AntigravityInclusion
+import com.getdieter.addon.v1.Command
+import com.getdieter.addon.v1.SettingChange
 import com.getdieter.addon.v1.Slice
 import com.getdieter.core.quotas.Quotas
 import com.getdieter.mobile.app.*
@@ -18,21 +21,25 @@ import com.getdieter.mobile.store.MobileStore
 import kotlin.time.Clock
 import kotlinx.coroutines.delay
 
-/**
- * Antigravity's quota groups, which the add-on reads with agy (the daemon reports no Antigravity usage): one card
- * per group, drawn like the provider accounts above it. Hidden while the add-on has no Antigravity credentials.
- */
-/** The Inbox's usage strip: one Antigravity bar at its tightest group, once agy has reported. */
+/** The Inbox's usage strip: one Antigravity bar at its tightest group included in the summary, once agy has reported. */
 @Composable
 internal fun antigravityBars(): List<UsageBar> {
     val groups = rememberAddonSlice(Slice.SLICE_ANTIGRAVITY)?.antigravity?.groups.orEmpty()
-    return remember(groups) { groups.minOfOrNull { it.remaining }?.let { listOf(UsageBar("Antigravity", it)) }.orEmpty() }
+    return remember(groups) {
+        groups.filterNot { it.excluded }.minOfOrNull { it.remaining }?.let { listOf(UsageBar("Antigravity", it)) }.orEmpty()
+    }
 }
 
+/**
+ * Antigravity's quota groups, which the add-on reads with agy (the daemon reports no Antigravity usage): one card
+ * per group, drawn like the provider accounts above it, each with "Include in summary" like theirs. Hidden while the
+ * add-on has no Antigravity credentials.
+ */
 @Composable
 internal fun AntigravitySection(store: MobileStore) {
     val slice = rememberAddonSlice(Slice.SLICE_ANTIGRAVITY)?.antigravity ?: return
     if (!slice.configured && slice.groups.isEmpty()) return
+    val actions = rememberAddonActions(store)
     val now by produceState(Clock.System.now()) {
         while (true) {
             delay(60_000)
@@ -59,12 +66,13 @@ internal fun AntigravitySection(store: MobileStore) {
                     color = palette.secondaryLabel,
                 )
             }
-        slice.groups.forEach { GroupCard(it, now) }
+        slice.groups.forEach { GroupCard(it, now, actions) }
     }
 }
 
 @Composable
-private fun GroupCard(group: AntigravityGroup, now: kotlin.time.Instant) {
+private fun GroupCard(group: AntigravityGroup, now: kotlin.time.Instant, actions: AddonActions) {
+    var saving by remember(group.name) { mutableStateOf(false) }
     val low = group.remaining < 20
     ContentCard(Modifier.padding(horizontal = ScreenMargin, vertical = 5.dp).testTag("antigravity-${group.name}")) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -95,6 +103,22 @@ private fun GroupCard(group: AntigravityGroup, now: kotlin.time.Instant) {
                     color = palette.secondaryLabel,
                 )
             }
+        }
+        Spacer(Modifier.height(8.dp))
+        Hairline()
+        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Include in summary", Modifier.weight(1f), style = type.subheadline, color = palette.label)
+            DSwitch(
+                !group.excluded,
+                { included ->
+                    saving = true
+                    actions.send(Command(change_setting = SettingChange(antigravity_inclusion = AntigravityInclusion(group.name, included)))) {
+                        saving = false
+                    }
+                },
+                Modifier.testTag("antigravity-include-${group.name}").named("Include ${group.name} in summary"),
+                enabled = !saving,
+            )
         }
     }
 }

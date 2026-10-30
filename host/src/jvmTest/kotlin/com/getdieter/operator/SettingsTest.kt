@@ -52,6 +52,27 @@ class SettingsTest {
     }
 
     @Test
+    fun `Antigravity groups are left out of the summary and taken back, one at a time`() {
+        settings.order(body("""{"ids":["b1"]}"""))
+        var v = settings.update(body("""{"antigravity_inclusion":{"group":"Gemini 4 Argon","included":false}}"""))
+        assertEquals(listOf("Gemini 4 Argon"), v["antigravity_excluded"]!!.jsonArray.map { it.jsonPrimitive.content })
+        settings.update(body("""{"antigravity_inclusion":{"group":"Gemini Models","included":false}}"""))
+        settings.update(body("""{"antigravity_inclusion":{"group":"Gemini Models","included":false}}"""))
+        v = settings.update(body("""{"antigravity_inclusion":{"group":"Gemini 4 Argon","included":true}}"""))
+        assertEquals(listOf("Gemini Models"), v["antigravity_excluded"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(Settings.Values("openai", listOf("b1"), 14, listOf("Gemini Models")), settings.read())
+        for (bad in listOf("""{"antigravity_inclusion":{"group":"","included":false}}""", """{"antigravity_inclusion":{"group":"G"}}""",
+                           """{"antigravity_inclusion":{"group":"G","included":"no"}}""", """{"antigravity_inclusion":"G"}""",
+                           """{"antigravity_inclusion":{"group":"${"x".repeat(81)}","included":false}}"""))
+            assertFailsWith<BadRequest>(bad) { settings.update(body(bad)) }
+        // other settings keep the list, and a file from before it reads as nothing left out
+        settings.update(body("""{"worktree_retention_days":30}"""))
+        assertEquals(listOf("Gemini Models"), settings.read().antigravityExcluded)
+        file.writeText("""{"title_model":"openai","worktree_retention_days":14,"board_order":[]}""")
+        assertEquals(emptyList(), settings.read().antigravityExcluded)
+    }
+
+    @Test
     fun `boards dragged on the page go first, others keep their rank after them`() {
         settings.order(body("""{"ids":["a","b","c","d"]}"""))
         val v = settings.order(body("""{"ids":["c","a"]}"""))

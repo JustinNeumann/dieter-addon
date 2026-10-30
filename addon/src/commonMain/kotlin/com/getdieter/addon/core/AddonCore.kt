@@ -49,8 +49,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import kotlinx.serialization.json.putJsonArray
 
 /** A command the add-on core refused or could not run; [failure] says why. */
 class AddonFailure(val failure: Failure) : Exception(failure.message)
@@ -103,6 +103,8 @@ class AddonCore(
     private var claudeSignIn = ClaudeSignIn()
     private var settingsJson: JsonObject? = null
     private var settingsError = ""
+    /** Antigravity as the bridge's stream last reported it; the settings say which groups the summary leaves out. */
+    private var antigravityReported = AntigravitySlice()
     private var pending: List<Question> = emptyList()
     private var questionsLoaded = false
     /** Answered here; the bridge's stream drops them a moment later. */
@@ -120,7 +122,7 @@ class AddonCore(
                     authError = ""
                     publishClaude()
                 }
-                antigravity.value =
+                antigravityReported =
                     AntigravitySlice(
                         configured = state.objects("backends").any { it.str("id") == "antigravity" },
                         groups =
@@ -128,6 +130,7 @@ class AddonCore(
                                 state.objects("quota").firstOrNull { it.str("provider") == "antigravity" }.objects("windows")
                             ),
                     )
+                publishAntigravity()
                 pending = state.objects("questions").mapNotNull(::parseQuestion)
                 answered.retainAll(pending.map { it.id }.toSet())
                 questionsLoaded = true
@@ -212,6 +215,8 @@ class AddonCore(
             when (slice) {
                 Slice.SLICE_CLAUDE -> auth == null
                 Slice.SLICE_GATEWAY, Slice.SLICE_SSH, Slice.SLICE_SETTINGS -> at == null || at.elapsedNow() > STALE
+                // the groups come with the stream; which of them the summary leaves out is a setting
+                Slice.SLICE_ANTIGRAVITY -> settingsJson == null && loadedAt[Slice.SLICE_SETTINGS] == null
                 else -> false
             }
         if (needed && loading[slice]?.isActive != true) loading[slice] = scope.launch { load(slice) }
@@ -236,6 +241,7 @@ class AddonCore(
                 settingsError = ""
                 publishSettings()
             }
+            Slice.SLICE_ANTIGRAVITY -> load(Slice.SLICE_SETTINGS)
             Slice.SLICE_CLAUDE -> {
                 val status = readOrNull("claude/login") { authError = it } ?: return publishClaude()
                 (status["auth"] as? JsonObject)?.let { auth = it }
@@ -545,10 +551,32 @@ class AddonCore(
                 if (days == 0) "Work folders are kept." else "Finished work folders are removed after ${retentionLabel(days)}."
             )
         }
+        change.antigravity_inclusion?.let { inclusion ->
+            if (inclusion.group.isBlank()) invalid("Which quota group?")
+            settingsJson =
+                bridge.write(
+                    "settings",
+                    buildJsonObject {
+                        putJsonObject("antigravity_inclusion") {
+                            put("group", inclusion.group)
+                            put("included", inclusion.included)
+                        }
+                    },
+                )
+            publishSettings()
+            return Result()
+        }
         invalid("Choose a setting.")
     }
 
+    private fun publishAntigravity() {
+        val excluded = settingsJson.strings("antigravity_excluded").toSet()
+        antigravity.value =
+            antigravityReported.copy(groups = antigravityReported.groups.map { it.copy(excluded = it.name in excluded) })
+    }
+
     private fun publishSettings() {
+        publishAntigravity()                       // which groups the summary leaves out is a setting
         val d = settingsJson
         if (d == null) {
             settings.value = SettingsSlice(loading = settingsError.isEmpty(), error = settingsError)

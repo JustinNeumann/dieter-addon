@@ -1,7 +1,10 @@
 package com.getdieter.web
 
+import com.getdieter.api.v1.Schedule
+import com.getdieter.api.v1.ScheduleDraft
 import com.getdieter.client.v1.*
 import com.getdieter.core.client.ClientSubscription
+import com.getdieter.core.schedules.SchedulePresentations
 import com.getdieter.mobile.store.MobileCore
 
 /**
@@ -14,6 +17,8 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
     /** The project last used on this "device" (the real core keeps it in its creation memory). */
     private var project = ""
     private val observers = mutableMapOf<Pair<Slice, String>, MutableList<(Update) -> Unit>>()
+    /** What Tools → Schedules shows: one project's schedules or every project's. */
+    private var schedulesShown: ScheduleProject? = null
 
     override suspend fun dispatch(command: Command): Result {
         command.board_view?.let { view ->
@@ -49,6 +54,22 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
             observers.keys.filter { it.first == Slice.SLICE_BOARD_VIEW || it.first == Slice.SLICE_WORKSPACE }
                 .forEach { publish(it.first, it.second) }
         }
+        command.schedules?.let { schedules ->
+            schedules.bind?.let { schedulesShown = it }
+            schedules.draft?.let { request ->
+                val projectId =
+                    if (schedulesShown?.all_projects == true) request.project_id else schedulesShown?.project_id.orEmpty()
+                val board = data.update(Slice.SLICE_WORKSPACE, "")?.workspace?.boards?.firstOrNull { it.project_id == projectId }
+                return Result(
+                    schedule_draft = ScheduleDraft(
+                        project_id = projectId, board_id = board?.id.orEmpty(), cron = "0 9 * * 1-5", timezone = "UTC",
+                        title_template = "Scheduled work · {{date}}", workspace_mode = "worktree",
+                    ),
+                )
+            }
+            publish(Slice.SLICE_SCHEDULES, schedules.scope)
+            return Result(schedules = schedulesSlice())
+        }
         command.files?.let { files ->
             extras.filesCommand(files)
             publish(Slice.SLICE_FILES, files.scope)
@@ -69,6 +90,7 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
             Slice.SLICE_MAIL -> Update(slice = slice, scope = scope, mail = extras.mail())
             Slice.SLICE_FILES -> Update(slice = slice, scope = scope, files = extras.files())
             Slice.SLICE_CREATION -> Update(slice = slice, scope = scope, creation = CreationSlice(project_id = project))
+            Slice.SLICE_SCHEDULES -> Update(slice = slice, scope = scope, schedules = schedulesSlice())
             else -> data.update(slice, scope)
         }
 
@@ -78,4 +100,28 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
     }
 
     private fun numbered(update: Update) = update.copy(sequence = ++sequence)
+
+    private fun schedulesSlice(): SchedulesSlice {
+        val shown = schedulesShown ?: return SchedulesSlice()
+        val schedules = SCHEDULES.filter { shown.all_projects || it.project_id == shown.project_id }
+        return SchedulesSlice(
+            project_id = if (shown.all_projects) "" else shown.project_id,
+            all_projects = shown.all_projects,
+            schedules = schedules,
+            total_count = schedules.size,
+            loaded = true,
+            state = if (schedules.isEmpty()) SchedulesSlice.State.STATE_EMPTY else SchedulesSlice.State.STATE_LOADED,
+            rows = schedules.map { SchedulePresentations.row(it) },
+        )
+    }
+
+    private companion object {
+        /** In two of the three projects, by name like the daemon's list. */
+        val SCHEDULES = listOf(
+            Schedule(id = "sch-backup", project_id = "p-home", board_id = "b-home", name = "Backup review", cron = "0 18 * * 0", timezone = "Europe/Berlin", enabled = true, action = "create_card"),
+            Schedule(id = "sch-deps", project_id = "p-addon", board_id = "b-addon", name = "Dependency check", cron = "0 3 * * *", timezone = "Europe/Berlin", enabled = true, action = "create_card"),
+            Schedule(id = "sch-ideas", project_id = "p-home", board_id = "b-home", name = "Morning ideas", cron = "0 4 * * 1-5", timezone = "Europe/Berlin", enabled = false, action = "create_card"),
+        )
+    }
 }
+

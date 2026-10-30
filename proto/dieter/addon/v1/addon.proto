@@ -88,7 +88,15 @@ message SettingChange {
   oneof setting {
     string title_model = 1;
     int32 worktree_retention_days = 2;
+    // Usage → Antigravity → a quota group's "Include in summary".
+    AntigravityInclusion antigravity_inclusion = 3;
   }
+}
+
+message AntigravityInclusion {
+  // The group's name, "Gemini 4 Argon"
+  string group = 1;
+  bool included = 2;
 }
 
 message AnswerQuestion {
@@ -288,6 +296,8 @@ message AntigravityGroup {
   // Percent left in its tightest window.
   int32 remaining = 3;
   repeated AntigravityWindow windows = 4;
+  // Left out of the Inbox's usage strip ("Include in summary" off); kept in the add-on's settings for every device.
+  bool excluded = 5;
 }
 
 message AntigravityWindow {

@@ -149,6 +149,14 @@ test("Settings (api/settings, api/boards/order): title models, work folder reten
   expect(order.ok).toBe(true);
   expect(order.board_order[0]).toBe(`b-e2e-${stamp}`);
   expect(order.board_order.slice(1)).toEqual(before.board_order.filter((x) => x !== `b-e2e-${stamp}`));
+  // Usage → Antigravity → "Include in summary": the groups left out, one change at a time
+  expect(before.antigravity_excluded).toEqual([]);
+  const left = await (await request.post("api/settings", { data: { antigravity_inclusion: { group: "Gemini 4 Argon", included: false } } })).json();
+  expect(left.antigravity_excluded).toEqual(["Gemini 4 Argon"]);
+  expect((await get()).antigravity_excluded).toEqual(["Gemini 4 Argon"]);
+  expect((await request.post("api/settings", { data: { antigravity_inclusion: { group: "", included: false } } })).status()).toBe(400);
+  await request.post("api/settings", { data: { antigravity_inclusion: { group: "Gemini 4 Argon", included: true } } });
+  expect((await get()).antigravity_excluded).toEqual([]);
 });
 
 test("the operator supervises the daemon: a restart on request, and an operator that died leaves no second daemon", async () => {

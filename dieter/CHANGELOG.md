@@ -2,7 +2,21 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.15 (2026-10-30)
+
+- **Tools → Schedules shows every project's schedules**, each under its project's name. Before, it showed only the
+  first project in the list, so schedules looked lost when that project had none. The menu (⋯ → Project) narrows the
+  list to one project and back to *All projects*. A new schedule asks for its project there.
+- Files, Changes and the other project tools start in the project you worked in last (newest activity on a card or
+  chat you started; cards a schedule created don't count) instead of the first project in the list.
+- A Dreamfall board takes the whole width on a tablet or PC again, like on the old page, whether it is opened from
+  Projects or from Tools → Dreamfall. Before, it was squeezed into the 400 px list column.
+- **Usage → Antigravity:** each quota group has an *Include in summary* switch.
+ A group that is switched off stays on
+  the page but no longer pulls down the Antigravity bar in the summary.
+
 ## 0.6.431.14 (2026-10-30)
+
 
 - A mouse wheel or trackpad that scrolls a list back past its top no longer leaves the round refresh arrow hanging
   there (Chrome on a PC); pulling down by touch still syncs again.
