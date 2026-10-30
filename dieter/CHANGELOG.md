@@ -2,6 +2,17 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.25 (2026-10-30)
+
+- **Boards are wide on desktops and tablets**, like Dreamfall boards: the board takes the whole width and its
+  lanes stand side by side, sharing it (each at least 260 dp, scrolling below that). Before, a board opened in the
+  narrow list pane and showed one lane at a time. A card opens over the board; Back returns to it. Phones keep
+  paging through the lanes.
+- **No more "Refreshing…" flicker under a running conversation.** The card's activity reaches the page a moment
+  before the conversation's stream, and every such moment showed "Refreshing…". It now shows only when the lag
+  lasts longer than half a second and the conversation is read again; opening a conversation, a broken stream and
+  an offline machine still show it at once.
+
 ## 0.6.431.24 (2026-10-30)
 
 - **Port 8099 answers only whom it must**, as Home Assistant's add-on rules ask (allow the Supervisor, deny the
