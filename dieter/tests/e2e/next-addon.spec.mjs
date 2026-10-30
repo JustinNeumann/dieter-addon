@@ -154,7 +154,7 @@ test("Projects: Add → New empty repository creates and registers a project", a
 });
 
 test("Push: the new page takes over the card an HA automation registered for the next load (api/focus)", async ({ page, request }) => {
-  // without a gateway account the card cannot open here; the page must still take the focus, as the classic one does
+  // without a gateway account the card cannot open here; the page must still take the focus
   const id = `c_focus${stamp}`;
   expect((await request.post("api/focus", { data: { id } })).ok()).toBeTruthy();
   expect((await (await request.get("api/focus")).json()).id).toBe(id);

@@ -1,4 +1,4 @@
-// Deep links into the page: ?route= at load (the classic page forwards <HA>/app/<slug>/next/<route>), and the routes
+// Deep links into the page: ?route= at load (the add-on's root page forwards <HA>/app/<slug>/next/<route>), and the routes
 // Home Assistant's app panel reports while the page is open (a push opening /<panel>/card/<id>).
 import { test, expect, type Page } from "@playwright/test";
 import { open, aria } from "./helpers";

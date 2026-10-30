@@ -12,7 +12,7 @@ import kotlinx.coroutines.channels.Channel
 internal object PanelRoutes {
     val later = Channel<String>(Channel.UNLIMITED)
 
-    /** [initial] is `?route=`, forwarded by the classic page from the panel route the panel then reports again. */
+    /** [initial] is `?route=`, forwarded by the add-on's root page from the panel route the panel then reports again. */
     fun start(initial: String, focus: Boolean) {
         var repeat = initial.trim('/')
         var routed = repeat.isNotEmpty()

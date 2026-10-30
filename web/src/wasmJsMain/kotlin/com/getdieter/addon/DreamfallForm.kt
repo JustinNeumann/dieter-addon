@@ -31,7 +31,7 @@ private val ROLES = listOf("enumeration" to "Enumeration", "navigation" to "Navi
 internal fun DreamfallFormScreen(store: MobileStore, scope: String) {
     val new = scope.startsWith("new:")
     var project by remember { mutableStateOf(scope.removePrefix("new:").takeIf { new }.orEmpty()) }
-    // the browser's time zone is the default for a new board (and for one that has none), as on the classic page
+    // the browser's time zone is the default for a new board (and for one that has none)
     val zone = remember { browserTimeZone() }
     val form = rememberAddonSlice(Slice.SLICE_DREAMFALL_FORM, (if (new) "new:$project" else scope) + "@$zone")?.dreamfall_form
     var settings by remember { mutableStateOf<DreamfallSettings?>(null) }

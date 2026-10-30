@@ -1,5 +1,5 @@
 // The project used last on this device (the core's creation memory): it leads the Projects list and opens when the
-// Projects tab is chosen from another tab, as on the classic page.
+// Projects tab is chosen from another tab.
 import { test, expect, type Page } from "@playwright/test";
 import { open, aria, settle } from "./helpers";
 

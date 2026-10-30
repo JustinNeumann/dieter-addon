@@ -4,30 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#FBFBFD" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#121214" media="(prefers-color-scheme: dark)">
 <title>Dieter</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=Roboto:wght@400;500;600&family=Roboto+Mono:wght@400&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0..1,0&display=block">
-<link rel="stylesheet" href="app.css">
+<style>html, body { margin: 0; background: #FBFBFD; } @media (prefers-color-scheme: dark) { html, body { background: #121214; } }</style>
+<script>
+/* The add-on's root, where Home Assistant's panel (Ingress) opens it: the page lives in next/. Behind Ingress this
+   is /api/hassio_ingress/<token>/ and the page's URL is relative, so the trailing slash matters.
+   Home Assistant opens the add-on at this root for every <HA>/app/<slug>/… address as well, so a deep link
+   <HA>/app/<slug>/next/… (the gateway's return after sign-in, a link to a conversation) is handed over here with the
+   parent's sub path and query: next/signin is the web host's sign-in return, other sub paths are routes of the page.
+   Not when the page itself navigated here (referrer inside Ingress): that would replay an old deep link. */
+(function () {
+  "use strict";
+  if (!location.pathname.endsWith("/") && !/\.html?$/.test(location.pathname)) {
+    location.replace(location.pathname + "/" + location.search + location.hash);
+    return;
+  }
+  var target = "next/" + location.search;
+  try {
+    var p = window.parent !== window && window.parent.location;
+    var m = p && p.pathname.match(/^\/(?:app\/|hassio\/ingress\/)?(?:[0-9a-f]{8}|local)_[a-z0-9_]+\/next(\/.*)?$/);
+    if (m && !/\/api\/hassio_ingress\//.test(document.referrer)) {
+      var sub = (m[1] || "/").replace(/^\/+|\/+$/g, "");
+      var query = p.search.replace(/^\?/, "");
+      target = sub === "signin" ? "next/signin" + p.search
+        : sub ? "next/?route=" + encodeURIComponent(sub) + (query ? "&" + query : "") : "next/" + p.search;
+    }
+  } catch (e) { /* not inside Home Assistant's frontend */ }
+  location.replace(target);
+})();
+</script>
 </head>
-<body>
-<div id="shell">
-  <nav id="rail"></nav>
-  <div id="body">
-    <div id="panes">
-      <section id="list"></section>
-      <div id="divider"></div>
-      <section id="detail"></section>
-    </div>
-    <nav id="bottombar"></nav>
-  </div>
-</div>
-<div id="modal" class="modal hidden"></div>
-<div id="overlay" class="hidden"></div>
-<div id="snackbar"></div>
-<script src="app.js"></script>
-</body>
+<body></body>
 </html>

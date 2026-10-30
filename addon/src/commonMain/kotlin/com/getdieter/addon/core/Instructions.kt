@@ -124,7 +124,7 @@ internal class Instructions(private val bridge: Bridge, private val scope: Corou
             )
         private val VARIABLE = Regex("""\{\{[\w.]+\}\}""")
 
-        /** The last line that says something besides variables, as the classic page shows it. */
+        /** The last line that says something besides variables. */
         fun summary(text: String): String =
             text.lines().map { it.trim() }.lastOrNull { it.replace(VARIABLE, "").isNotBlank() }.orEmpty()
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Dieter bridge: a small HTTP service that wraps the `dieter` CLI for the Home Assistant
-page (index.html next to this file) and for HA sensors.
+"""Dieter bridge: a small HTTP service that wraps the `dieter` CLI for the add-on's page (Dieter's Compose UI
+in next/, with its web host) and for HA sensors.
 
 Two homes, detected by /data/options.json:
   * Home Assistant add-on (dieter-addon/): the bridge also runs the Dieter daemon
@@ -16,7 +16,7 @@ Two homes, detected by /data/options.json:
     owner's, or with X-API-Key (~/.config/dieter-bridge/api_key, created on first start).
 
 Endpoints:
-  GET  /                      the page
+  GET  /                      the add-on's root (index.html next to this file): forwards to next/, with deep links
   GET  /api/state             everything the board needs (from the CLI: the cards `dieter watch changes` reports
                               changed are re-read one by one, everything is listed every IDLE_POLL_S, or POLL_S
                               while that stream is down)
@@ -35,7 +35,6 @@ Endpoints:
   GET  /api/{card|chat}/ID/tool-image?message=M&tool=T&i=N   N-th image in a tool call's output (Read of a PNG, screenshots)
   GET  /api/machines          enrolled machines (also part of /api/state)
   GET  /api/machine/ID/info   live host telemetry of one enrolled machine (`dieter machine info ID`)
-  GET  /app.css, /app.js      the page's assets
   GET  /next/...              the new Compose page (Kotlin/Wasm bundle in /opt/web, DIETER_WEB_DIR): hashed files
                               immutable, index.html and resources no-cache + ETag; *.wasm.gz raw for the loader,
                               .br/.gz by Accept-Encoding only outside Ingress (Ingress strips that header)
@@ -2851,7 +2850,7 @@ def in_nets(ip, nets):
 
 
 # --------------------------------------------------------------------------- Compose web UI (/next/)
-# The bundle of github.com/JustinNeumann/dieter-addon-kotlin (Dockerfile: DIETER_WEB_VERSION, sha256-pinned).
+# The page, built from this repository's web/ with the image (tools/addon-dist.sh → dieter/web-dist → /opt/web).
 WEB_DIR = os.environ.get("DIETER_WEB_DIR", "/opt/web")
 # webpack's wasm assets (20 hex) and the packaged dieter.<16 hex>.js never change under their name
 WEB_HASHED = re.compile(r"(^|[./])[0-9a-f]{16,}\.(wasm|js|mjs)(\.LICENSE\.txt)?(\.gz|\.br)?$")
@@ -2890,7 +2889,7 @@ def accepted_encodings(header):
     return out
 
 
-# The web host (dieter-addon-kotlin host/): the Compose page's core on the JVM, run by run.sh as its own user
+# The web host (host/ of this repository): the Compose page's core on the JVM, run by run.sh as its own user
 # with a private state directory (/data/web-host: device key, gateway session). It listens on loopback and
 # only answers requests that carry the per-boot secret, which run.sh hands to this bridge on an inherited
 # file descriptor (never in a file or the environment the agents could read). The bridge relays
@@ -3284,9 +3283,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.websocket_echo()
             if not parts or parts == ["index.html"]:
                 return self.send_text(open(INDEX, "rb").read(), ctype="text/html; charset=utf-8")
-            if parts in (["app.css"], ["app.js"]):
-                ctype = "text/css; charset=utf-8" if parts[0].endswith(".css") else "text/javascript; charset=utf-8"
-                return self.send_text(open(os.path.join(HERE, parts[0]), "rb").read(), ctype=ctype)
             if parts[0] != "api":
                 return self.send_json({"error": "not found"}, 404)
             if len(parts) == 4 and parts[1] == "dreamfall" and parts[2] == "card":

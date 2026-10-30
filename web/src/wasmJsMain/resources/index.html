@@ -27,7 +27,7 @@
 <script>
 /* Loader of Dieter's Compose UI (Kotlin/Wasm).
    Behind Home Assistant Ingress the page lives at /api/hassio_ingress/<token>/next/ and every asset
-   URL is relative, so the trailing slash matters (same guard as the classic page). */
+   URL is relative, so the trailing slash matters (same guard as the add-on's root page). */
 (function () {
   "use strict";
   var path = location.pathname;
@@ -143,7 +143,7 @@
     setInterval(function () { if (!document.hidden) check(); }, 1000); // hass.themes can change without a DOM change
   }
   // ---- where the gateway should send this browser back after GitHub sign-in. Inside Home Assistant's
-  // frontend: <HA address>/app/<add-on slug>/next/signin (the classic page forwards that deep link to
+  // frontend: <HA address>/app/<add-on slug>/next/signin (the add-on's root page forwards that deep link to
   // next/signin, which the bridge relays to the web host). Elsewhere: this page's own address.
   function signInCallback() {
     try {
@@ -175,7 +175,7 @@
     };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run); else run();
   }
-  var CLASSIC = 'The classic page still works: <a href="../" target="_self">open it</a>.';
+  var RELOAD = '<a href="./" target="_self">Reload</a> to try again.';
 
   // ---- Kotlin/Wasm needs WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari and iOS 18.2+)
   function wasmGcSupported() {
@@ -188,8 +188,8 @@
     }
   }
   if (!wasmGcSupported()) {
-    fail("This browser cannot run the new Dieter page: it needs WebAssembly GC " +
-      "(current Chrome, Edge or Firefox; Safari, iPhone and iPad from iOS 18.2). " + CLASSIC);
+    fail("This browser cannot run Dieter: it needs WebAssembly GC " +
+      "(current Chrome, Edge or Firefox; Safari, iPhone and iPad from iOS 18.2).");
     return;
   }
 
@@ -220,7 +220,7 @@
   function startupError(message) {
     if (!loading() || window.dieterStarted) return;
     fail("Dieter could not start: " + String(message || "unknown error")
-      .replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }) + ". " + CLASSIC);
+      .replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }) + ". " + RELOAD);
   }
   window.addEventListener("error", function (e) { startupError(e.message || (e.error && e.error.message)); });
   window.addEventListener("unhandledrejection", function (e) {

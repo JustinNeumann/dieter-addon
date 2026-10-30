@@ -9,8 +9,8 @@ import com.getdieter.mobile.store.ConversationNamer
 import com.getdieter.mobile.store.MobileStore
 
 /**
- * While Settings → Task titles is Ollama, the add-on names new tasks and chats on its own machine, as on the
- * classic page; the add-on core says which machine that is ([com.getdieter.addon.v1.SettingsSlice.titles_daemon_id]).
+ * While Settings → Task titles is Ollama, the add-on names new tasks and chats on its own machine; the add-on
+ * core says which machine that is ([com.getdieter.addon.v1.SettingsSlice.titles_daemon_id]).
  */
 @Composable
 internal fun rememberConversationNamer(store: MobileStore): ConversationNamer? {
