@@ -110,8 +110,11 @@ class Routes {
 
 fun errorAnswer(message: String?) = buildJsonObject { put("error", message ?: "error") }
 
-/** The JDK's HTTP server on loopback, one virtual thread per request, every answer JSON and never cached. */
-class OperatorServer(private val address: InetSocketAddress, private val routes: Routes) {
+/**
+ * The JDK's HTTP server on loopback, one virtual thread per request, every answer JSON and never cached. With
+ * [callers], only trusted callers get more than [Callers.agentRoute] (403 otherwise).
+ */
+class OperatorServer(private val address: InetSocketAddress, private val routes: Routes, private val callers: Callers? = null) {
     fun start(): HttpServer =
         HttpServer.create(address, 50).apply {
             executor = Executors.newVirtualThreadPerTaskExecutor()
@@ -126,6 +129,11 @@ class OperatorServer(private val address: InetSocketAddress, private val routes:
                 val uri = exchange.requestURI
                 val parts = uri.rawPath.split("/").filter { it.isNotEmpty() }.drop(1).map { URLDecoder.decode(it, Charsets.UTF_8) }
                 val headers = exchange.requestHeaders.mapNotNull { (k, v) -> v.firstOrNull()?.let { k.lowercase() to it } }.toMap()
+                if (callers != null && !Callers.agentRoute(exchange.requestMethod, parts) &&
+                    !callers.trusted(exchange.remoteAddress, exchange.localAddress)) {
+                    exchange.requestBody.close()
+                    return exchange.reply(403, errorAnswer("forbidden: the person's routes answer the page only"))
+                }
                 routes.streamFor(exchange.requestMethod, parts, query(uri.rawQuery), headers)?.let { stream ->
                     exchange.responseHeaders["Content-Type"] = "text/event-stream; charset=utf-8"
                     exchange.responseHeaders["Cache-Control"] = "no-store"

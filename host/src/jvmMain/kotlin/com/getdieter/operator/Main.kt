@@ -18,6 +18,9 @@ import kotlinx.serialization.json.put
  * anyway. The gateway session stays in the web host (user dieter-web). Until it takes over port 8099 the bridge
  * forwards the moved paths to it. Environment:
  *   DIETER_OPERATOR_ADDR   loopback address to listen on, default 127.0.0.1:8096
+ *   DIETER_OPERATOR_TRUSTED_UIDS  users whose connections get every route (run.sh: root and the web host's
+ *                          dieter-web); everyone else, the agents included, only the questions the harness registers
+ *                          and polls ([Callers]). Unset: every caller gets everything (outside the add-on)
  *   DIETER_BIN             the Dieter CLI, default /usr/local/bin/dieter (DIETER_HOME and the daemon address
  *                          come from the environment, as for the bridge)
  *   BRIDGE_SETTINGS_FILE   the add-on's settings, default /data/bridge_settings.json
@@ -88,8 +91,9 @@ fun main() {
     val server = OperatorServer(
         InetSocketAddress(host, port),
         routes(dieter, settings, projects, supervision?.daemon, access, questions, uploads, titles, housekeeping, Live(board, cards, usage, ha)),
+        Callers.fromEnv(env["DIETER_OPERATOR_TRUSTED_UIDS"]),
     ).start()
-    Log.line("listening on $host:${server.address.port}")
+    Log.line("listening on $host:${server.address.port}" + if (env["DIETER_OPERATOR_TRUSTED_UIDS"].isNullOrBlank()) ", every caller trusted" else "")
     supervision?.let { Thread.ofPlatform().name("supervisor").start(it::run) }
     housekeeping?.let { Thread.ofPlatform().name("housekeeping").daemon().start { it.loop() } }
     Thread.ofPlatform().name("board").start(board::loop)
