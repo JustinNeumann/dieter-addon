@@ -106,3 +106,24 @@ test("hass-cli is in the image, the Supervisor CLI is not", async () => {
   const hass = execFileSync("docker", ["exec", "dieter-e2e", "hass-cli", "--version"]).toString();
   expect(hass).toContain("1.0.0");
 });
+
+test("Agent instructions (api/prompts): the daemon's templates, refusals with the daemon's reason, set and reset", async ({ request }) => {
+  const prompts = async () => (await request.get("api/prompts")).json();
+  const before = await prompts();
+  for (const k of ["template", "board_skill", "chat_skill"]) expect(typeof before[k]).toBe("string");
+  expect(before.template).toContain("{{project.instructions_block}}");
+  expect(before.variables.length).toBeGreaterThan(5);
+  expect(Array.isArray(before.overrides)).toBe(true);
+  for (const bad of [{}, { chat_skill: "  " }, { chat_skill: "x", reset: ["chat_skill"] }, { reset: ["nope"] }]) {
+    const r = await request.post("api/prompts", { data: bad });
+    expect(r.status(), JSON.stringify(bad)).toBe(400);
+  }
+  const refused = await request.post("api/prompts", { data: { template: "Hello" } });
+  expect(refused.status()).toBe(400);
+  expect((await refused.json()).error).toContain("instructions_block");
+  const set = await (await request.post("api/prompts", { data: { chat_skill: `-Chats ${stamp}` } })).json();
+  expect(set.chat_skill).toBe(`-Chats ${stamp}`);                       // a text starting with "-" is no flag
+  const reset = await (await request.post("api/prompts", { data: { reset: ["chat_skill"] } })).json();
+  expect(reset.chat_skill).toBe(before.chat_skill);
+  expect(reset.template).toBe(before.template);
+});

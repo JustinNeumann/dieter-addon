@@ -27,6 +27,21 @@ fi
 chown dieter:dieter /data /data/options.json 2>/dev/null || true   # the Supervisor rewrites options.json as root
 bashio::log.info "Dieter $(dieter --version) · node $(node --version) · bridge on :8099 · store ${DIETER_HOME} · user dieter"
 
+# The operator: the bridge's duties already moved to Kotlin (same jar as the web host, docs/PLAN.md Step 2). It runs as
+# the dieter user like the bridge, on loopback, and holds no secret; started before the web host's secret exists.
+if [ -f /opt/web-host/dieter-web-host.jar ] && command -v java >/dev/null; then
+  (
+    while true; do
+      setpriv --reuid=dieter --regid=dieter --init-groups env HOME=/data USER=dieter LOGNAME=dieter \
+        java -XX:+UseSerialGC -Xms8m -Xmx64m -Xss512k -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=24m \
+          -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError -Djava.net.preferIPv4Stack=true \
+          -cp /opt/web-host/dieter-web-host.jar com.getdieter.operator.MainKt || true
+      bashio::log.warning "operator exited; restarting in 5 s"
+      sleep 5
+    done
+  ) &
+fi
+
 # The web host: the new page's core (JVM) with the gateway session and device key. It runs as its own user
 # with a private state directory, so agents (user dieter) can neither read the session nor talk to it:
 # it answers only requests with the per-boot secret, which it reads from stdin and the bridge from an

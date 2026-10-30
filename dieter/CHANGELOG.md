@@ -2,6 +2,12 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.10 (2026-10-30)
+
+- **The bridge into Kotlin, step 1 of 8:** the add-on gets its *operator*, the Kotlin half of the bridge (same jar
+  as the web host, run as the add-on's user `dieter` on loopback). **Agent instructions** (Tools → Settings) are
+  the first area it answers; the bridge forwards them to it. Nothing changes on the page or for Home Assistant.
+
 ## 0.6.431.9 (2026-10-30)
 
 - **One page:** the add-on opens Dieter's Compose page directly; the classic page is gone. The sidebar entry,
