@@ -397,7 +397,12 @@ and sha256; its plan lists what comes next. It will replace this page once it do
 - First load about 5 MB (the WebAssembly is fetched gzip-compressed and inflated in the browser, because Ingress
   neither forwards `Accept-Encoding` nor compresses WebAssembly), afterwards from the browser cache.
 - `next/?theme=dark|light` overrides the theme, `next/?script=tab projects; board Main` replays the app's debug
-  navigation. `<your HA address>/app/<this add-on's slug>/next/` opens the new page directly.
+  navigation. `<your HA address>/app/<this add-on's slug>/next/` opens the new page directly; behind it
+  `card/<id>` opens a conversation, `tab/<name>` a tab, `dreamfall/<id>` a Dreamfall board (`…/settings` its
+  settings) and `idea/<id>` an idea. While the new page is open, Dieter's push notifications open their card in
+  it (as they do on this page); the address then goes back to `…/next`, so a reload stays on the new page.
+- **Dreamfall** is on the new page too: Tools → Dreamfall, or a stage board opened from Projects. Picks, parks and
+  settings made there are the same as on this page; the trail names the Home Assistant user who made them.
 
 ### Signing in the new page
 
@@ -415,9 +420,10 @@ return addresses it lists, so once:
    screen, or `dieter device approve <code>` on a paired machine).
 
 Sign in from a browser where you are logged in to Home Assistant (a desktop browser is easiest; the Companion app
-opens sign-in in your phone's browser). If the return lands somewhere else, paste the full address you landed on
-into the page's gateway field and press Sign in. The option `web_sign_in_callback` pins the return address
-instead of using the one you opened Home Assistant with.
+opens sign-in in your phone's browser, which then needs a Home Assistant login too). Each attempt returns only to
+the address the page was opened through; if the return lands in a browser without your Home Assistant login,
+start the sign-in again from one that has it. The option `web_sign_in_callback` pins the return address instead
+of using the one you opened Home Assistant with.
 
 **What the web host holds:** this install's device key and the gateway session, in `/data/web-host` (part of
 the add-on's backups). It runs as its own user, so the agents (user `dieter`) can neither read that directory

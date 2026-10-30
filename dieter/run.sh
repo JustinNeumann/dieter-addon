@@ -42,6 +42,7 @@ if [ -f /opt/web-host/dieter-web-host.jar ] && command -v java >/dev/null; then
         env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/data/web-host LANG=C.UTF-8 \
           DIETER_WEB_HOST_STATE=/data/web-host DIETER_WEB_HOST_SECRET_FILE=- \
           DIETER_WEB_SIGN_IN_CALLBACK="${WEB_CALLBACK}" \
+          DIETER_WEB_BRIDGE_URL="http://127.0.0.1:${BRIDGE_PORT:-8099}/api/" \
           DIETER_WEB_DEVICE_NAME="Home Assistant (web)" \
           DIETER_WEB_HOST_VERBOSE="$([ "${BRIDGE_LOG_LEVEL}" = debug ] && echo 1 || echo 0)" \
         java -XX:+UseSerialGC -Xms16m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=48m \

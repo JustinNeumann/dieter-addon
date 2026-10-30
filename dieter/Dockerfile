@@ -141,8 +141,8 @@ RUN set -eu; \
 
 # The new page (Compose UI in the browser, Kotlin/Wasm) from github.com/JustinNeumann/dieter-addon-kotlin: the
 # same files for every architecture. The bridge serves them at /next/. The sha256 is the release's SHA256SUMS line.
-ARG DIETER_WEB_VERSION=0.3.0
-ARG DIETER_WEB_SHA=732c6880925486c47c177c3aa3e0c2e421a2f4d427ebdaf877ffc458d6f3f0cf
+ARG DIETER_WEB_VERSION=0.4.0
+ARG DIETER_WEB_SHA=e003e201127eb5728fedc01e47939bc9cbe99570103bdd1f1657a1d04a485188
 RUN set -eu; \
     curl -fsSL -o /tmp/web.tar.gz "https://github.com/JustinNeumann/dieter-addon-kotlin/releases/download/v${DIETER_WEB_VERSION}/dieter-web-${DIETER_WEB_VERSION}.tar.gz"; \
     echo "${DIETER_WEB_SHA}  /tmp/web.tar.gz" | sha256sum -c -; \
@@ -153,7 +153,7 @@ RUN set -eu; \
 
 # The web host (the new page's core on the JVM, same repository and release) and a headless Java 21 runtime
 # from Debian. run.sh starts it as user dieter-web on loopback; the bridge relays next/core and next/signin.
-ARG DIETER_WEB_HOST_SHA=818b6703979557a407368105f5887c9d3587ea0206fce5edf58583a148a623c5
+ARG DIETER_WEB_HOST_SHA=9bca1b1c48b0a2cd21b40623dd964bc43b7c84ac3d2301fe37a7cb97fc822d38
 RUN set -eu; \
     apt-get update; \
     apt-get install -y --no-install-recommends openjdk-21-jre-headless; \

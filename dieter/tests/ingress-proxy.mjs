@@ -1,7 +1,8 @@
 // Stand-in for the Supervisor's Ingress proxy for local end-to-end tests: serves the bridge under
 // /api/hassio_ingress/<token>/, adds X-Ingress-Path and forwards request bodies chunked (as the
 // Supervisor does), streams SSE through, passes WebSocket upgrades on and, like Home Assistant,
-// drops Accept-Encoding (HA compresses at its border instead).
+// drops Accept-Encoding (HA compresses at its border instead) and names the signed-in person on every
+// request, sockets included (E2E_USER, default "E2E Tester"; a request's own X-Remote-User-* wins).
 // Usage: node ingress-proxy.mjs  (PROXY_PORT, BRIDGE_PORT)
 import http from "node:http";
 import net from "node:net";
@@ -10,8 +11,11 @@ const TARGET = { host: "127.0.0.1", port: Number(process.env.BRIDGE_PORT || 1809
 const PREFIX = "/api/hassio_ingress/t0ken";
 const PORT = Number(process.env.PROXY_PORT || 18100);
 
+const USER = process.env.E2E_USER || "E2E Tester";
+
 const upstreamHeaders = (req) => {
-  const headers = { ...req.headers, "x-ingress-path": PREFIX, host: "local-dieter:8099" };
+  const person = { "x-remote-user-id": "e2e", "x-remote-user-name": "e2e", "x-remote-user-display-name": USER };
+  const headers = { ...person, ...req.headers, "x-ingress-path": PREFIX, host: "local-dieter:8099" };
   delete headers["content-length"];
   delete headers["accept-encoding"];
   return headers;
