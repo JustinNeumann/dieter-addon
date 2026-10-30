@@ -52,6 +52,9 @@ PORT = int(os.environ.get("BRIDGE_PORT", "8099" if ADDON else "4250"))
 HA_IP = os.environ.get("BRIDGE_HA_IP", "192.168.0.10")
 KEY_FILE = os.environ.get("BRIDGE_KEY_FILE", "/data/bridge_api_key" if ADDON else os.path.expanduser("~/.config/dieter-bridge/api_key"))
 HASSIO_NETS = [ipaddress.ip_network("172.30.32.0/23")]   # Supervisor (ingress proxy) and HA core
+# Where the page's core may be reached from: the Supervisor's network only, never loopback, where the agents are
+# (BRIDGE_INGRESS_NETS adds the e2e suite's stand-in proxy, which connects from 127.0.0.2)
+INGRESS_NETS = HASSIO_NETS + [ipaddress.ip_network(n.strip()) for n in os.environ.get("BRIDGE_INGRESS_NETS", "").split(",") if n.strip()]
 LOOPBACK = [ipaddress.ip_network(n) for n in ("127.0.0.0/8", "::1/128")]
 READ_NETS = LOOPBACK + HASSIO_NETS + [ipaddress.ip_network(n) for n in ("192.168.0.0/24", "100.64.0.0/10", "fd7a:115c:a1e0::/48")]
 TS_NETS = [ipaddress.ip_network(n) for n in ("100.64.0.0/10", "fd7a:115c:a1e0::/48")]
@@ -516,6 +519,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self.may_read():
                 return self.send_json({"error": "forbidden"}, 403)
             if parts[:2] in (["next", "core"], ["next", "signin"]) and len(parts) == 2:
+                # the core drives the account's gateway session: Home Assistant's Ingress only, so the agents
+                # (this user, on loopback) cannot have the bridge relay them with the secret
+                if not (ADDON and in_nets(self.client_ip(), INGRESS_NETS)):
+                    return self.send_text("The page's core is reached through Home Assistant only.", 403)
                 return self.web_host_relay(u, parts)
             if parts and parts[0] == "next":
                 return self.serve_web(u, parts)

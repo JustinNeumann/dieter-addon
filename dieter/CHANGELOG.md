@@ -10,6 +10,10 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
   paths, answers and events (`dieter_turn_finished`, `dieter_card_review`, `dieter_question`) stay the same, so
   `homeassistant/packages/dieter.yaml` needs no change. The bridge is left with Ingress, the page's files and the
   relay to the web host, and forwards everything under `/api/` to the operator.
+- **Security:** the bridge relayed the page's core connection (`next/core`, `next/signin`) for any caller on the
+  container's loopback, the agents included, adding the web host's secret. An agent could thereby drive the web host's
+  gateway session (every machine of your Dieter account), which the agents must not reach. The relay now answers only
+  Home Assistant's Ingress (the Supervisor's network); the page works as before.
 - The classic page's own endpoints are gone (the board's file browser and diffs, devices, machines, Dieter Mail's
   inbox, schedule editing over `/api/schedules/…`); the page at `next/` never used them. Home Assistant's
   `/api/schedules?project=` stays.

@@ -121,6 +121,17 @@ test("hass-cli is in the image, the Supervisor CLI is not", async () => {
   expect(hass).toContain("1.0.0");
 });
 
+test("the page's core (next/core, next/signin) answers Home Assistant's Ingress, not the agents on loopback", async ({ request }) => {
+  const port = process.env.BRIDGE_PORT || "18099";
+  const upgrade = "-H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13'";
+  const status = (path) => execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "sh", "-c",
+    `curl -s -o /dev/null -w '%{http_code}' --max-time 5 ${upgrade} http://127.0.0.1:${port}/${path}`], { stdio: "pipe" }).toString().trim();
+  expect(status("next/core")).toBe("403");
+  expect(status("next/signin?code=x&state=y")).toBe("403");
+  expect(status("api/state")).toBe("200");                             // the API stays theirs, as the dieter CLI is
+  expect((await request.get("next/")).status()).toBe(200);               // through Ingress the page and its core work
+});
+
 test("Agent instructions (api/prompts): the daemon's templates, refusals with the daemon's reason, set and reset", async ({ request }) => {
   const prompts = async () => (await request.get("api/prompts")).json();
   const before = await prompts();

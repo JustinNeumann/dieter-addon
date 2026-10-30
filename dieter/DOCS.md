@@ -388,7 +388,8 @@ of using the one you opened Home Assistant with.
 **What the web host holds:** this install's device key and the gateway session, in `/data/web-host` (part of
 the add-on's backups). It runs as its own user, so the agents (user `dieter`) can neither read that directory
 nor talk to it: it answers only the bridge, which proves itself with a secret created at every start and kept
-only in the bridge's memory (the bridge is non-dumpable, so processes of the agents' user cannot read it). The
+only in the bridge's memory (the bridge is non-dumpable, so processes of the agents' user cannot read it), and the
+bridge relays only requests that come through Home Assistant's Ingress, never the agents' own on loopback. The
 session gives full access to every machine of your Dieter account, like any signed-in app. Sign out in the
 page's Settings, or revoke the device in the Dieter app.
 
