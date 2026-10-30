@@ -2,6 +2,17 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.6 (2026-10-30)
+
+- **New page (`next/`), dieter-addon-kotlin 0.4.2:**
+  - **Task titles with Ollama:** a task or chat started there without a title is named by Ollama, as on this page.
+    It shows its first line until the name arrives. Tasks on other machines keep Dieter's auto-title (the add-on can
+    rename only on its own machine). New bridge call `POST api/titles`; `GET api/settings` names the add-on's
+    machine while Ollama names tasks (`titles_daemon_id`).
+  - **The project used last** comes first in Projects ("Last used"), New task preselects it, and choosing the
+    Projects tab from another tab opens it. Opening a project, board, Dreamfall board or conversation makes it the
+    last used. The add-on keeps it for every browser, unlike this page, which keeps it per browser.
+
 ## 0.6.431.5 (2026-10-30)
 
 - **New page (`next/`), dieter-addon-kotlin 0.4.1:**
