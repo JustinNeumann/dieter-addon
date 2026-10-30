@@ -34,6 +34,10 @@ test("next/ loads through Ingress with relative assets, compressed wasm and cach
   const [index] = byName(/\/next\/$/);
   expect(index.headers()["cache-control"]).toBe("no-cache");
   expect(index.headers()["etag"]).toBeTruthy();
+
+  // the page reports its start: one line in the add-on log (PageLoad.kt), the files it fetched counted
+  await expect.poll(() => execFileSync("sh", ["-c", "docker logs dieter-e2e 2>&1 | grep 'operator: page: started in' | tail -1"]).toString(),
+    { timeout: 15_000 }).toMatch(/page: started in \d+\.\d s · \w+ on Linux · .*(downloaded [\d.]+ (MB|kB) in \d+ files|nothing downloaded).* from the cache/);
 });
 
 test("next/ on a phone: the bottom navigation renders", async ({ browser }) => {

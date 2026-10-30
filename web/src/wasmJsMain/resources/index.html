@@ -216,6 +216,32 @@
     };
   }
 
+  // ---- once the first frame is drawn (Browser.kt hideLoading): one line in the add-on log with how long the start
+  // took on this device and which of the page's files came over the network (the Companion app's WebView keeps
+  // only a small cache). Not in the demo.
+  window.dieterLoaded = function () {
+    var ms = Math.round(performance.now());
+    if (/[?&]demo(=|&|$)/.test(location.search) || !performance.getEntriesByType) return;
+    try {
+      var base = new URL("./", location.href).href;
+      var files = performance.getEntriesByType("navigation").concat(performance.getEntriesByType("resource"))
+        .filter(function (e) { return e.name.indexOf(base) === 0; })
+        .map(function (e) {
+          var name = e.name.slice(base.length).split(/[?#]/)[0] || "index.html";
+          return { name: name, transfer: e.transferSize || 0, size: e.encodedBodySize || 0 };
+        });
+      var host = location.hostname;
+      var where = /\.ui\.nabu\.casa$/.test(host) ? "nabu"
+        : /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)|\.local$|^localhost$/.test(host) ? "local" : "other";
+      // the page is in next/, the add-on's API beside it (PanelRoutes.kt)
+      nativeFetch(new URL("../api/page-load", location.href).href, {
+        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ms: ms, client: navigator.userAgent, where: where,
+          downlink: navigator.connection && navigator.connection.downlink, files: files }),
+      }).catch(function () {});
+    } catch (e) {}
+  };
+
   // ---- errors before the first frame end up on the loader instead of a blank page
   function startupError(message) {
     if (!loading() || window.dieterStarted) return;

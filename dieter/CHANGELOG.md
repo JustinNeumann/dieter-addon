@@ -2,6 +2,16 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.14 (2026-10-30)
+
+- A mouse wheel or trackpad that scrolls a list back past its top no longer leaves the round refresh arrow hanging
+  there (Chrome on a PC); pulling down by touch still syncs again.
+- New palette **Dreamfall Pearl** (Tools → Settings → Appearance): night-sky navy with a pearlescent sheen (cyan,
+  periwinkle, violet, pink, peach) and a golden glow; pearl white in light mode.
+- Every start of the page writes one line into the add-on log: how long it took on that device and which of the
+  page's files came over the network. It shows whether the Companion app downloads the page again on each open (its
+  WebView keeps only a small cache).
+
 ## 0.6.431.13 (2026-10-30)
 
 - **The bridge into Kotlin, step 4 of 10:** the add-on's start and the daemon belong to the operator now. Staging the

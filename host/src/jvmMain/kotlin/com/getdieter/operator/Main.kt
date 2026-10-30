@@ -112,6 +112,7 @@ fun routes(dieter: Dieter, settings: Settings, projects: Projects, daemon: Daemo
         .post("settings") { settings.update(it.body) }
         .post("boards/order") { settings.order(it.body) }
         .post("project") { projects.add(it.body) }
+        .post("page-load") { PageLoad.log(it.body) }
         .post("daemon/restart") {
             // after a Claude sign-in or a gateway enrollment (the bridge): the daemon starts again with them
             val restarted = (daemon ?: throw BadRequest("the daemon is supervised in the add-on only")).restart()

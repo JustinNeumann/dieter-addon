@@ -1,5 +1,6 @@
 import { expect, type Page, type Locator } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 import path from "node:path";
 
 /** The page builds with the fork's Compose 1.12 unless gradle.properties names its own release (composeWebVersion). */
@@ -82,3 +83,28 @@ export async function hit(page: Page, x: number, y: number): Promise<string> {
 }
 
 export { expect };
+
+/** The colours of the column at x from y down, [r, g, b] each: a 1-px-wide screenshot, decoded here (a row of one
+ *  pixel has no left neighbour, so only the None, Up, Average and Paeth filters need undoing, all from the row above). */
+export async function column(page: Page, x: number, y: number, height: number): Promise<number[][]> {
+  const png = await page.screenshot({ clip: { x, y, width: 1, height } });
+  const data: Buffer[] = [];
+  let bpp = 4;
+  for (let i = 8; i < png.length; ) {
+    const length = png.readUInt32BE(i), type = png.toString("ascii", i + 4, i + 8);
+    if (type === "IHDR") bpp = png[i + 8 + 9] === 2 ? 3 : 4; // colour type 2: RGB, 6: RGBA
+    if (type === "IDAT") data.push(png.subarray(i + 8, i + 8 + length));
+    i += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(data));
+  const rows: number[][] = [];
+  let above = [0, 0, 0, 0];
+  for (let r = 0; r < height; r++) {
+    const filter = raw[r * (bpp + 1)];
+    const px = [...raw.subarray(r * (bpp + 1) + 1, (r + 1) * (bpp + 1))].map((v, i) =>
+      filter === 2 || filter === 4 ? (v + above[i]) & 0xff : filter === 3 ? (v + (above[i] >> 1)) & 0xff : v);
+    rows.push(px.slice(0, 3));
+    above = px;
+  }
+  return rows;
+}
