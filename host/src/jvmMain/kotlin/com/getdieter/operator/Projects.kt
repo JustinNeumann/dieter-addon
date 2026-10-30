@@ -10,7 +10,7 @@ import kotlinx.serialization.json.put
 /**
  * The add-on's repositories (Projects → Add): a Git URL cloned into /data/projects/<name>, or a new empty repository
  * there (an existing folder is adopted), registered with the daemon once. Private GitHub repositories clone with the
- * add-on's github_token through the git configuration the bridge writes into /data.
+ * add-on's github_token through the git configuration in /data (Setup.git).
  */
 class Projects(
     private val dieter: Dieter,

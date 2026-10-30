@@ -1,5 +1,6 @@
 #!/usr/bin/with-contenv bashio
-# Add-on entry point: the bridge starts and supervises the Dieter daemon itself.
+# Add-on entry point: the operator (Kotlin) stages the harness runtime and supervises the Dieter daemon, the bridge
+# serves Ingress on 8099, the web host holds the page's gateway session.
 set -euo pipefail
 
 export HOME=/data
@@ -27,8 +28,9 @@ fi
 chown dieter:dieter /data /data/options.json 2>/dev/null || true   # the Supervisor rewrites options.json as root
 bashio::log.info "Dieter $(dieter --version) · node $(node --version) · bridge on :8099 · store ${DIETER_HOME} · user dieter"
 
-# The operator: the bridge's duties already moved to Kotlin (same jar as the web host, docs/PLAN.md Step 2). It runs as
-# the dieter user like the bridge, on loopback, and holds no secret; started before the web host's secret exists.
+# The operator: the bridge's duties already moved to Kotlin (same jar as the web host, docs/PLAN.md Step 2), the daemon
+# among them. It runs as the dieter user like the bridge, on loopback, and holds no secret; started before the web
+# host's secret exists. A daemon an exited operator left behind is stopped by the next one before it starts its own.
 if [ -f /opt/web-host/dieter-web-host.jar ] && command -v java >/dev/null; then
   (
     while true; do

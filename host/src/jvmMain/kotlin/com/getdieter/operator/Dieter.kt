@@ -42,12 +42,16 @@ class ProcessDieter(private val bin: String) : Dieter {
 /** A finished command: its exit status and both outputs. */
 class Command(val exit: Int, val stdout: String, val stderr: String) {
     companion object {
-        /** Runs [cmd] (stdin empty) in [cwd]; null when it outlives [timeout] (it is killed then). */
-        fun run(cmd: List<String>, cwd: java.io.File? = null, timeout: Duration): Command? {
-            val process = ProcessBuilder(cmd).directory(cwd).redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null"))).start()
+        /** Runs [cmd] in [cwd] with [input] on stdin (else none) and [env] added; null when it outlives [timeout] (killed then). */
+        fun run(cmd: List<String>, cwd: java.io.File? = null, timeout: Duration, input: String? = null, env: Map<String, String> = emptyMap()): Command? {
+            val builder = ProcessBuilder(cmd).directory(cwd)
+            builder.environment().putAll(env)
+            if (input == null) builder.redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
+            val process = builder.start()
             // both streams on their own threads, so a command that hangs with its output open still times out
             val out = Collected(process.inputStream)
             val err = Collected(process.errorStream)
+            if (input != null) process.outputStream.use { it.write(input.toByteArray()) }
             if (!process.waitFor(timeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly()
                 return null
@@ -67,9 +71,33 @@ class Command(val exit: Int, val stdout: String, val stderr: String) {
     }
 }
 
-/** `git ARGS` in [cwd]: its output; a failure is answered with 502 "git: …", as by the bridge. */
-fun git(args: List<String>, cwd: java.io.File? = null, timeout: Duration = 600.seconds): String {
-    val done = Command.run(listOf("git") + args, cwd, timeout) ?: throw CliError("git: timeout")
-    if (done.exit != 0) throw CliError("git: " + done.stderr.ifBlank { done.stdout }.trim().take(500))
+/** [cmd] in [cwd]: its output; a failure or timeout throws CliError "<program>: <its message>". */
+fun checked(cmd: List<String>, cwd: java.io.File? = null, timeout: Duration): String {
+    val program = cmd.first().substringAfterLast('/')
+    val done = Command.run(cmd, cwd, timeout) ?: throw CliError("$program: timeout")
+    if (done.exit != 0) throw CliError("$program: " + done.stderr.ifBlank { done.stdout }.trim().take(500).ifEmpty { "exit ${done.exit}" })
     return done.stdout
+}
+
+/** `git ARGS` in [cwd]: its output; a failure is answered with 502 "git: …", as by the bridge. */
+fun git(args: List<String>, cwd: java.io.File? = null, timeout: Duration = 600.seconds): String = checked(listOf("git") + args, cwd, timeout)
+
+/** `rm -rf PATH` (does not follow links into other trees). */
+fun removeTree(path: java.io.File, timeout: Duration = 600.seconds) {
+    checked(listOf("rm", "-rf", path.path), timeout = timeout)
+}
+
+/** [text] into [file], readable by its owner only (missing folders too), written whole and renamed into place. */
+fun writePrivate(file: java.io.File, text: String) {
+    java.nio.file.Files.createDirectories(
+        file.parentFile.toPath(),
+        java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")),
+    )
+    val tmp = java.nio.file.Files.createTempFile(file.parentFile.toPath(), ".${file.name}.", ".tmp")   // created 0600
+    try {
+        java.nio.file.Files.writeString(tmp, text)
+        java.nio.file.Files.move(tmp, file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+    } finally {
+        java.nio.file.Files.deleteIfExists(tmp)
+    }
 }

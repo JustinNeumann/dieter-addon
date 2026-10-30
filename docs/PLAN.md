@@ -504,8 +504,8 @@ operator through the store's identity, owns `/data/projects`, `/data/.ssh` and t
 The web host stays `dieter-web` with the gateway session, which agents can neither read nor reach. Folding both into
 one process would need the web host to run as `dieter` (the session within the agents' reach) or a setuid `sudo` in
 the image. Until the operator serves port 8099 itself the bridge forwards the moved paths (`OPERATOR_PATHS`); the
-web host keeps calling `DIETER_WEB_BRIDGE_URL`, so nothing changes for it. The bridge also starts the daemon, serves
-Ingress on 8099 and answers Home Assistant. Its areas move to the operator one at a time, each its own add-on release
+web host keeps calling `DIETER_WEB_BRIDGE_URL`, so nothing changes for it. The bridge also serves Ingress on 8099 and
+answers Home Assistant. Its areas move to the operator one at a time, each its own add-on release
 with the e2e suite green, and the last one deletes `dieter/bridge/` and Python from the image:
 
 1. ✅ 0.6.431.10: the operator (run.sh starts it, the bridge forwards) and Agent instructions (`api/prompts`)
@@ -513,16 +513,18 @@ with the e2e suite green, and the last one deletes `dieter/bridge/` and Python f
    titles, housekeeping and state stream read it, and the bridge follows a change after the forward: `after_operator`)
 3. ✅ 0.6.431.12: projects: clone, new repository, adoption (`api/project`; the options' `projects` at start go through
    the operator too)
-4. Claude sign-in, gateway enrollment, SSH key
-5. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments
-6. Dreamfall: the API, and the agents' `dreamfall` command (a mode of the jar instead of `dreamfall.py`; its records
+4. ✅ 0.6.431.13: the add-on's start and the daemon: harness runtime staging and the managed Bun, what the options
+   configure (provider env file, git and gh, Claude Code's note, Antigravity), the daemon started and restarted (after
+   a sign-in or enrollment the bridge asks: `daemon/restart`); moved ahead of the sign-in, which restarts the daemon
+5. Claude sign-in, gateway enrollment, SSH key
+6. Agent questions (the harness's `DIETER_QUESTIONS_URL`) and attachments
+7. Dreamfall: the API, and the agents' `dreamfall` command (a mode of the jar instead of `dreamfall.py`; its records
    stay in Dieter's key-value store)
-7. Housekeeping (work folder retention) and the Ollama titles
-8. Home Assistant's side: `/api/ha`, the rest_commands' endpoints (`/api/card`, `…/send`, `…/move`, `/api/focus`,
+8. Housekeeping (work folder retention) and the Ollama titles
+9. Home Assistant's side: `/api/ha`, the rest_commands' endpoints (`/api/card`, `…/send`, `…/move`, `/api/focus`,
    `/api/state`) and the events `dieter_turn_finished`, `dieter_card_review`, `dieter_question`, on port 8099 with
    the same paths and answers, so `homeassistant/packages/dieter.yaml` does not change
-9. Process supervision (daemon start and restart, harness runtime staging: run.sh), Ingress on 8099, the page's files
-   and the relay to the web host; then `dieter/bridge/` goes
+10. Ingress on 8099, the page's files and the relay to the web host; then `dieter/bridge/` goes
 
 The e2e contract tests (`dieter/tests/e2e/bridge-api.spec.mjs`, `dreamfall-api.spec.mjs`) pin what Home Assistant and
 the agents rely on; they run unchanged against every step.

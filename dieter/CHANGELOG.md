@@ -2,9 +2,20 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.13 (2026-10-30)
+
+- **The bridge into Kotlin, step 4 of 10:** the add-on's start and the daemon belong to the operator now. Staging the
+  harness runtime (sha256-pinned, ≈ 775 MB once) and the managed Bun, the provider tokens for the daemon, git and gh
+  with the GitHub token, Claude Code's note and Antigravity's credentials, then the daemon, started again when it
+  exits, after a Claude sign-in and after a gateway enrollment. A daemon that an exited operator left behind is
+  stopped by the next one, so there is never a second. The page is served while the first start downloads.
+- Claude Code's note (`/data/.claude/CLAUDE.md`, replaced only if you never edited it) no longer promises that
+  Markdown images in a reply are shown: the page shows images that tools return and links the others.
+- The image sets `DIETER_VERSION`, its one pin of the fork release.
+
 ## 0.6.431.12 (2026-10-30)
 
-- **The bridge into Kotlin, step 3 of 9:** repositories (Projects → Add: clone, new empty repository, an existing
+- **The bridge into Kotlin, step 3 of 10:** repositories (Projects → Add: clone, new empty repository, an existing
   folder adopted) and the `projects` option are handled by the operator. Same folders (`/data/projects/<name>`), same
   checks and messages.
 
