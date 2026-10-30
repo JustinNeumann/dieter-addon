@@ -94,16 +94,18 @@ test("Tools → Dreamfall lists the board with the ideas waiting for the person"
 
 test("a board shows the night: the funnel, each stage's run, Navigation's queue with its verdicts", async ({ page }) => {
   await open(page, `dreamfall/${pid}`);
-  await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Navigation, 2 waiting");
+  await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Navigation Agent · daily 05:00 (paused) · judges Enumeration");
+  // the board takes the whole width with its three stages side by side, not the pane beside Tools (that starts
+  // 400 px right of the rail and shows one stage at a time); Enumeration's column comes first
+  expect((await page.getByRole("button", { name: "New idea", exact: true }).first().boundingBox()).x).toBeLessThan(300);
   let tree = await aria(page);
-  expect(tree).toContain("Enumeration, 0 waiting");
+  expect(tree).toMatch(/Enumeration Agent · daily 02:00 \(paused\)[\s\S]*Navigation Agent[\s\S]*Implementation You decide/);
   expect(tree).toContain("2 of 4");                                  // of Enumeration's four judged ideas, two went on
   expect(tree).toMatch(/Run · today \d\d:\d\d – \d\d:\d\d · 4 judged, 2 promoted/);
   expect(tree).toContain("Promoted · 9/10 · Saves water every rainy week.");
   expect(tree).toContain("from Enumeration");
   // Enumeration: the queue is empty, the released ideas are folded
-  await tap(page, page.getByRole("button", { name: /^Enumeration, / }));
-  await expect.poll(() => aria(page)).toContain("No ideas waiting.");
+  expect(tree).toContain("No ideas waiting.");
   await tap(page, page.getByRole("button", { name: /^Released, / }));
   await expect.poll(() => aria(page)).toContain("Needs new hardware per bed.");
   // an idea by hand: New task on Enumeration's board, saved to the queue (Todo) instead of started
@@ -135,10 +137,10 @@ test("Pick copies an idea to Implementation as a Todo draft; the card waits ther
   expect(st.dreamfall.records[copy.id].source_verdict.rationale).toBe("before winter");
   await expect.poll(async () => ideaOn(await state(request), "navigation", "Path lights").lane).toBe("done");
   await open(page, `dreamfall/${pid}`);
-  await tap(page, page.getByRole("button", { name: /^Implementation, / }));
-  await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Path lights follow sunset");
+  await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Picked by E2E Tester"); // Implementation's column
   const tree = await aria(page);
-  expect(tree).toContain("Picked by E2E Tester");
+  expect(tree).toContain("Path lights follow sunset");
+
   expect(tree).toMatch(/button "Start"/);
 });
 

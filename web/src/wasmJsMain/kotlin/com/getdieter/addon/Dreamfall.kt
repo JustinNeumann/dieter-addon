@@ -63,7 +63,7 @@ private fun rememberDreamfalls() =
         if (!list.loading) knownStageBoards = list.dreamfalls.flatMap { it.board_ids }.toSet()
     }
 
-/** Draws a Dreamfall stage board opened from Projects as its Dreamfall board. */
+/** Draws a Dreamfall stage board opened from Projects as its Dreamfall board, across the whole width. */
 internal fun dreamfallBoards() =
     BoardRenderer(
         claims = { _, boardId ->
@@ -74,7 +74,9 @@ internal fun dreamfallBoards() =
             } else boardId in knownStageBoards
         },
         content = { store, boardId -> DreamfallBoardScreen(store, boardId) },
+        wide = true,
     )
+
 
 /** Opens a stage board as the ordinary Kanban board. */
 private fun openKanban(store: MobileStore, boardId: String) {

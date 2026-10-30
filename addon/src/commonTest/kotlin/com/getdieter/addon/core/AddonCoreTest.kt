@@ -17,6 +17,7 @@ import com.getdieter.addon.v1.Slice
 import com.getdieter.addon.v1.Step
 import com.getdieter.addon.v1.SubmitClaudeCode
 import com.getdieter.addon.v1.TestSsh
+import com.getdieter.addon.v1.AntigravityInclusion
 import com.getdieter.addon.v1.AntigravitySlice
 import com.getdieter.addon.v1.AntigravityWindow
 import com.getdieter.addon.v1.Tone
@@ -271,6 +272,43 @@ class AddonCoreTest {
         )
         assertEquals("", shown.groups.last().windows.single().resets_at)
         assertEquals(emptyList(), shown.groups.last().models)
+    }
+
+    @Test
+    fun anAntigravityGroupLeftOutOfTheSummaryIsASettingOfTheAddOn() = runTest {
+        var excluded = listOf("Argon")
+        val view = {
+            """{"title_model":"openai","worktree_retention_days":14,"board_order":[],"title_models":[],""" +
+                """"antigravity_excluded":[${excluded.joinToString(",") { "\"$it\"" }}]}"""
+        }
+        bridge.routes["GET settings"] = { BridgeResponse(200, json(view())) }
+        bridge.routes["POST settings"] = { body ->
+            val change = body!!["antigravity_inclusion"] as JsonObject
+            val group = change.str("group")
+            excluded = if (change.bool("included")) excluded - group else excluded + group
+            BridgeResponse(200, json(view()))
+        }
+        val core = core()
+        val seen = watch(core, Slice.SLICE_ANTIGRAVITY)
+        bridge.state.emit(
+            json(
+                """{"questions":[],"backends":[{"id":"antigravity"}],"quota":[{"provider":"antigravity","windows":[
+                   {"label":"Gemini · Week","remaining":95,"group":"Gemini"},{"label":"Argon · Week","remaining":0,"group":"Argon"}]}]}"""
+            )
+        )
+        runCurrent()
+        // the groups come with the stream, which of them the summary leaves out is read when Usage opens
+        assertEquals(listOf("Gemini" to false, "Argon" to true), seen.last().antigravity!!.groups.map { it.name to it.excluded })
+
+        core.dispatch(Command(change_setting = SettingChange(antigravity_inclusion = AntigravityInclusion("Gemini", false))))
+        runCurrent()
+        assertEquals("""{"antigravity_inclusion":{"group":"Gemini","included":false}}""", bridge.sent("POST settings").single().toString())
+        assertEquals(listOf(true, true), seen.last().antigravity!!.groups.map { it.excluded })
+
+        core.dispatch(Command(change_setting = SettingChange(antigravity_inclusion = AntigravityInclusion("Argon", true))))
+        runCurrent()
+        assertEquals(listOf("Gemini" to true, "Argon" to false), seen.last().antigravity!!.groups.map { it.name to it.excluded })
+        assertEquals(Failure.Kind.KIND_INVALID, core.fails(Command(change_setting = SettingChange(antigravity_inclusion = AntigravityInclusion(" ", true)))).kind)
     }
 
     @Test

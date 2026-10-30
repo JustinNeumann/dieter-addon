@@ -17,7 +17,9 @@ internal fun addonExtensions(): MobileExtensions =
                 ExtensionPage("new-repository", "New repository", Glyph.FOLDER_ADD, 0xFF0A9EF5) { store, _ ->
                     AddRepositoryScreen(store, empty = true)
                 },
-                ExtensionPage("dreamfall", "Dreamfall", Glyph.WATERFALL, 0xFFAF52DE, ToolSection.WORKSPACE, { dreamfallWaiting() }) { store, id ->
+                // a board takes the whole width; the list of boards opens beside Tools
+                ExtensionPage("dreamfall", "Dreamfall", Glyph.WATERFALL, 0xFFAF52DE, ToolSection.WORKSPACE, { dreamfallWaiting() }, wide = { it.isNotEmpty() }) { store, id ->
+
                     if (id.isEmpty()) DreamfallListScreen(store) else DreamfallBoardScreen(store, id)
                 },
                 ExtensionPage("dreamfall-idea", "Idea", Glyph.SPARKLES, 0xFFAF52DE) { store, id -> IdeaScreen(store, id) },

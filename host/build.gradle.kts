@@ -59,11 +59,13 @@ kotlin {
             dependencies { implementation(libs.okhttp) }
         }
         jvmTest {
-            // The core's own tests of what the web host relies on (sign-in, opening conversations): the
+            // The core's own tests of what the web host relies on (sign-in, opening conversations, schedules): the
+
             // submodule's Gradle build needs the Android SDK, so they run here.
             kotlin.srcDir(apps.resolve("core/testing/src/commonMain/kotlin"))
             kotlin.srcDir(rootDir.resolve("addon/src/commonTest/kotlin"))
-            for (area in listOf("identity", "navigation", "notifications"))
+            for (area in listOf("identity", "navigation", "notifications", "schedules"))
+
                 kotlin.srcDir(apps.resolve("core/runtime/src/commonTest/kotlin/com/getdieter/core/$area"))
             dependencies {
                 implementation(kotlin("test"))
