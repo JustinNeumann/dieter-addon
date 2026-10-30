@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.5 (2026-10-30)
+
+- **New page (`next/`), dieter-addon-kotlin 0.4.1:**
+  - Tools → Settings → **Agent instructions**: the parts Dieter puts at the start of every turn (every agent, board
+    cards, standalone chats) can be edited and reset to Dieter's default, as on this page.
+  - Dreamfall on a phone: the three stage names fit; the counts between the stages show on wider screens.
+
 ## 0.6.431.4 (2026-10-30)
 
 - **New page (`next/`), dieter-addon-kotlin 0.4.0: the add-on's own features.**
