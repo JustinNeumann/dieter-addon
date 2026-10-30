@@ -333,6 +333,13 @@ private fun Funnel(stages: List<DreamfallStage>, selected: StageKind?, wide: Boo
     }
 }
 
+/** New task on a stage's board; an idea added by hand waits in the queue (Todo) like the agent's. */
+private fun newOnStage(store: MobileStore, board: DreamfallSlice, stage: DreamfallStage) {
+    store.newConversation(false)
+    val intent = store.creation.intent.value.copy(project_id = board.project_id, board_id = stage.board_id, checkout_id = "")
+    store.creation.update(if (stage.human) intent else intent.copy(lane = "todo"))
+}
+
 @Composable
 private fun StageList(
     store: MobileStore,
@@ -358,6 +365,14 @@ private fun StageList(
                     Text(stage.actor, style = type.footnote, color = palette.secondaryLabel)
                 }
                 stage.run?.let { RunLine(store, board, stage, it, actions) }
+                if (stage.can_add)
+                    DButton(
+                        if (stage.human) "New task" else "New idea",
+                        { newOnStage(store, board, stage) },
+                        Modifier.testTag("dreamfall-new-${stage.kind.name.removePrefix("STAGE_").lowercase()}"),
+                        kind = ButtonKind.PLAIN,
+                        glyph = Glyph.ADD,
+                    )
             }
         }
         if (stage.gate.isNotEmpty())

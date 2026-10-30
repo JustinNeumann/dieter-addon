@@ -418,7 +418,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 |---|---|---|---|
 | Boxes (Inbox, Flagged, Unread, Archive, Trash), search, filters, undo, badge | ✅ | none (the page was modelled on the Android Mail tab) | |
 | Markdown body incl. tables | ✅ | HTML island (Phase 2) for selection/find | |
-| vega-lite / vega / mermaid charts | 🟡 | `NativeMarkdownDiagram` web actual with the offline renderer (Phase 2) | |
+| vega-lite / vega / mermaid charts | ✅ | `NativeMarkdownDiagram` web actual with the offline renderer (Phase 2), in sandboxed frames inside the HTML island | `diagrams render offline in sandboxed frames` |
 | Relative links open the file in the sender's checkout | 🟡 | verify; route to Files | |
 | Share a message | ✅ | `rememberTextSharer` web actual: the system share sheet where the browser has one (phones), else the Markdown downloads as `<subject>.md`; menus drawn over the HTML island take clicks (the island's interop wrapper lets pointer events through) | `Share on a mail message downloads its Markdown…` |
 
@@ -450,7 +450,7 @@ where noted, a web actual) · 🟡 partly / verify · ❌ add-on only (new scree
 | Pick (worktree/project dir, start now), Park, Back to the queue, promote | ✅ | `DecideIdea`; the card stays busy until the bridge's state shows the change (its `rev`) | `next-dreamfall: Pick copies an idea…`, `…Park takes it out of the queue` |
 | ⋮ run a stage now, pause/resume, settings, open stage as Kanban, Remove Dreamfall | ✅ | Kanban: the shared board screen for that stage while the route is open | menu entries in `next-dreamfall: the settings save…` |
 | "Added outside Dreamfall" flag, "Finished · still in Running" + Review button | ✅ | rules in the add-on core | `DreamfallTest` (JVM) |
-| Adding an idea by hand on Enumeration or Implementation | 🟡 | through the stage's Kanban view (its New task); no button on the Dreamfall board yet | |
+| Adding an idea by hand on Enumeration or Implementation | ✅ | "New idea" / "New task" in the stage's head opens New task on that stage's board; an idea starts on "Add to Todo" (fork: the form takes the intent's lane) | `next-dreamfall: a board shows the night…` |
 | `dreamfall` command, schedules, KV records | n/a | unchanged (server side) | `the Enumeration agent adds ideas…`, `Navigation waits for Enumeration…` |
 
 Upstream path: the Dreamfall proposal (`docs/proposals/dreamfall.md`, draft) points at this Compose implementation
