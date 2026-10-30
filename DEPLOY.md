@@ -9,12 +9,20 @@ installs needs
 1. a new `version` in `dieter/config.yaml` (`<bundled Dieter release>.<add-on revision>`) and a
    `dieter/CHANGELOG.md` entry;
 2. `dieter/tests/run.sh` green;
-3. a push to `main`: `.github/workflows/builder.yaml` builds the page and the web host from `web/`, `host/` and
-   `addon/` (with the `fork` submodule), runs the web host's tests and the page's browser tests, hands both to the
-   image in `dieter/web-dist` (`tools/addon-dist.sh`), then builds aarch64 and amd64 on native runners with
-   the `home-assistant/builder` actions, signs them with Cosign and publishes the multi-arch manifest
-   `ghcr.io/justinneumann/dieter:<version>` (plus `{arch}-dieter`); pull requests only build.
-   A version whose tag already exists is not pushed again (`skip-existing`).
+3. a pull request from this repository, merged when green: `.github/workflows/builder.yaml` builds the page and the
+   web host from `web/`, `host/` and `addon/` (with the `fork` submodule), runs the web host's tests and the page's
+   browser tests, hands both to the image in `dieter/web-dist` (`tools/addon-dist.sh`), then builds aarch64 and
+   amd64 on native runners with the `home-assistant/builder` actions, signs them with Cosign and publishes the
+   multi-arch manifest `ghcr.io/justinneumann/dieter:<version>` (plus `{arch}-dieter`).
+
+   **The image comes first.** The Supervisor offers a version as soon as `config.yaml` on `main` names it, and a pull
+   it cannot find fails ("Can't install …: not found"). So a pull request that changes the version publishes that
+   version's image itself, labelled `io.dieter.tree` with the tree it was built from (the pull request merged into
+   `main`). After the merge, `main` only moves `:latest` when its tree is the same, and builds and publishes the
+   version again when it is not (`main` moved in between: merge release pull requests one at a time, each up to
+   date). Pull requests that keep the version only build, and on `main` a version whose tag already exists is not
+   pushed again (`skip-existing`). Pull requests from other repositories never publish.
+
 
 One-time: after the first successful run make the packages public (GitHub → Packages →
 `dieter`, `aarch64-dieter`, `amd64-dieter` → Package settings → Change visibility), and the repository
