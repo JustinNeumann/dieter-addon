@@ -1,0 +1,756 @@
+syntax = "proto3";
+
+// The add-on's own features: its enrollment with a Dieter gateway, its SSH key, the Claude Code
+// login of its harness, its settings, agent questions, adding repositories and Dreamfall boards. These are the commands
+// and slices of the add-on core (addon/ in this repository), which runs in the web host next to
+// Dieter's core and talks to the add-on's bridge. The browser sends commands and draws slices; every
+// rule, label and state change is decided here, as Dieter's clients do with Dieter's core.
+package dieter.addon.v1;
+
+option java_package = "com.getdieter.addon.v1";
+
+message Command {
+  oneof command {
+    EnrollGateway enroll_gateway = 1;
+    // Stops a running enrollment, or puts a finished one away.
+    Step close_enrollment = 2;
+    // Drops the enrollment so the add-on can enroll again (a new daemon ID).
+    Step unenroll_gateway = 3;
+    TestSsh test_ssh = 4;
+    Step begin_claude_sign_in = 5;
+    SubmitClaudeCode submit_claude_code = 6;
+    // Stops a running sign-in, or puts a finished one away.
+    Step close_claude_sign_in = 7;
+    Step sign_out_of_claude = 8;
+    SettingChange change_setting = 9;
+    AnswerQuestion answer_question = 10;
+    AddRepository add_repository = 11;
+    // Reads what the bridge does not push (gateway, SSH key, settings) again.
+    Step refresh = 12;
+    CreateDreamfall create_dreamfall = 13;
+    UpdateDreamfall update_dreamfall = 14;
+    // Pauses or resumes both agent schedules of a Dreamfall board.
+    PauseDreamfall pause_dreamfall = 15;
+    // Deletes the schedules and the Dreamfall view; the stage boards and their cards stay.
+    RemoveDreamfall remove_dreamfall = 16;
+    RunDreamfallStage run_dreamfall_stage = 17;
+    DecideIdea decide_idea = 18;
+    // Saves one of the account's agent instructions, or resets it to Dieter's default.
+    ChangeInstructions change_instructions = 19;
+    // Has the add-on name a task or chat created without a title (SettingsSlice.titles_daemon_id).
+    NameConversation name_conversation = 20;
+    // Puts a project's boards in this order, for every device (SettingsSlice.board_order).
+    OrderBoards order_boards = 21;
+  }
+}
+
+message OrderBoards {
+  // A project's boards, as dragged.
+  repeated string board_ids = 1;
+}
+
+message NameConversation {
+  string id = 1;
+  bool chat = 2;
+  string prompt = 3;
+  // The title it was created under, Dieter's placeholder; a rename waits while it still has it.
+  string provisional = 4;
+}
+
+message ChangeInstructions {
+  InstructionsKind kind = 1;
+  // The new text; ignored with reset.
+  string text = 2;
+  // Back to Dieter's default, which later Dieter releases then update.
+  bool reset = 3;
+}
+
+// The parts Dieter puts at the start of every turn's instructions (`dieter prompt`).
+enum InstructionsKind {
+  INSTRUCTIONS_UNSPECIFIED = 0;
+  // First, for every agent in every project.
+  INSTRUCTIONS_EVERY_AGENT = 1;
+  // Then, for a card on a board.
+  INSTRUCTIONS_BOARD_CARDS = 2;
+  // Or, for a standalone chat.
+  INSTRUCTIONS_CHATS = 3;
+}
+
+message Step {}
+
+message EnrollGateway { string gateway_url = 1; }
+
+message TestSsh { string target = 1; }
+
+message SubmitClaudeCode { string code = 1; }
+
+message SettingChange {
+  oneof setting {
+    string title_model = 1;
+    int32 worktree_retention_days = 2;
+  }
+}
+
+message AnswerQuestion {
+  string question_id = 1;
+  // By question item ID; ignored with decline.
+  map<string, Answer> answers = 2;
+  bool decline = 3;
+}
+
+message Answer {
+  repeated string option_ids = 1;
+  string freeform = 2;
+}
+
+message AddRepository {
+  // A Git URL to clone (https://, ssh:// or git@host:path); empty for a new empty repository.
+  string git_url = 1;
+  // The folder and project name; with a Git URL empty means the repository's own name.
+  string name = 2;
+  string branch = 3;
+}
+
+// A Dreamfall board's settings: what the ideas are about, how they are found and judged, when.
+message DreamfallSettings {
+  string name = 1;
+  string goal = 2;
+  // One category per line.
+  string categories = 3;
+  // Or a file of the project that lists them.
+  string categories_file = 4;
+  // New ideas per category and night (1-10).
+  int32 per_category = 5;
+  // How the Navigation agent decides which ideas go on, in plain language.
+  string navigation_logic = 6;
+  // Added to the brief of every card picked for Implementation.
+  string implementation_instructions = 7;
+  // Picked cards may send the person mail.
+  bool implementation_mail = 8;
+  // HH:MM in timezone.
+  string enumeration_time = 9;
+  string navigation_time = 10;
+  // 0 = Sunday … 6 = Saturday.
+  repeated int32 days = 11;
+  string timezone = 12;
+  // The two agents run on their schedules.
+  bool enabled = 13;
+  // The Navigation agent mails what it promoted.
+  bool mail = 14;
+  string provider = 15;
+  string model = 16;
+  string effort = 17;
+}
+
+enum StageKind {
+  STAGE_UNSPECIFIED = 0;
+  // An agent writes new ideas.
+  STAGE_ENUMERATION = 1;
+  // An agent judges them: strong ones go on, the rest are released.
+  STAGE_NAVIGATION = 2;
+  // The person's gate: only a pick puts cards here.
+  STAGE_IMPLEMENTATION = 3;
+}
+
+message CreateDreamfall {
+  string project_id = 1;
+  DreamfallSettings settings = 2;
+  // Boards of the project to use as stages instead of new ones, by stage.
+  map<string, string> boards = 3;
+}
+
+message UpdateDreamfall {
+  string dreamfall_id = 1;
+  DreamfallSettings settings = 2;
+}
+
+message PauseDreamfall {
+  string dreamfall_id = 1;
+  bool paused = 2;
+}
+
+message RemoveDreamfall { string dreamfall_id = 1; }
+
+message RunDreamfallStage {
+  string dreamfall_id = 1;
+  StageKind stage = 2;
+}
+
+// The person's decision on an idea; the core knows its Dreamfall board.
+message DecideIdea {
+  string card_id = 1;
+  enum Decision {
+    DECISION_UNSPECIFIED = 0;
+    // Copy a Navigation idea to Implementation as a Todo draft.
+    DECISION_PICK = 1;
+    // Keep a Navigation idea for later.
+    DECISION_PARK = 2;
+    // Copy an idea to the next agent stage.
+    DECISION_PROMOTE = 3;
+    DECISION_RELEASE = 4;
+    // A released or parked idea waits in its queue again.
+    DECISION_RESTORE = 5;
+    // Start the agent of an Implementation draft.
+    DECISION_START = 6;
+    // An Implementation card whose agent finished but left it in Running.
+    DECISION_REVIEW = 7;
+  }
+  Decision decision = 2;
+  // Kept on the trail.
+  string note = 3;
+  // Pick: in a new worktree instead of the project directory, and start the agent at once.
+  bool worktree = 4;
+  bool start = 5;
+}
+
+message Reply {
+  oneof reply {
+    Result result = 1;
+    Failure failure = 2;
+  }
+}
+
+message Result {
+  // A confirmation to show briefly, e.g. "Finished work folders are removed after 30 days."
+  string message = 1;
+  // What the command created, e.g. the new Dreamfall board, for the page to open.
+  string created_id = 2;
+}
+
+message Failure {
+  enum Kind {
+    // The input cannot work; the message says what to change.
+    KIND_INVALID = 0;
+    // The add-on tried and could not.
+    KIND_FAILED = 1;
+    // The add-on's bridge did not answer; trying again may work.
+    KIND_UNREACHABLE = 2;
+  }
+  Kind kind = 1;
+  string message = 2;
+}
+
+enum Slice {
+  SLICE_UNSPECIFIED = 0;
+  SLICE_GATEWAY = 1;
+  SLICE_SSH = 2;
+  SLICE_CLAUDE = 3;
+  SLICE_SETTINGS = 4;
+  // Scope: a conversation's ID for its questions, empty for all.
+  SLICE_QUESTIONS = 5;
+  // The Dreamfall boards.
+  SLICE_DREAMFALLS = 6;
+  // One Dreamfall board; scope: its ID, or the ID of one of its stage boards.
+  SLICE_DREAMFALL = 7;
+  // An idea's brief, verdict, provenance and trail; scope: its card ID.
+  SLICE_IDEA = 8;
+  // The form: scope "new:<project ID>" (or "new:" to choose the project) for a new Dreamfall board,
+  // or a board's ID for its settings.
+  SLICE_DREAMFALL_FORM = 9;
+  // The account's agent instructions.
+  SLICE_INSTRUCTIONS = 10;
+  // Antigravity's quota groups, which only the add-on reads (Usage).
+  SLICE_ANTIGRAVITY = 11;
+}
+
+message Update {
+  Slice slice = 1;
+  string scope = 2;
+  // Counts the updates of one observation; the first (1) is a snapshot.
+  uint64 sequence = 3;
+  oneof value {
+    GatewaySlice gateway = 4;
+    SshSlice ssh = 5;
+    ClaudeSlice claude = 6;
+    SettingsSlice settings = 7;
+    QuestionsSlice questions = 8;
+    DreamfallsSlice dreamfalls = 9;
+    DreamfallSlice dreamfall = 10;
+    IdeaSlice idea = 11;
+    DreamfallFormSlice dreamfall_form = 12;
+    InstructionsSlice instructions = 13;
+    AntigravitySlice antigravity = 14;
+  }
+}
+
+// Antigravity's quota as the add-on's agy reports it: models share a weekly and a 5-hour window per group.
+message AntigravitySlice {
+  // The add-on has Antigravity credentials (the option antigravity_token).
+  bool configured = 1;
+  repeated AntigravityGroup groups = 2;
+}
+
+message AntigravityGroup {
+  // "Gemini"
+  string name = 1;
+  // The model families sharing it: "Gemini Flash", "Gemini Pro".
+  repeated string models = 2;
+  // Percent left in its tightest window.
+  int32 remaining = 3;
+  repeated AntigravityWindow windows = 4;
+}
+
+message AntigravityWindow {
+  // "Week", "5h"
+  string name = 1;
+  int32 remaining = 2;
+  // RFC 3339, empty when agy reports none.
+  string resets_at = 3;
+}
+
+enum Tone {
+  TONE_NEUTRAL = 0;
+  TONE_ACTIVE = 1;
+  TONE_SUCCESS = 2;
+  TONE_WARNING = 3;
+  TONE_DANGER = 4;
+}
+
+// The add-on's enrollment with a Dieter gateway: how the apps see it as a machine.
+message GatewaySlice {
+  bool loading = 1;
+  // Why the state could not be read.
+  string error = 2;
+  bool enrolled = 3;
+  // Enrolled: the machine's row, e.g. "home-assistant" and "https://gateway… · connected".
+  string title = 4;
+  string detail = 5;
+  Tone tone = 6;
+  enum Action {
+    ACTION_NONE = 0;
+    // The account lists the machine: its devices page.
+    ACTION_DEVICES = 1;
+    // The account removed or replaced the machine: drop the enrollment and enroll again.
+    ACTION_REENROLL = 2;
+  }
+  Action action = 7;
+  // Not enrolled: the name the machine gets, and the gateway address to start from. The add-on's
+  // options can fix the address (locked).
+  string machine_name = 8;
+  string gateway_url = 9;
+  bool gateway_url_locked = 10;
+  Enrollment enrollment = 11;
+}
+
+message Enrollment {
+  enum Phase {
+    PHASE_NONE = 0;
+    PHASE_STARTING = 1;
+    // Open sign_in_url and authorize the daemon; the gateway may ask for code.
+    PHASE_WAITING = 2;
+    PHASE_DONE = 3;
+    PHASE_FAILED = 4;
+  }
+  Phase phase = 1;
+  string sign_in_url = 2;
+  string code = 3;
+  // Done: what happened and what is next; failed: why.
+  string message = 4;
+}
+
+message SshSlice {
+  bool loading = 1;
+  string error = 2;
+  // Empty until the add-on has made its key (at its next start).
+  string public_key = 3;
+  string fingerprint = 4;
+  SshTest test = 5;
+}
+
+// The last connection test with the add-on's key.
+message SshTest {
+  string target = 1;
+  bool running = 2;
+  bool ok = 3;
+  // "Connected: <host>" or "Failed: <why>".
+  string message = 4;
+}
+
+// The Claude Code login of the add-on's harness.
+message ClaudeSlice {
+  bool loading = 1;
+  string error = 2;
+  bool signed_in = 3;
+  // e.g. "Signed in (max)", "Setup-token from the add-on options", "Not signed in".
+  string title = 4;
+  string detail = 5;
+  Tone tone = 6;
+  enum Action {
+    ACTION_NONE = 0;
+    ACTION_SIGN_IN = 1;
+    ACTION_SIGN_OUT = 2;
+  }
+  Action action = 7;
+  ClaudeSignIn sign_in = 8;
+}
+
+message ClaudeSignIn {
+  enum Phase {
+    PHASE_NONE = 0;
+    PHASE_STARTING = 1;
+    // Open sign_in_url, allow Claude Code, paste the code it shows.
+    PHASE_CODE = 2;
+    PHASE_SUBMITTING = 3;
+    PHASE_DONE = 4;
+    // The attempt ended; starting again is a new attempt.
+    PHASE_FAILED = 5;
+  }
+  Phase phase = 1;
+  string sign_in_url = 2;
+  // Done: what happens next; failed: why.
+  string message = 3;
+}
+
+message SettingsSlice {
+  bool loading = 1;
+  string error = 2;
+  Choice title_model = 3;
+  Choice worktree_retention = 4;
+  // The add-on's machine while it names new tasks and chats there (Ollama through Home Assistant); empty when
+  // Dieter's auto-title does.
+  string titles_daemon_id = 5;
+  // Boards in the order dragged on either page; boards not in it follow in Dieter's order.
+  repeated string board_order = 6;
+}
+
+message InstructionsSlice {
+  bool loading = 1;
+  string error = 2;
+  // In the order Dieter puts them together.
+  repeated Instructions items = 3;
+  // What the text may use, e.g. "{{project.name}}".
+  repeated string variables = 4;
+  // Projects and boards with a template of their own instead of "every agent".
+  repeated Override overrides = 5;
+
+  message Instructions {
+    InstructionsKind kind = 1;
+    string title = 2;
+    // The row's subtitle: the text's last line that is not only variables.
+    string summary = 3;
+    string text = 4;
+    // What this part is for.
+    string help = 5;
+  }
+
+  message Override {
+    string name = 1;
+    // "Project", or "Board of <project>".
+    string detail = 2;
+    bool board = 3;
+  }
+}
+
+// A setting with fixed options.
+message Choice {
+  // The chosen option's id and label.
+  string selected = 1;
+  string selected_label = 2;
+  repeated Option options = 3;
+  // Why the chosen value does not work right now; empty when it does.
+  string warning = 4;
+}
+
+message Option {
+  string id = 1;
+  string label = 2;
+}
+
+message QuestionsSlice {
+  bool loading = 1;
+  // Oldest first.
+  repeated Question questions = 2;
+}
+
+// An agent's question (Claude Code's AskUserQuestion), relayed by the add-on's harness worker.
+message Question {
+  string id = 1;
+  // The conversation that asks.
+  string card_id = 2;
+  repeated QuestionItem items = 3;
+  // The agent takes answers to only some of the items.
+  bool allow_partial = 4;
+  // For lists: the first item's question.
+  string summary = 5;
+  string created_at = 6;
+}
+
+message QuestionItem {
+  string id = 1;
+  // A short label for the item, e.g. "Colour".
+  string chip = 2;
+  string question = 3;
+  repeated QuestionOption options = 4;
+  bool multiple = 5;
+  // Own text allowed (always when there are no options).
+  bool free_form = 6;
+}
+
+message QuestionOption {
+  string id = 1;
+  string label = 2;
+  string description = 3;
+}
+
+message DreamfallsSlice {
+  bool loading = 1;
+  string error = 2;
+  repeated DreamfallSummary dreamfalls = 3;
+}
+
+message DreamfallSummary {
+  string id = 1;
+  string name = 2;
+  // e.g. "Home-Assistant-Sem2 · 42 ideas · paused"
+  string detail = 3;
+  // Ideas waiting for the person's pick.
+  int32 waiting = 4;
+  string project_id = 5;
+  // Its stage boards, which open as the Dreamfall board.
+  repeated string board_ids = 6;
+  // Every idea once (the card it started as); copies on later stages don't count.
+  int32 ideas = 7;
+}
+
+message DreamfallSlice {
+  bool loading = 1;
+  string error = 2;
+  // Not (or no longer) a Dreamfall board.
+  bool missing = 3;
+  string id = 4;
+  string name = 5;
+  // e.g. "Home-Assistant-Sem2 · Dreamfall · 42 ideas"
+  string subtitle = 6;
+  string project_id = 7;
+  // Both schedules are paused.
+  bool paused = 8;
+  repeated DreamfallStage stages = 9;
+  // The stage a narrow screen shows first.
+  StageKind first = 10;
+}
+
+message DreamfallStage {
+  StageKind kind = 1;
+  string name = 2;
+  string board_id = 3;
+  bool human = 4;
+  // The queue: ideas waiting here.
+  int32 waiting = 5;
+  // e.g. "Agent · daily 02:00 · writes new ideas", "You decide · agents never create or move cards here"
+  string actor = 6;
+  // The funnel's line: "Agent · daily 02:00", "You · human gate · 1 running"
+  string funnel = 7;
+  // The funnel's arrow into this stage: "3 of 12", "you"; empty for the first stage.
+  string passes = 8;
+  // Agent stages: the latest run.
+  DreamfallRun run = 9;
+  // The person's stage: what the gate means, and what every pick adds.
+  string gate = 10;
+  string gate_extra = 11;
+  repeated IdeaGroup groups = 12;
+  // Nothing waits: "No ideas waiting."
+  string empty = 13;
+  // An agent schedule exists: run it now.
+  bool can_run = 14;
+  // The person may add a card: a new idea (Enumeration) or a new task (Implementation).
+  bool can_add = 15;
+}
+
+message DreamfallRun {
+  enum Status {
+    STATUS_NONE = 0;
+    STATUS_WORKING = 1;
+    STATUS_DONE = 2;
+    STATUS_FAILED = 3;
+    // Begun and not finished, or not begun yet.
+    STATUS_WAITING = 4;
+  }
+  Status status = 1;
+  // e.g. "Run · today 02:00 – 02:14 · 6 new ideas", "No run yet · next at 02:00"
+  string text = 2;
+  // The run's card: its conversation.
+  string card_id = 3;
+  // The agent's note on the run.
+  string note = 4;
+}
+
+message IdeaGroup {
+  enum Kind {
+    KIND_QUEUE = 0;
+    KIND_TRANSFERRED = 1;
+    KIND_RELEASED = 2;
+    KIND_PICKED = 3;
+    KIND_PARKED = 4;
+    // The person's stage: Todo, Running, Review.
+    KIND_LANE = 5;
+    KIND_DONE = 6;
+  }
+  Kind kind = 1;
+  // Empty for a stage's queue.
+  string title = 2;
+  // Finished groups fold; the person opens them.
+  bool collapsible = 3;
+  // "12", or "newest 40 of 52"
+  string count = 4;
+  repeated IdeaCard cards = 5;
+}
+
+message IdeaCard {
+  string id = 1;
+  string category = 2;
+  string title = 3;
+  // "3h", "2d"
+  string age = 4;
+  string excerpt = 5;
+  Verdict verdict = 6;
+  repeated IdeaMeta metas = 7;
+  // e.g. "Waiting for you", "Running", "Finished · still in Running", "Released · 2d"
+  string status = 8;
+  Tone status_tone = 9;
+  // The card's agent is working.
+  bool live = 10;
+  // "claude-code · opus · 12.4k tokens"
+  string detail = 11;
+  IdeaAction action = 12;
+  // A decision on the card is under way, e.g. "Picking…"
+  string busy = 13;
+  // Implementation cards open their conversation, ideas open their page.
+  bool opens_conversation = 14;
+}
+
+message Verdict {
+  enum Kind {
+    KIND_PROMOTE = 0;
+    KIND_PICK = 1;
+    KIND_RELEASE = 2;
+    KIND_PARK = 3;
+  }
+  Kind kind = 1;
+  // Promote and pick.
+  bool good = 2;
+  // "Promoted"
+  string label = 3;
+  // "8/10 · Saves two kWh a day with parts that exist."
+  string text = 4;
+}
+
+message IdeaMeta {
+  enum Kind {
+    KIND_FROM = 0;
+    KIND_TO = 1;
+    KIND_AGENT = 2;
+    KIND_PERSON = 3;
+    KIND_PICKED_BY = 4;
+    // An Implementation card that did not come through a pick.
+    KIND_OUTSIDE = 5;
+    KIND_WORKSPACE = 6;
+  }
+  Kind kind = 1;
+  string text = 2;
+}
+
+message IdeaAction {
+  DecideIdea.Decision decision = 1;
+  string label = 2;
+  bool primary = 3;
+  // Asks for a note first (and for a pick, the workspace and whether to start).
+  bool asks = 4;
+  // The question's title and what happens, e.g. "Park", "It leaves your queue for later; you can pick it any time."
+  string ask_title = 5;
+  string ask_text = 6;
+  // Shown while it runs, e.g. "Picking…"
+  string busy = 7;
+}
+
+message IdeaSlice {
+  bool loading = 1;
+  string error = 2;
+  // Not (or no longer) on a Dreamfall board.
+  bool missing = 3;
+  string card_id = 4;
+  string dreamfall_id = 5;
+  string title = 6;
+  // "Home-Assistant-Sem2 · Dreamfall · Navigation"
+  string subtitle = 7;
+  StageKind stage = 8;
+  // "Navigation · Waiting for you"
+  string stage_label = 9;
+  string category = 10;
+  repeated IdeaAction actions = 11;
+  string busy = 12;
+  Verdict verdict = 13;
+  // Markdown.
+  string brief = 14;
+  repeated ProvenanceStep provenance = 15;
+  repeated TrailEvent trail = 16;
+  // The trail is still being read.
+  bool trail_loading = 17;
+}
+
+// One copy of the idea across the stages, oldest first.
+message ProvenanceStep {
+  string card_id = 1;
+  StageKind stage = 2;
+  // "Navigation · this card", "Enumeration · c_8f2k1x"
+  string title = 3;
+  // "Found by agent · today 02:04 · promoted"
+  string detail = 4;
+  bool current = 5;
+}
+
+message TrailEvent {
+  enum Kind {
+    KIND_OTHER = 0;
+    KIND_CREATED = 1;
+    KIND_JUDGED = 2;
+    KIND_RELEASED = 3;
+    KIND_PARKED = 4;
+    KIND_TRANSFERRED = 5;
+    KIND_PICKED = 6;
+    KIND_RESTORED = 7;
+    KIND_STARTED = 8;
+    // Where the card is now.
+    KIND_NOW = 9;
+  }
+  Kind kind = 1;
+  // By the person (not an agent).
+  bool human = 2;
+  // "Transferred to Navigation, source released"
+  string title = 3;
+  // "Agent · run c_93kd0a · today 05:02"
+  string detail = 4;
+  // The reason or note, with its score.
+  string quote = 5;
+}
+
+message DreamfallFormSlice {
+  bool loading = 1;
+  string error = 2;
+  // Settings of an existing board (no project or stage boards to choose).
+  bool edit = 3;
+  string dreamfall_id = 4;
+  // "New Dreamfall board", "Dreamfall settings"
+  string title = 5;
+  string project_id = 6;
+  string project_name = 7;
+  // The add-on's projects, while none is chosen.
+  repeated Option projects = 8;
+  // Where the form starts.
+  DreamfallSettings settings = 9;
+  repeated AgentOption agents = 10;
+  // The project's boards that can be a stage (a Review lane, not a stage yet).
+  repeated Option boards = 11;
+}
+
+message AgentOption {
+  string id = 1;
+  string label = 2;
+  repeated ModelOption models = 3;
+  string default_model = 4;
+}
+
+message ModelOption {
+  string id = 1;
+  string label = 2;
+  repeated Option efforts = 3;
+}

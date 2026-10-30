@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#121214">
+<title>Dieter</title>
+<style>
+  :root { --dieter-bg: #121214; --dieter-fg: #8e8e96; }
+  :root.light { --dieter-bg: #fbfbfd; --dieter-fg: #6e6e76; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--dieter-bg); }
+  /* Compose scrolls and drags itself: a browser that took over a pan (iPadOS does, mid-swipe) would cancel it */
+  #dieter { position: fixed; inset: 0; touch-action: pinch-zoom; }
+  #loading { position: fixed; inset: 0; z-index: 1; display: grid; place-items: center; padding: 16px;
+    font: 500 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--dieter-fg);
+    text-align: center; }
+  #loading .box { max-width: 420px; }
+  #loading .spinner { width: 22px; height: 22px; margin: 0 auto 12px; border-radius: 50%;
+    border: 2px solid currentColor; border-right-color: transparent; opacity: .7;
+    animation: spin .9s linear infinite; }
+  #loading.failed .spinner { display: none; }
+  #loading a { color: inherit; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #loading .spinner { animation: none; } }
+</style>
+<script>
+/* Loader of Dieter's Compose UI (Kotlin/Wasm).
+   Behind Home Assistant Ingress the page lives at /api/hassio_ingress/<token>/next/ and every asset
+   URL is relative, so the trailing slash matters (same guard as the classic page). */
+(function () {
+  "use strict";
+  var path = location.pathname;
+  if (!path.endsWith("/") && !/\.html?$/.test(path)) {
+    location.replace(path + "/" + location.search + location.hash);
+    return;
+  }
+
+  // ---- Home Assistant's theme. Behind Ingress the page is same origin with HA's frontend, so it
+  // reads the parent page: hass.themes (dark mode, theme name) and the CSS variables HA applies to its
+  // <html>. HA's app-panel messages (home-assistant/properties) carry only narrow and route, no theme.
+  // Precedence for dark/light: ?theme=dark|light, then Home Assistant, then the device.
+  // window.dieterHost hands the result to the Compose side (WebHost.kt) and tells it about changes.
+  var HA_VARS = ["primary-color", "accent-color", "primary-background-color", "secondary-background-color",
+    "card-background-color", "primary-text-color", "sidebar-background-color"];
+  function haRoot() {
+    try {
+      if (window.parent === window) return null;
+      var root = window.parent.document.querySelector("home-assistant");
+      return root && root.hass ? root : null;
+    } catch (e) {
+      return null; // another origin (no Ingress)
+    }
+  }
+  var probe = null;
+  function toHex(value) { // any CSS color -> #rrggbb, null for none/transparent
+    if (!value) return null;
+    if (!probe) { probe = document.createElement("i"); probe.style.display = "none"; document.documentElement.appendChild(probe); }
+    probe.style.color = "";
+    probe.style.color = value;
+    if (!probe.style.color) return null;
+    var m = getComputedStyle(probe).color.match(/rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)(?:\s*[,/]\s*([\d.]+)(%?))?/);
+    if (!m || (m[4] !== undefined && parseFloat(m[4]) === 0)) return null;
+    return "#" + [m[1], m[2], m[3]].map(function (n) { return ("0" + (+n).toString(16)).slice(-2); }).join("");
+  }
+  function readTheme() {
+    var forced = new URLSearchParams(location.search).get("theme");
+    if (forced !== "dark" && forced !== "light") forced = null;
+    var root = haRoot();
+    var hass = root && root.hass;
+    var vars = {};
+    if (root) {
+      try {
+        var cs = window.parent.getComputedStyle(window.parent.document.documentElement);
+        HA_VARS.forEach(function (n) { vars[n] = toHex(cs.getPropertyValue("--" + n).trim()); });
+      } catch (e) {}
+    }
+    var themes = hass && hass.themes;
+    var dark = forced ? forced === "dark"
+      : themes && typeof themes.darkMode === "boolean" ? themes.darkMode
+      : !(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches);
+    return {
+      dark: dark,
+      source: forced ? "query" : hass ? "home-assistant" : "device",
+      name: (themes && (themes.theme || themes.default_theme)) || null,
+      primary: vars["primary-color"] || null,
+      accent: vars["accent-color"] || null,
+      background: vars["primary-background-color"] || null,
+      surface: vars["card-background-color"] || null,
+      text: vars["primary-text-color"] || null,
+      sidebar: vars["sidebar-background-color"] || null,
+    };
+  }
+  function storage(key, value) {
+    try {
+      if (value === undefined) return window.localStorage.getItem(key);
+      window.localStorage.setItem(key, value);
+    } catch (e) {}
+    return null;
+  }
+  // The loader and the browser chrome take the colour Compose drew last time in this mode (no flash).
+  function applyChrome(dark, color) {
+    var bg = color || storage("dieter.chrome." + (dark ? "dark" : "light")) || (dark ? "#121214" : "#fbfbfd");
+    var html = document.documentElement;
+    html.classList.toggle("light", !dark);
+    html.style.setProperty("--dieter-bg", bg);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", bg);
+  }
+  var current = readTheme();
+  var currentJson = JSON.stringify(current);
+  var listeners = [];
+  var pending = null;
+  var watching = false;
+  applyChrome(current.dark);
+  function check() {
+    pending = null;
+    var next = readTheme();
+    var json = JSON.stringify(next);
+    if (json === currentJson) return;
+    current = next;
+    currentJson = json;
+    if (document.getElementById("loading")) applyChrome(next.dark);
+    listeners.slice().forEach(function (cb) { try { cb(); } catch (e) {} });
+  }
+  function schedule() { if (!pending) pending = setTimeout(check, 100); }
+  function watch() {
+    if (watching) return;
+    watching = true;
+    try {
+      var parentDoc = window.parent !== window ? window.parent.document : null;
+      if (parentDoc) {
+        var Observer = window.parent.MutationObserver;
+        new Observer(schedule).observe(parentDoc.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+        new Observer(schedule).observe(parentDoc.head, { childList: true, subtree: true, characterData: true });
+      }
+    } catch (e) {}
+    [window, window.parent].forEach(function (w) {
+      try { w.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", schedule); } catch (e) {}
+    });
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) schedule(); });
+    window.addEventListener("focus", schedule);
+    setInterval(function () { if (!document.hidden) check(); }, 1000); // hass.themes can change without a DOM change
+  }
+  // ---- where the gateway should send this browser back after GitHub sign-in. Inside Home Assistant's
+  // frontend: <HA address>/app/<add-on slug>/next/signin (the classic page forwards that deep link to
+  // next/signin, which the bridge relays to the web host). Elsewhere: this page's own address.
+  function signInCallback() {
+    try {
+      if (window.parent !== window) {
+        var p = window.parent.location;
+        var m = p.pathname.match(/^\/(?:app\/|hassio\/ingress\/)?((?:[0-9a-f]{8}|local)_[a-z0-9_]+)(?:\/|$)/);
+        if (m) return p.origin + "/app/" + m[1] + "/next/signin";
+      }
+    } catch (e) {}
+    return location.origin + location.pathname.replace(/[^/]*$/, "") + "signin";
+  }
+  window.dieterHost = {
+    signInCallback: signInCallback,
+    theme: function () { check(); return currentJson; },
+    onThemeChange: function (callback) { listeners.push(callback); watch(); },
+    setChrome: function (color, dark) {
+      storage("dieter.chrome." + (dark ? "dark" : "light"), color);
+      applyChrome(dark, color);
+    },
+  };
+
+  function loading() { return document.getElementById("loading"); }
+  function fail(html) {
+    var run = function () {
+      var el = loading();
+      if (!el) return;
+      el.classList.add("failed");
+      el.querySelector(".text").innerHTML = html;
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run); else run();
+  }
+  var CLASSIC = 'The classic page still works: <a href="../" target="_self">open it</a>.';
+
+  // ---- Kotlin/Wasm needs WebAssembly GC (Chrome/Edge 119+, Firefox 120+, Safari and iOS 18.2+)
+  function wasmGcSupported() {
+    try {
+      // a module whose type section declares one struct type (GC proposal)
+      return typeof WebAssembly === "object" &&
+        WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 95, 1, 120, 0]));
+    } catch (e) {
+      return false;
+    }
+  }
+  if (!wasmGcSupported()) {
+    fail("This browser cannot run the new Dieter page: it needs WebAssembly GC " +
+      "(current Chrome, Edge or Firefox; Safari, iPhone and iPad from iOS 18.2). " + CLASSIC);
+    return;
+  }
+
+  // ---- compressed WebAssembly: Home Assistant's Ingress drops Accept-Encoding and compresses only
+  // text, JSON and JavaScript at the border, so the ~14 MB of .wasm would travel uncompressed.
+  // The bundle ships X.wasm.gz next to X.wasm; fetch the .gz and inflate it in the browser.
+  var nativeFetch = window.fetch.bind(window);
+  if (typeof DecompressionStream === "function" && typeof Response === "function") {
+    window.fetch = function (input, init) {
+      var url = typeof input === "string" ? input : (input && (input.href || input.url));
+      if (url && /\.wasm(\?|$)/.test(url)) {
+        var gz = url.replace(/\.wasm(\?|$)/, ".wasm.gz$1");
+        return nativeFetch(gz, init).then(function (r) {
+          if (!r.ok || !r.body) return nativeFetch(input, init);
+          return new Response(r.body.pipeThrough(new DecompressionStream("gzip")), {
+            status: 200,
+            headers: { "Content-Type": "application/wasm" },
+          });
+        }, function () {
+          return nativeFetch(input, init);
+        });
+      }
+      return nativeFetch(input, init);
+    };
+  }
+
+  // ---- errors before the first frame end up on the loader instead of a blank page
+  function startupError(message) {
+    if (!loading() || window.dieterStarted) return;
+    fail("Dieter could not start: " + String(message || "unknown error")
+      .replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }) + ". " + CLASSIC);
+  }
+  window.addEventListener("error", function (e) { startupError(e.message || (e.error && e.error.message)); });
+  window.addEventListener("unhandledrejection", function (e) {
+    startupError(e.reason && (e.reason.message || e.reason));
+  });
+
+  // ---- the bundle (tools/package.sh rewrites the name to the content-hashed one)
+  var script = document.createElement("script");
+  script.src = "dieter.js";
+  script.onerror = function () { startupError("the bundle did not load"); };
+  document.head.appendChild(script);
+})();
+</script>
+</head>
+<body>
+<div id="loading" role="status" aria-live="polite"><div class="box"><div class="spinner"></div><div class="text">Loading Dieter…</div></div></div>
+<div id="dieter"></div>
+</body>
+</html>
