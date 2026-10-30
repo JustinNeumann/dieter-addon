@@ -195,6 +195,12 @@ class DreamfallTest {
         assertEquals("claude-code", settings.provider)
         assertEquals("opus", settings.model)
         assertEquals("Europe/Berlin", settings.timezone)
+        // the page adds the viewer's time zone; one that is not a zone name leaves the machine's
+        val zoned = watch(core, Slice.SLICE_DREAMFALL_FORM, "new:p1@America/New_York").last().dreamfall_form!!
+        assertEquals("America/New_York", zoned.settings!!.timezone)
+        assertEquals("Dieter", zoned.project_name)
+        val odd = watch(core, Slice.SLICE_DREAMFALL_FORM, "new:p1@not a zone").last().dreamfall_form!!
+        assertEquals("Europe/Berlin", odd.settings!!.timezone)
         assertEquals("Promote what helps.", settings.navigation_logic)
         assertEquals((0..6).toList(), settings.days)
 

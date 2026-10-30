@@ -19,6 +19,8 @@ object AddonRules {
     private val BRANCH = Regex("""^[\w./-]{1,100}$""")
     private val TIME = Regex("""^([01]?\d|2[0-3]):([0-5]\d)$""")
     private val TIMEZONE = Regex("""^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$|^UTC$""")
+
+    fun isTimezone(zone: String): Boolean = TIMEZONE.matches(zone)
     /** The longest navigation logic and implementation instructions the bridge keeps. */
     const val MAX_LOGIC = 4000
 

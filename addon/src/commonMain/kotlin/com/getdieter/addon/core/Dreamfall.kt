@@ -779,8 +779,11 @@ internal class Dreamfall(
 
     // ---- the form
 
-    private fun form(scope: String): DreamfallFormSlice {
+    /** [target] is "new:<project>" or a board's ID, then "@<zone>": the viewer's time zone, the default for a new board. */
+    private fun form(target: String): DreamfallFormSlice {
         if (!loaded) return DreamfallFormSlice(loading = true)
+        val scope = target.substringBefore('@')
+        val zone = target.substringAfter('@', "").takeIf(AddonRules::isTimezone) ?: timezone()
         val agents =
             harnesses.map { h ->
                 AgentOption(
@@ -818,7 +821,7 @@ internal class Dreamfall(
                         enumeration_time = hhmm(enumeration).ifEmpty { "02:00" },
                         navigation_time = hhmm(navigation).ifEmpty { "05:00" },
                         days = days(enumeration),
-                        timezone = p.str("timezone").ifEmpty { timezone() },
+                        timezone = p.str("timezone").ifEmpty { zone },
                         enabled = p.str("enabled") != "false",
                         mail = p.bool("mail"),
                         provider = agent.str("provider"),
@@ -849,7 +852,7 @@ internal class Dreamfall(
                     enumeration_time = "02:00",
                     navigation_time = "05:00",
                     days = (0..6).toList(),
-                    timezone = timezone(),
+                    timezone = zone,
                     enabled = true,
                     provider = agent?.id.orEmpty(),
                     model = agent?.default_model?.ifEmpty { null } ?: agent?.models?.firstOrNull()?.id.orEmpty(),
