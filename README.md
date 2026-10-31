@@ -39,8 +39,12 @@ Pi or mini PC, and get a push notification when it needs you or is ready for rev
 - Home Assistant OS or Supervised (add-ons), on aarch64 (Raspberry Pi 4/5, Home Assistant Green/Yellow) or amd64.
 - At least one provider login: a Claude subscription (sign in on the page), an OpenAI API key, or an Antigravity
   sign-in.
-- A Dieter gateway and GitHub account for the page's sign-in (the page is a Dieter client, like the phone apps; see
-  [the page](dieter/DOCS.md#the-page)). `…/next/?demo` shows the page with demo data without any of it.
+- Nothing else to install: the Dieter daemon, the agent CLIs (`claude`, `codex`, `agy`), `gh` and the page are all in
+  the add-on's image.
+- Access to a Dieter **gateway**, the one thing outside the add-on: the page, like the Dieter phone apps, signs in to
+  one with your GitHub account. The default, `gateway.getdieter.com`, only admits accounts its operator has allowed;
+  otherwise [run your own](https://github.com/dbpprt/dieter/blob/main/site/content/docs/gateway.md). See [the page](dieter/DOCS.md#the-page).
+  `…/next/?demo` shows the page with demo data without any of it.
 - Optional: a GitHub token, so agents can clone, push and open pull requests.
 
 About 800 MB of agent runtime is downloaded on the first start.
@@ -52,8 +56,8 @@ About 800 MB of agent runtime is downloaded on the first start.
 2. Install **Dieter**, fill in the options you have (a Claude token, an OpenAI key or Antigravity credentials;
    optionally a GitHub token and your Git name and e-mail) and start it. The first start downloads the agent runtime.
 3. Open **Dieter** in the sidebar and sign the page in to your Dieter gateway with GitHub, then approve the pairing
-   code it shows on a device that is already trusted (the Dieter app, or `dieter device approve <code>`). Your gateway
-   must accept your Home Assistant's address as a return address once; the steps are in
+   code it shows on a device that is already trusted (the Dieter app, or `dieter device approve <code>`). A gateway you
+   run yourself must accept your Home Assistant's address as a return address once; the steps are in
    [Signing in the page](dieter/DOCS.md#signing-in-the-page). Signed in, you can also sign in to Claude Code on the
    page (Tools → Usage) instead of pasting a token.
 4. Optional: copy [`homeassistant/packages/dieter.yaml`](homeassistant/packages/dieter.yaml) into your
