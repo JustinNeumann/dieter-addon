@@ -83,6 +83,21 @@ class SettingsTest {
     }
 
     @Test
+    fun `the palette picked on one page is kept for every device, and other settings keep it`() {
+        assertEquals("", settings.view()["palette"]!!.jsonPrimitive.content)
+        assertEquals("dreamfall", settings.update(body("""{"palette":"dreamfall"}"""))["palette"]!!.jsonPrimitive.content)
+        settings.update(body("""{"worktree_retention_days":30}"""))
+        settings.order(body("""{"ids":["b1"]}"""))
+        assertEquals(Settings.Values("openai", listOf("b1"), 30, palette = "dreamfall"), settings.read())
+        for (bad in listOf("""{"palette":""}""", """{"palette":1}""", """{"palette":"Dream Fall"}""", """{"palette":"x${"y".repeat(40)}"}""", """{"palette":null}"""))
+            assertFailsWith<BadRequest>(bad) { settings.update(body(bad)) }
+        assertEquals("dreamfall", settings.read().palette)
+        // a file from before it, or an odd value, reads as none picked
+        file.writeText("""{"title_model":"openai","worktree_retention_days":14,"board_order":[],"palette":"<b>"}""")
+        assertEquals("", settings.read().palette)
+    }
+
+    @Test
     fun `Ollama titles name the add-on's daemon only while chosen and available, and the entity is looked up again`() {
         var v = settings.view()
         assertEquals("", v["titles_daemon_id"]!!.jsonPrimitive.content)

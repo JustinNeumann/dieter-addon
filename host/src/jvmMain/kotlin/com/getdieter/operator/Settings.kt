@@ -16,12 +16,19 @@ import kotlinx.serialization.json.put
 
 /**
  * The add-on's own settings (Tools → Settings), kept in /data/bridge_settings.json: who titles a task created without
- * a title, how long a finished card's work folder is kept, the board order dragged on the page, and the Antigravity
- * quota groups left out of the Inbox's usage strip (Usage → Include in summary). The operator's titles and
+ * a title, how long a finished card's work folder is kept, the board order dragged on the page, the palette picked in
+ * Settings → Appearance (every device and page load starts in it), and the Antigravity quota groups left out of the
+ * Inbox's usage strip (Usage → Include in summary). The operator's titles and
  * housekeeping and the bridge's state stream (the board order) read the same file on every use.
  */
 class Settings(private val file: File, private val ollama: OllamaEntity, private val daemonId: () -> String) {
-    data class Values(val titleModel: String, val boardOrder: List<String>, val retentionDays: Int, val antigravityExcluded: List<String> = emptyList())
+    data class Values(
+        val titleModel: String,
+        val boardOrder: List<String>,
+        val retentionDays: Int,
+        val antigravityExcluded: List<String> = emptyList(),
+        val palette: String = "",
+    )
 
     fun read(): Values {
         val d = runCatching { Json.parseToJsonElement(file.readText()) as? JsonObject }.getOrNull() ?: JsonObject(emptyMap())
@@ -29,15 +36,17 @@ class Settings(private val file: File, private val ollama: OllamaEntity, private
         val order = (d["board_order"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
         val days = (d["worktree_retention_days"] as? JsonPrimitive)?.takeUnless { it.isString || it.content == "true" || it.content == "false" }?.intOrNull
         val excluded = (d["antigravity_excluded"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+        val palette = (d["palette"] as? JsonPrimitive)?.takeIf { it.isString }?.content
         return Values(
             if (model in TITLE_MODELS) model!! else "openai",
             order.orEmpty(),
             days?.takeIf { it in 0..RETENTION_MAX_DAYS } ?: RETENTION_DEFAULT_DAYS,
             excluded.orEmpty(),
+            palette?.takeIf { PALETTE.matches(it) }.orEmpty(),
         )
     }
 
-    /** {title_model?, worktree_retention_days?, antigravity_inclusion?: {group, included}}; answers the view. */
+    /** {title_model?, worktree_retention_days?, antigravity_inclusion?: {group, included}, palette?}; answers the view. */
     fun update(body: JsonObject): JsonObject {
         var cur = read()
         body["title_model"]?.let { v ->
@@ -65,6 +74,12 @@ class Settings(private val file: File, private val ollama: OllamaEntity, private
                 throw BadRequest("antigravity_inclusion: {group: a quota group's name, included: true or false}")
             val rest = cur.antigravityExcluded.filter { it != group }
             cur = cur.copy(antigravityExcluded = if (included) rest else (rest + group).takeLast(ANTIGRAVITY_EXCLUDED_MAX))
+        }
+        body["palette"]?.let { v ->
+            // The page knows the palettes; a slug it no longer has draws as its default there
+            val slug = (v as? JsonPrimitive)?.takeIf { it.isString }?.content
+            if (slug == null || !PALETTE.matches(slug)) throw BadRequest("palette: a palette's slug, e.g. \"dreamfall\"")
+            cur = cur.copy(palette = slug)
         }
         save(cur)
         return view()
@@ -95,6 +110,7 @@ class Settings(private val file: File, private val ollama: OllamaEntity, private
             put("board_order", JsonArray(cur.boardOrder.map(::JsonPrimitive)))
             put("worktree_retention_days", cur.retentionDays)
             put("antigravity_excluded", JsonArray(cur.antigravityExcluded.map(::JsonPrimitive)))
+            put("palette", cur.palette)
             put("titles_daemon_id", if (entity != null && cur.titleModel == "ollama") daemonId() else "")
             put("title_models", buildJsonArray {
                 add(buildJsonObject { put("id", "openai"); put("name", TITLE_MODELS.getValue("openai")); put("available", true); put("detail", "Dieter's auto-title (GPT Spark)") })
@@ -115,6 +131,7 @@ class Settings(private val file: File, private val ollama: OllamaEntity, private
             put("board_order", JsonArray(v.boardOrder.map(::JsonPrimitive)))
             put("worktree_retention_days", v.retentionDays)
             put("antigravity_excluded", JsonArray(v.antigravityExcluded.map(::JsonPrimitive)))
+            if (v.palette.isNotEmpty()) put("palette", v.palette)
         }.toString())
         Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     }
@@ -124,6 +141,7 @@ class Settings(private val file: File, private val ollama: OllamaEntity, private
         const val RETENTION_DEFAULT_DAYS = 14
         const val RETENTION_MAX_DAYS = 3650
         const val ANTIGRAVITY_EXCLUDED_MAX = 50
+        private val PALETTE = Regex("[a-z0-9][a-z0-9-]{0,39}")
 
         /** The add-on daemon's id from the store's runtime file, "" when unknown. */
         fun localDaemonId(dieterHome: File): String =

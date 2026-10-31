@@ -14,6 +14,7 @@ import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.window.ComposeViewport
 import com.getdieter.addon.AddonClient
 import com.getdieter.addon.LocalAddon
+import com.getdieter.addon.PaletteSync
 import com.getdieter.addon.addonExtensions
 import com.getdieter.client.v1.Command
 import com.getdieter.client.v1.OpenConversationRequest
@@ -91,6 +92,7 @@ private fun show(store: MobileStore, addon: AddonClient, script: String, route: 
             ChromeColor(store)
             BrowserBack()
             CompositionLocalProvider(LocalMobileExtensions provides extensions, LocalAddon provides addon) {
+                PaletteSync(store)
                 MobileApp(store, openUrl = ::openInNewTab)
             }
         }

@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.31 (2026-10-31)
+
+- **The palette you pick is kept for every device.** Settings → Appearance → Palette was stored only in the browser,
+  so each device, the Companion app and every address of Home Assistant (local or Nabu Casa) had its own and started
+  in Monochrome. The add-on now keeps the pick in its settings (`palette` in `/data/bridge_settings.json`): every page
+  load starts in it, and open pages on other devices switch along. A page that has a palette from before hands it over
+  the first time it opens. Light/Dark stays per device.
+
 ## 0.6.431.30 (2026-10-31)
 
 - **Fix: archived cards could not be restored.** A board's Archived Cards sheet sent the restore without its board, and

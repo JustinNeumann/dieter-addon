@@ -398,7 +398,8 @@ repository with the add-on. The add-on's root forwards to it at `next/`.
   Java process), so the sign-in belongs to the add-on, not to a browser: sign in once and every browser and the
   Companion app that open the page use it. Until then it shows the sign-in screen; `next/?demo` shows demo data.
 - **Theme:** Appearance *System* follows Home Assistant's light/dark mode (your HA profile, also when it differs
-  from the device's), live without a reload. **Dynamic color** (Settings) takes Dieter's colours from Home
+  from the device's), live without a reload. The **palette** you pick is kept by the add-on for every device and
+  page load; open pages elsewhere switch along. Light/Dark is per device. **Dynamic color** (Settings) takes Dieter's colours from Home
   Assistant's primary colour, including custom themes.
 - **Browsers:** it needs WebAssembly GC: current Chrome, Edge and Firefox, Android's WebView (Companion app),
   Safari and iPhone/iPad from iOS 18.2. Older browsers get a note saying so.
