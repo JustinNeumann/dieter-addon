@@ -31,11 +31,8 @@ internal fun addonExtensions(): MobileExtensions =
             ),
         toolSections =
             mapOf(
-                ToolPage.MACHINES to
-                    listOf(
-                        ExtensionSection("gateway") { GatewaySection(it) },
-                        ExtensionSection("ssh") { SshKeySection(it) },
-                    ),
+                // the gateway this machine is enrolled at, next to the devices it trusts
+                ToolPage.DEVICES to listOf(ExtensionSection("gateway") { GatewaySection(it) }),
                 ToolPage.USAGE to
                     listOf(
                         ExtensionSection("antigravity") { AntigravitySection(it) },
@@ -45,6 +42,7 @@ internal fun addonExtensions(): MobileExtensions =
                     listOf(
                         ExtensionSection("addon-settings") { AddonSettingsSection(it) },
                         ExtensionSection("addon-instructions") { InstructionsSection(it) },
+                        ExtensionSection("ssh") { SshKeySection(it) },
                     ),
             ),
         inboxSections = listOf(ExtensionSection("questions") { WaitingForAnswerSection(it) }),
@@ -58,7 +56,7 @@ internal fun addonExtensions(): MobileExtensions =
                     it.present(MobileRoute.Extension("new-repository"))
                 },
                 ExtensionAction("new-dreamfall", "New Dreamfall board", Glyph.WATERFALL) {
-                    it.present(MobileRoute.Extension("dreamfall-form", "new:${it.boards.selectedProject.value}"))
+                    it.present(MobileRoute.Extension("dreamfall-form", "new:${it.lastProject().orEmpty()}"))
                 },
             ),
         boardRenderer = dreamfallBoards(),

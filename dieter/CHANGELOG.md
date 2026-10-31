@@ -2,6 +2,15 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.34 (2026-10-31)
+
+- **New navigation from Dieter 0.6.432: Inbox, Projects, Chats and More.** Mail, Channels, Terminals, Usage, the
+  machines, Devices and Settings are in More; Files, Changes and Schedules open from their project. On wide
+  screens More stays beside the open page. The daemon is unchanged (0.6.432 changes only the apps).
+- Add-on pages follow: **Dreamfall** is listed in More, **Gateway of this add-on** is on Devices, the add-on's
+  **SSH key** in Settings. Schedules open from a project, with an *All projects* switch in their menu.
+- Links from before (`tab/mail`, `tab/channels`, `tab/tools`, `dreamfall/<id>`) still open the right place.
+
 ## 0.6.431.33 (2026-10-31)
 
 - **Fix: Ollama task titles were never applied.** With Settings → Task titles on Ollama, a new task or chat kept

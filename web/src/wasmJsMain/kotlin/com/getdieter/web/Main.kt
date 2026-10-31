@@ -128,13 +128,18 @@ private suspend fun openRoute(store: MobileStore, route: String) {
                 target?.inbox != null -> store.selectTab(MobileTab.INBOX)
             }
         }
+        // the four destinations; links to the tabs before 0.6.432 (mail, channels, tools) open their place in More
         "tab" -> parts.getOrNull(1)?.let { name ->
-            MobileTab.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let(store::selectTab)
+            when (name.lowercase()) {
+                "mail" -> store.openMore(MobileRoute.Mailbox)
+                "channels" -> store.openMore(MobileRoute.Channels)
+                "tools" -> store.selectTab(MobileTab.MORE)
+                else -> MobileTab.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let(store::selectTab)
+            }
         }
-        // Tools → Dreamfall, a Dreamfall board (its ID or a stage board's) with its settings, or one idea
+        // More → Dreamfall, a Dreamfall board (its ID or a stage board's) with its settings, or one idea
         "dreamfall" -> {
-            store.selectTab(MobileTab.TOOLS)
-            store.push(MobileRoute.Extension("dreamfall"))
+            store.openMore(MobileRoute.Extension("dreamfall"))
             parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { id ->
                 store.push(MobileRoute.Extension("dreamfall", id))
                 if (parts.getOrNull(2) == "settings") store.present(MobileRoute.Extension("dreamfall-form", id))

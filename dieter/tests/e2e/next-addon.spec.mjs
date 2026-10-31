@@ -31,9 +31,9 @@ async function typeInto(page, locator, text) {
 // another popup opens (its semantics listener follows only the newest owner; fixed in 1.13). The add-on's
 // state lives in the web host, so after a popup the tests open the page again.
 
-/** Opens a tool; a dialog left by an earlier run (enrollment, Claude sign-in: shown until put away) is closed first. */
+/** Opens a page of More; a dialog left by an earlier run (enrollment, Claude sign-in: shown until put away) is closed first. */
 async function openTool(page, tool, section, dialog) {
-  const query = `script=tab%20tools;%20tool%20${tool}`;
+  const query = `script=more%20${tool}`;
   await open(page, query);
   await expect.poll(() => aria(page), { timeout: 30_000 }).toMatch(new RegExp(`${section}|${dialog}`));
   if (!(await aria(page)).includes(dialog)) return;
@@ -41,7 +41,8 @@ async function openTool(page, tool, section, dialog) {
   await open(page, query);
   await expect.poll(() => aria(page), { timeout: 30_000 }).toContain(section);
 }
-const openMachines = (page) => openTool(page, "machines", "Gateway of this add-on", "Enroll with the gateway");
+// the gateway enrollment is on Devices, the add-on's SSH key in Settings (More has no Machines page since 0.6.432)
+const openDevices = (page) => openTool(page, "devices", "Gateway of this add-on", "Enroll with the gateway");
 const openUsage = (page) => openTool(page, "usage", "Claude Code account of this add-on", "Sign in to Claude");
 
 /** Scrolls the detail pane until [locator] is on screen (lazy lists compose only what is near it, so a row can exist
@@ -55,9 +56,10 @@ async function scrollTo(page, locator, x = 900) {
   await expect(locator.first()).toBeVisible();
 }
 
-test("Machines: the add-on's SSH key, and the connection test reports a failure for an unreachable host", async ({ page, request }) => {
+test("Settings: the add-on's SSH key, and the connection test reports a failure for an unreachable host", async ({ page, request }) => {
   const key = await (await request.get("api/ssh")).json();
-  await openMachines(page);
+  await open(page, "script=more%20settings");
+  await scrollTo(page, page.getByRole("textbox", { name: "Test connection to user@host" }));
   await expect.poll(() => aria(page), { timeout: 30_000 }).toContain(key.public_key);
   expect(await aria(page)).toContain("SSH key of this add-on");
   await typeInto(page, page.getByRole("textbox", { name: "Test connection to user@host" }), "nobody@127.0.0.1:1");
@@ -65,9 +67,8 @@ test("Machines: the add-on's SSH key, and the connection test reports a failure 
   await expect.poll(() => aria(page), { timeout: 40_000 }).toMatch(/Failed:/);
 });
 
-test("Machines: the add-on offers enrollment with the gateway; an unreachable gateway is reported, Close puts it away", async ({ page, request }) => {
-  await openMachines(page);
-  expect(await aria(page)).toContain("home-assistant");
+test("Devices: the add-on offers enrollment with the gateway; an unreachable gateway is reported, Close puts it away", async ({ page, request }) => {
+  await openDevices(page);
   // the add-on core's rule: an https origin (with a port of 2 to 5 digits)
   await typeInto(page, page.getByRole("textbox", { name: "Gateway address" }), "https://127.0.0.1:1");
   await expect.poll(() => aria(page)).toContain("The gateway must be an https origin");
@@ -76,7 +77,7 @@ test("Machines: the add-on offers enrollment with the gateway; an unreachable ga
   await expect.poll(() => aria(page), { timeout: 60_000 }).toMatch(/Enroll with the gateway[\s\S]*(refused|connect|enroll)[\s\S]*button "Close"/i);
   await tap(page, page.getByRole("button", { name: "Close", exact: true }));
   expect((await (await request.get("api/gateway")).json()).enrolled).toBe(false);
-  await open(page, "script=tab%20tools;%20tool%20machines");
+  await open(page, "script=more%20devices");
   await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Gateway of this add-on");
   expect(await aria(page)).not.toContain("Enroll with the gateway"); // the attempt was put away
 });
@@ -89,7 +90,7 @@ test("Usage: Claude sign-in opens claude.com, Cancel aborts, a wrong code shows 
   expect((await (await request.get("api/claude/login")).json()).running).toBe(true);
   await tap(page, page.getByRole("button", { name: "Cancel", exact: true }));
   await expect.poll(async () => (await (await request.get("api/claude/login")).json()).running, { timeout: 10_000 }).toBe(false);
-  await open(page, "script=tab%20tools;%20tool%20usage");
+  await open(page, "script=more%20usage");
   await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Claude Code account of this add-on");
   expect(await aria(page)).not.toContain("Sign in to Claude");
   // a wrong code is rejected by the CLI; the dialog says why and offers another attempt
@@ -106,13 +107,13 @@ test("Usage: Claude sign-in opens claude.com, Cancel aborts, a wrong code shows 
 
 test("Settings: the add-on's work-folder retention is saved to the bridge", async ({ page, request }) => {
   const before = await (await request.get("api/settings")).json();
-  await open(page, "script=tab%20tools;%20tool%20settings");
+  await open(page, "script=more%20settings");
   const row = page.getByRole("button", { name: /Keep finished work folders/ });
   await scrollTo(page, row);
   await tap(page, row);
   await tap(page, page.getByRole("button", { name: "30 days", exact: true }));
   await expect.poll(async () => (await (await request.get("api/settings")).json()).worktree_retention_days, { timeout: 15_000 }).toBe(30);
-  await open(page, "script=tab%20tools;%20tool%20settings");
+  await open(page, "script=more%20settings");
   await scrollTo(page, page.getByRole("button", { name: "Keep finished work folders 30 days" }));
   await request.post("api/settings", { data: { worktree_retention_days: before.worktree_retention_days } });
 });
@@ -173,7 +174,7 @@ test("Push: the new page takes over the card an HA automation registered for the
 test("Settings: agent instructions are edited and reset through the add-on core", async ({ page, request }) => {
   const prompts = async () => (await request.get("api/prompts")).json();
   const before = await prompts();
-  await open(page, "script=tab%20tools;%20tool%20settings");
+  await open(page, "script=more%20settings");
   await scrollTo(page, page.getByRole("button", { name: /^Board cards/ }));
   expect(await aria(page)).toContain("Standalone chats");
   await tap(page, page.getByRole("button", { name: /^Board cards/ }));
@@ -182,14 +183,14 @@ test("Settings: agent instructions are edited and reset through the add-on core"
   await tap(page, page.getByRole("button", { name: "Save", exact: true }));
   await expect.poll(async () => (await prompts()).board_skill, { timeout: 20_000 }).toBe(`Use the Dieter CLI. ${stamp}`);
   // Every agent: the two blocks must stay; the page says so before anything is sent
-  await open(page, "script=tab%20tools;%20tool%20settings");
+  await open(page, "script=more%20settings");
   await scrollTo(page, page.getByRole("button", { name: /^Every agent/ }));
   await tap(page, page.getByRole("button", { name: /^Every agent/ }));
   await typeInto(page, page.getByRole("textbox", { name: "Instructions" }), "Hello");
   await expect.poll(() => aria(page)).toContain("{{project.instructions_block}} must stay in the text exactly once.");
   expect((await prompts()).template).toBe(before.template);
   // Board cards back to Dieter's default
-  await open(page, "script=tab%20tools;%20tool%20settings");
+  await open(page, "script=more%20settings");
   await scrollTo(page, page.getByRole("button", { name: /^Board cards/ }));
   await tap(page, page.getByRole("button", { name: /^Board cards/ }));
   await scrollTo(page, page.getByRole("button", { name: /^Reset to Dieter's default/ }));

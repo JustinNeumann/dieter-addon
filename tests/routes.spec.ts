@@ -46,5 +46,5 @@ test("opened at /<panel>/next/dreamfall/<id>: the board over the Dreamfall list,
   await back();
   await expect.poll(tree, { timeout: 10_000 }).toContain('button "New Dreamfall board"');
   await back();
-  await expect.poll(tree, { timeout: 10_000 }).toContain("No tool selected");
+  await expect.poll(tree, { timeout: 10_000 }).toContain("Nothing selected");   // More, where Dreamfall is listed
 });
