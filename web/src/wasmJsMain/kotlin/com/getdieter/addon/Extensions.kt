@@ -64,6 +64,7 @@ internal fun addonExtensions(): MobileExtensions =
         boardRenderer = dreamfallBoards(),
         // boards, like Dreamfall boards, take the whole width on desktops and tablets: lanes side by side
         wideBoards = true,
+        homeAssistantAccess = true,   // New task and schedules: "Allow Home Assistant access" (the web host's agent relay)
         conversationNamer = { rememberConversationNamer(it) },
         boardOrder = { rememberBoardOrder(it) },
         boardGroups = { dreamfallGroups() },

@@ -30,7 +30,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
 /** A night of Dreamfall: Enumeration found two ideas, Navigation promoted one, nothing picked yet. */
-private fun night(rev: Int = 10, extraPipeline: String = "", navigationLane: String = "todo") =
+private fun night(rev: Int = 10, extraPipeline: String = "", navigationLane: String = "todo", moreCards: String = "") =
     json(
         """{"rev":$rev,
         "projects":[{"id":"p1","name":"Dieter"}],
@@ -65,7 +65,7 @@ private fun night(rev: Int = 10, extraPipeline: String = "", navigationLane: Str
            "created_at":"2026-10-29T01:02:00Z","updated_at":"2026-10-29T04:00:00Z","phase_changed_at":"2026-10-29T04:00:00Z"},
           {"id":"c-e2","title":"[Speed] Cache","lane":"todo","board_id":"b-e","initial_prompt":"Cache the state","created_at":"2026-10-29T01:03:00Z","updated_at":"2026-10-29T01:03:00Z"},
           {"id":"c-n1","title":"[UX] Dark mode","lane":"$navigationLane","board_id":"b-n","initial_prompt":"## Idea\nA dark theme for the page\n\n---\n**Promoted from Enumeration** by Navigation agent, 2026-10-29: Useful\n\n<!-- dreamfall-source c-e1 -->",
-           "created_at":"2026-10-29T04:00:00Z","updated_at":"2026-10-29T10:00:00Z"}]}"""
+           "created_at":"2026-10-29T04:00:00Z","updated_at":"2026-10-29T10:00:00Z"}$moreCards]}"""
     )
 
 class DreamfallTest {
@@ -146,6 +146,29 @@ class DreamfallTest {
         assertEquals("Picked cards get your instructions", implementation.gate_extra)
         assertEquals("Nothing picked yet.", implementation.empty)
         assertFalse(implementation.can_run)
+    }
+
+    @Test
+    fun implementationGroupsItsCardsByLaneUnderDistinctTitles() = runTest {
+        // the page keys a stage's groups by kind and title: two lanes with cards once gave two "group-KIND_LANE" keys,
+        // and Compose's duplicate-key failure left the board black
+        val lanes = listOf("todo", "running", "running", "review", "done").mapIndexed { i, lane ->
+            """,{"id":"c-i$i","title":"Task $i","lane":"$lane","board_id":"b-i","initial_prompt":"Do $i",""" +
+                """"created_at":"2026-10-29T0$i:00:00Z","updated_at":"2026-10-29T0$i:30:00Z","phase_changed_at":"2026-10-29T0$i:30:00Z"}"""
+        }
+        bridge.state.emit(night(moreCards = lanes.joinToString("")))
+        val implementation = watch(core(), Slice.SLICE_DREAMFALL, "b-i").last().dreamfall!!.stages[2]
+        val groups = implementation.groups.map { Triple(it.kind, it.title, it.count) }
+        assertEquals(
+            listOf(
+                Triple(IdeaGroup.Kind.KIND_LANE, "Todo", "1"),
+                Triple(IdeaGroup.Kind.KIND_LANE, "Running", "2"),
+                Triple(IdeaGroup.Kind.KIND_LANE, "Review", "1"),
+                Triple(IdeaGroup.Kind.KIND_DONE, "Done", "1"),
+            ),
+            groups,
+        )
+        assertEquals(groups.size, groups.map { it.first to it.second }.toSet().size, "a stage's groups differ in kind or title")
     }
 
     @Test

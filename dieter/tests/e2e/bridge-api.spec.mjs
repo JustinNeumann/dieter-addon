@@ -161,12 +161,38 @@ test("the Supervisor token reaches the web host only: no agent finds it, and its
   expect(sh(`grep -l ${token} /proc/[0-9]*/environ 2>/dev/null | wc -l`, "root")).not.toBe("0");   // the check would see it: root sees the web host's
   expect(sh(`grep -rl ${token} /data /run /tmp /etc 2>/dev/null; true`, "dieter")).toBe("");
   expect(sh("cat /run/s6/container_environment/SUPERVISOR_TOKEN >/dev/null 2>&1 && echo read || echo denied", "dieter")).toBe("denied");
-  expect(sh("cat /data/.claude/CLAUDE.md", "dieter")).toContain("The agents have no access to Home Assistant here");
+  expect(sh("cat /data/.claude/CLAUDE.md", "dieter")).toContain('In conversations created with "Allow Home Assistant access"');
   const relay = (path, body) => sh(`curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST -H 'Content-Type: application/json' -d '${body}' http://127.0.0.1:8097/core/api/${path}`, "dieter");
   expect(relay("services/rest_command/dieter_send_message", '{"card":"c_1","message":"hi"}')).toBe("403");
   expect(relay("services/homeassistant/restart", "{}")).toBe("403");
   expect(relay("template", '{"template":"{{ states | list }}"}')).toBe("403");
-  expect(relay("events/dieter_question", '{"card_id":"c_1"}')).toBe("502");               // passed on; no Supervisor here
+  expect(relay("events/dieter_question", '{"card_id":"c_4f2a9b0c1d3e"}')).toBe("502");    // passed on; no Supervisor here
+  expect(relay("events/dieter_question", '{"card_id":"../../config/users"}')).toBe("403"); // only a card's id shape
+});
+
+test("Home Assistant for agents: only a turn the daemon vouches for passes the agent relay; the daemon's agents point at it", async () => {
+  const sh = (cmd, user) => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "env", "-u", "SUPERVISOR_TOKEN", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
+  const forged = `dtt1:c_e2e:t_e2e:${"A".repeat(43)}`;
+  const agentRelay = (header) => sh(`curl -s -w ' %{http_code}' --max-time 20 ${header} http://127.0.0.1:8098/api/states`, "dieter");
+  for (const header of ["", "-H 'Authorization: Bearer e2e-supervisor-token-2718'", `-H 'Authorization: Bearer ${forged}'`]) {
+    const answer = agentRelay(header);
+    expect(answer.endsWith(" 403"), `${header}: ${answer}`).toBe(true);
+    expect(answer).toContain("Allow Home Assistant access");
+  }
+  // hass-cli signs in with the turn's token (here a forged one) and gets the relay's refusal
+  expect(sh(`DIETER_TURN_TOKEN='${forged}' HASS_SERVER=http://127.0.0.1:8098 hass-cli state list 2>&1; true`, "dieter")).toMatch(/created without Home Assistant access/); // the relay's 403 text
+  // the operator's turn check answers the web host (and root), not the agents; the daemon refuses a forged token
+  const caller = (user) => sh(`curl -s -w ' %{http_code}' -X POST -H 'Content-Type: application/json' -d '{"token":"${forged}"}' http://127.0.0.1:8096/api/turns/caller`, user);
+  expect(caller("dieter").endsWith(" 403")).toBe(true);
+  const asRoot = caller("root");
+  expect(asRoot.endsWith(" 200"), asRoot).toBe(true);
+  const answer = JSON.parse(asRoot.slice(0, -4));
+  expect(answer.home_assistant_access).toBe(false);
+  expect(answer.reason).toMatch(/turn token is invalid|its turn has finished/);
+  // option off: the daemon hands its agents the relay as HASS_SERVER and no token
+  // as its own user (root may not read it); by process name, as -f would also match this shell
+  const daemonEnv = sh("for p in $(pgrep -u dieter -x dieter); do tr '\\0' '\\n' < /proc/$p/environ; done | grep -E '^HASS_' | sort -u", "dieter");
+  expect(daemonEnv).toBe("HASS_SERVER=http://127.0.0.1:8098");
 });
 
 test("questions: the poll token is the asking worker's; an id still waiting cannot be registered again", async ({ request }) => {

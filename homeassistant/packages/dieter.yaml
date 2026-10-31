@@ -98,7 +98,8 @@ template:
           name: "{{ ((state_attr('sensor.dieter', 'machine') or {}).get('gpu') or {}).get('name') }}"
 
 rest_command:
-  # Fields: project (id), board (id), title, prompt, provider, model, effort, workspace (project|worktree), start (bool)
+  # Fields: project (id), board (id), title, prompt, provider, model, effort, workspace (project|worktree), start (bool),
+  # home_assistant (bool: the task's agents may use Home Assistant, see the add-on's docs)
   dieter_create_task:
     url: "http://4d8f2a84-dieter:8099/api/card"
     method: POST
@@ -107,7 +108,8 @@ rest_command:
     payload: >-
       {{ {"project": project, "board": board, "title": title | default(''), "prompt": prompt,
           "provider": provider | default('claude-code'), "model": model | default(''), "effort": effort | default(''),
-          "workspace": workspace | default('project'), "start": start | default(true)} | to_json }}
+          "workspace": workspace | default('project'), "start": start | default(true),
+          "home_assistant": home_assistant | default(false)} | to_json }}
   # Fields: card (id), message, kind (card|chat)
   dieter_send_message:
     url: "http://4d8f2a84-dieter:8099/api/{{ kind | default('card') }}/{{ card }}/send"

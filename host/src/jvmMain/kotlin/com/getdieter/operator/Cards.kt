@@ -37,7 +37,7 @@ class Cards(
 
     // ------------------------------------------------------------------ actions
 
-    /** {project, board, title, prompt, provider, model, effort, workspace, branch?, base?, publish?, vault?, mail?, start?, attachments?}. */
+    /** {project, board, title, prompt, provider, model, effort, workspace, branch?, base?, publish?, vault?, mail?, home_assistant?, start?, attachments?}. */
     fun create(kind: String, b: JsonObject, user: String = "you"): JsonObject {
         for (k in listOf("project", "prompt")) if (!b[k].truthy()) throw BadRequest("$k required")
         val prompt = b.field("prompt")
@@ -54,6 +54,7 @@ class Cards(
         if (b.field("workspace") == "worktree" && b["base"].truthy()) args += listOf("--base-branch", b.field("base"))
         if (b["publish"].truthy()) args += listOf("--remote-publish", publishMode(b.field("publish")))
         for (k in listOf("vault", "mail")) if (b[k].truthy()) args += "--$k=true"   // fixed at creation: the vault and mail gates of the agent turns
+        if (b["home_assistant"].truthy()) args += "--home-assistant=true"           // and the agent relay's (Home Assistant access)
         val files = uploads(b["attachments"])
         files.forEach { args += listOf("--attach", it.path) }
         val out = try {

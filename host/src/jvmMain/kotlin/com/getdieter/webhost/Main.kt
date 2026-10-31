@@ -28,7 +28,9 @@ import okio.Path.Companion.toOkioPath
  *   BRIDGE_CORE_NETS         address ranges treated as Home Assistant besides its 172.30.32.1 (e2e only)
  *   BRIDGE_API_KEY           lets any caller with `Authorization: Bearer <key>` use Home Assistant's routes (option api_key)
  *   SUPERVISOR_TOKEN         the add-on's token: the web host relays the operator's few Home Assistant calls with it
- *                            ([HomeAssistantRelay] on DIETER_HA_RELAY_ADDR, default 127.0.0.1:8097)
+ *                            ([HomeAssistantRelay] on DIETER_HA_RELAY_ADDR, default 127.0.0.1:8097), and Home
+ *                            Assistant for the agent turns that may use it ([HomeAssistantAgentRelay] on
+ *                            DIETER_HA_AGENT_ADDR, default 127.0.0.1:8098)
  *   DIETER_WEB_DIR           the page's bundle, default /opt/web
  *   DIETER_OPERATOR_URL      the operator, which answers /api/, default http://127.0.0.1:8096/
  *   DIETER_WEB_SIGN_IN_CALLBACK  pins the sign-in callback (https://<HA>/app/<slug>/next/signin); else the page tells it
@@ -49,8 +51,10 @@ fun main() {
         apiKey = env["BRIDGE_API_KEY"].orEmpty(),
     ).start()
     env["SUPERVISOR_TOKEN"]?.takeIf { it.isNotBlank() }?.let { token ->
-        val (host, port) = (env["DIETER_HA_RELAY_ADDR"] ?: "127.0.0.1:8097").let { it.substringBeforeLast(":") to it.substringAfterLast(":").toInt() }
-        HomeAssistantRelay(token, java.net.InetSocketAddress(host, port)).start()
+        fun address(spec: String) = java.net.InetSocketAddress(spec.substringBeforeLast(":"), spec.substringAfterLast(":").toInt())
+        HomeAssistantRelay(token, address(env["DIETER_HA_RELAY_ADDR"] ?: "127.0.0.1:8097")).start()
+        val operator = env["DIETER_OPERATOR_URL"] ?: "http://127.0.0.1:8096/"
+        HomeAssistantAgentRelay(token, address(env["DIETER_HA_AGENT_ADDR"] ?: "127.0.0.1:8098"), HomeAssistantAgentRelay.operator(operator)).start()
     }
 }
 

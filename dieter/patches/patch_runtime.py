@@ -22,8 +22,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # recovery, the --effort fix) replaces the fork's; sha256 of the fork's file at DIETER_COMMIT.
 OVERRIDES = {
     "antigravity-runtime.mjs": "e5284a82635a9ffd8db13ec4827ff290d6809cf8654e77fbe70a875b287068eb",
-    # the worker sends the operator's poll token back (fork web-addon, after the pinned release)
-    "host-questions.mjs": "ca865acbfe0c78bcc12792f9fd6a7575c085b4c06742b7826f8b7ddbad6afb69",
 }
 # The stdio MCP proxy agy launches to reach the host tools of a turn (see antigravity-runtime.mjs).
 ADDITIONS = ["antigravity-host-tools.mjs"]
