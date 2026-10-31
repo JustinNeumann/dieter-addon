@@ -49,9 +49,14 @@ About 800 MB of agent runtime is downloaded on the first start.
 
 1. Click the button above, or: Settings → Add-ons → Add-on store → ⋮ → **Repositories** → add
    `https://github.com/JustinNeumann/dieter-addon`.
-2. Install **Dieter**, fill in the options (a provider login, optionally a GitHub token and your Git name and
-   e-mail) and start it. The sidebar entry **Dieter** opens the page.
-3. Optional: copy [`homeassistant/packages/dieter.yaml`](homeassistant/packages/dieter.yaml) into your
+2. Install **Dieter**, fill in the options you have (a Claude token, an OpenAI key or Antigravity credentials;
+   optionally a GitHub token and your Git name and e-mail) and start it. The first start downloads the agent runtime.
+3. Open **Dieter** in the sidebar and sign the page in to your Dieter gateway with GitHub, then approve the pairing
+   code it shows on a device that is already trusted (the Dieter app, or `dieter device approve <code>`). Your gateway
+   must accept your Home Assistant's address as a return address once; the steps are in
+   [Signing in the page](dieter/DOCS.md#signing-in-the-page). Signed in, you can also sign in to Claude Code on the
+   page (Tools → Usage) instead of pasting a token.
+4. Optional: copy [`homeassistant/packages/dieter.yaml`](homeassistant/packages/dieter.yaml) into your
    configuration for sensors and push notifications.
 
 Every option, the provider logins, the Home Assistant package, Dreamfall, schedules, the gateway and security notes
