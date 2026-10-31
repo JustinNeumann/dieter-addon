@@ -10,9 +10,9 @@ ARG BUILD_ARCH
 # The harness runtime *sources* (runner.mjs + adapters) are taken from the same tag's source tree and
 # checked against RUNTIME_SOURCES_SHA (sha256 of the `sha256sum` lines of the LC_ALL=C-sorted files); the operator lays
 # them over the release's node_modules archive at start (its checksums: host/…/operator/Harness.kt). Node checksums: nodejs.org/dist/vX/SHASUMS256.txt.
-ARG DIETER_VERSION=0.6.431-antigravity.8
-ARG DIETER_COMMIT=2aafb54b68949a6474af4c0cef773b853243d41d
-ARG RUNTIME_SOURCES_SHA=d68763f51e2656dff84e6f3d5753183050cb23e0ccf4e3bfc559004efa16dbe2
+ARG DIETER_VERSION=0.6.431-antigravity.9
+ARG DIETER_COMMIT=215c5403ea4c202b77a88b6afb950affbc26ec6a
+ARG RUNTIME_SOURCES_SHA=b957b32d519e1b0adc9183d6b5283d9cbd95beba7e876edb1117bf582ae9a496
 ARG NODE_VERSION=22.23.4
 
 # glibc base (musl breaks the OMP harness; trixie for Python 3.13, which hass-cli needs); git, tmux and
@@ -25,9 +25,9 @@ RUN apt-get update \
 
 RUN set -eu; \
     case "${BUILD_ARCH}" in \
-      aarch64) D=arm64; DSHA=7471c369bbfab5995abc85ea2a26dd69c30fb6c940159d11e01a0f92d7a92935; \
+      aarch64) D=arm64; DSHA=ea3f81a8e280b0d65d5b9f3db4c8c1acd67459cc840fe0d885a257ab7876f9f2; \
                N=arm64; NSHA=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b ;; \
-      amd64)   D=amd64; DSHA=995d4aaed76490ec77cbba98322bd23d03989b3f9f550ef319684ce5231405c7; \
+      amd64)   D=amd64; DSHA=65c23cd8abb54a755ff5866b2b3e29fb20a6273a92958c558dbe7950d7b28430; \
                N=x64;   NSHA=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce ;; \
       *) echo "unsupported BUILD_ARCH ${BUILD_ARCH}" >&2; exit 1 ;; \
     esac; \
@@ -100,16 +100,18 @@ RUN set -eu; \
     rm -rf /tmp/vlc.zip /tmp/vlc; \
     vl-convert --version
 
-# hass-cli for the agents (REST API of HA core; the bridge sets HASS_SERVER to the Supervisor's core
-# proxy and HASS_TOKEN to the add-on's token, homeassistant_api in config.yaml). PyPI, version-pinned.
+# hass-cli for the agents (REST API of HA core; the operator sets HASS_SERVER to the Supervisor's core
+# proxy and HASS_TOKEN to the add-on's token with the option agents_home_assistant, else HASS_SERVER to the
+# web host's agent relay and tools/hass-cli signs in with the turn's token). PyPI, version-pinned.
 # The Supervisor CLI `ha` is deliberately not included: it would need hassio_api and hand the agents
 # add-on/host management.
 ARG HASS_CLI_VERSION=1.0.0
 RUN set -eu; \
     python3 -m venv /opt/hass-cli; \
     /opt/hass-cli/bin/pip install --no-cache-dir --disable-pip-version-check "homeassistant-cli==${HASS_CLI_VERSION}"; \
-    ln -s /opt/hass-cli/bin/hass-cli /usr/local/bin/hass-cli; \
-    hass-cli --version
+    /opt/hass-cli/bin/hass-cli --version
+COPY tools/hass-cli /usr/local/bin/hass-cli
+RUN chmod 755 /usr/local/bin/hass-cli && hass-cli --version
 
 # ha-logs: the add-on's own log reader for the agents (system log over the WebSocket API with filters; its
 # shebang is the hass-cli venv's Python, which has aiohttp)

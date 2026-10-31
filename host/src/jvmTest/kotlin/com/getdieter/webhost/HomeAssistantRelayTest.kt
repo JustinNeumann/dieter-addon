@@ -52,8 +52,14 @@ class HomeAssistantRelayTest {
     @Test
     fun onlyTheOperatorsCallsPass() {
         val title = buildJsonObject { put("entity_id", "ai_task.qwen"); put("task_name", Titles.TASK_NAME); put("instructions", "Task: x") }
-        assertTrue(HomeAssistantRelay.allowed("events/dieter_question", json("""{"card_id":"c_1"}""")))
-        assertTrue(HomeAssistantRelay.allowed("events/dieter_turn_finished", json("{}")))
+        assertTrue(HomeAssistantRelay.allowed("events/dieter_question", json("""{"card_id":"c_0123456789abcdef01234567","title":"x"}""")))
+        assertTrue(HomeAssistantRelay.allowed("events/dieter_turn_finished", json("""{"id":"c_4f2a9b0c1d3e","title":"x"}""")))
+        assertTrue(HomeAssistantRelay.allowed("events/dieter_card_review", json("""{"id":"c_4f2a9b0c1d3e"}""")))
+        // the notification's link and tag come from the id: anything but a card's id is refused
+        for (bad in listOf("{}", """{"id":"c_1"}""", """{"id":"../../config/users"}""", """{"id":"c_4f2a9b0c1d3e/../../x"}""",
+            """{"id":"C_4F2A9B0C1D3E"}""", """{"id":12}""", """{"card_id":"c_4f2a9b0c1d3e"}"""))
+            assertFalse(HomeAssistantRelay.allowed("events/dieter_turn_finished", json(bad)), bad)
+        assertFalse(HomeAssistantRelay.allowed("events/dieter_question", json("""{"id":"c_4f2a9b0c1d3e"}""")), "a question names its card in card_id")
         assertTrue(HomeAssistantRelay.allowed("template", buildJsonObject { put("template", OllamaEntity.TEMPLATE) }))
         assertTrue(HomeAssistantRelay.allowed("services/ai_task/generate_data?return_response", title))
         assertFalse(HomeAssistantRelay.allowed("events/call_service", json("{}")))
@@ -73,7 +79,7 @@ class HomeAssistantRelayTest {
         assertNull(seen.poll(300, TimeUnit.MILLISECONDS), "nothing refused reaches Home Assistant")
         // the operator's client, pointed at the relay, sends no token of its own
         val ha = HomeAssistant.of(mapOf("DIETER_HA_RELAY_URL" to "http://127.0.0.1:${relay.address.port}", "SUPERVISOR_TOKEN" to "unused"))!!
-        assertEquals("""{"ok":true}""", ha.post("events/dieter_question", json("""{"card_id":"c_1"}"""), Duration.ofSeconds(5)))
-        assertEquals("""/core/api/events/dieter_question Bearer t0ken {"card_id":"c_1"}""", seen.poll(5, TimeUnit.SECONDS))
+        assertEquals("""{"ok":true}""", ha.post("events/dieter_question", json("""{"card_id":"c_4f2a9b0c1d3e"}"""), Duration.ofSeconds(5)))
+        assertEquals("""/core/api/events/dieter_question Bearer t0ken {"card_id":"c_4f2a9b0c1d3e"}""", seen.poll(5, TimeUnit.SECONDS))
     }
 }

@@ -30,11 +30,11 @@ not be root anyway.
 | Piece | Where |
 |---|---|
 | `dieter daemon start --addr 127.0.0.1:4242` | store `/data/dieter`, started and restarted by the operator (again after a Claude sign-in or a gateway enrollment) |
-| web host `/opt/web-host/dieter-web-host.jar` (Java 21) | `0.0.0.0:8099` (Ingress port), user `dieter-web`: the add-on's front door. It serves the page (`next/`) and Dieter's core for it (`next/core`, signed in to your gateway, Ingress only) with the add-on's own features, and passes `/api/` (Home Assistant's `/api/ha` and rest_commands, the add-on's features) to the operator, and relays the operator's few Home Assistant calls with the add-on's token (`127.0.0.1:8097`); state in `/data/web-host` |
+| web host `/opt/web-host/dieter-web-host.jar` (Java 21) | `0.0.0.0:8099` (Ingress port), user `dieter-web`: the add-on's front door. It serves the page (`next/`) and Dieter's core for it (`next/core`, signed in to your gateway, Ingress only) with the add-on's own features, and passes `/api/` (Home Assistant's `/api/ha` and rest_commands, the add-on's features) to the operator, relays the operator's few Home Assistant calls with the add-on's token (`127.0.0.1:8097`) and Home Assistant for conversations with Home Assistant access (`127.0.0.1:8098`); state in `/data/web-host` |
 | operator (same jar, `com.getdieter.operator`) | `127.0.0.1:8096`, user `dieter`: the add-on's API: the daemon and what the options configure (provider tokens, git and gh, Claude Code's note), the board's state and events stream, cards and Home Assistant's side, Dreamfall, Agent instructions, settings, repositories, sign-ins, questions, housekeeping and titles |
 | harness runtime (the daemon's worker scripts + Bun, ≈ 800 MB) | staged by the operator on first start into `/data/dieter/harness-staged/<version>` (sha256-pinned download; the daemon's own download timed out on a Raspberry Pi) and passed as `DIETER_HARNESS_RUNTIME_DIR`; staged runtimes of earlier versions are removed, and the Bun it carries is installed as the daemon's managed Bun (`/data/dieter/runtime/tools/bun/<bun version>`), which Oh My Pi's model discovery would otherwise download the whole archive for |
 | `claude` 2.1.311, `codex` 0.163.0, `agy` 1.4.8 (Antigravity) | `/usr/local/bin`, all pinned by checksum; their configs live under `/data` (HOME) |
-| `hass-cli` 1.0.0 (HA core REST API), `ha-logs` (HA logs) | `/usr/local/bin`; signed in only with the option `agents_home_assistant`, see below |
+| `hass-cli` 1.0.0 (HA core REST API), `ha-logs` (HA logs) | `/usr/local/bin`; signed in through the web host's relay with the turn's token in conversations with Home Assistant access, or with the add-on's token for every agent (option `agents_home_assistant`), see below |
 | `vl-convert` 1.9.0 (Vega-Lite/Vega charts to SVG, PNG, PDF; bundled fonts) | `/usr/local/bin`, pinned by checksum; agents render a chart and look at it before they mail it or show it in the chat (Claude Code's note in `/data/.claude/CLAUDE.md` says so; for Codex and Antigravity add it to Tools → Settings → Agent instructions) |
 | runtime sources of the same build (`/opt/dieter-runtime`, from the fork tag, checksum-verified) | `runner.mjs` + adapters, laid over the archive's `node_modules`; the **Antigravity** adapter is the add-on's own copy (`patches/antigravity-runtime.mjs`, laid over the fork's at image build by `patches/patch_runtime.py`) |
 | project checkouts | `/data/projects/<name>` |
@@ -57,10 +57,16 @@ The API key reaches the web host only; the operator and the agents get a copy of
 The add-on's Supervisor token is an administrator's in Home Assistant (its Supervisor user), and Home Assistant
 cannot narrow it to some services. So only the web host gets it: it relays the operator's few calls (the events
 `dieter_turn_finished`, `dieter_card_review` and `dieter_question`, the lookup of the Ollama ai_task entity and the
-title of a new task) on `127.0.0.1:8097` and refuses anything else. The operator, the daemon and the agents get the
-token only with the option **`agents_home_assistant`** (their `hass-cli`); s6's copy of the container's environment
-is root's. With the option on, the agents can do whatever Home Assistant can, including this add-on's
-rest_commands: post a message into any card as you, create and start a task, move a card.
+title of a new task) on `127.0.0.1:8097` and refuses anything else. That relay is on loopback, so an agent can send
+these events too, with made-up text: each must name a card id (`c_` and hex) in `id` or `card_id`, from which the
+package builds the notification's link and tag, so a forged one opens a card's page at most. For agents it relays on `127.0.0.1:8098`: a
+conversation created with **Allow Home Assistant access** signs in there with its turn's token, which the web host
+checks with the daemon (through the operator, `dieter card caller`), and gets all of core's API; any other caller gets
+403. The operator, the daemon and the agents get the token itself only with the option **`agents_home_assistant`**
+(Home Assistant for every task); s6's copy of the container's environment is root's. A conversation with Home
+Assistant access, and with the option every agent, can do whatever Home Assistant can, including this add-on's
+rest_commands: post a message into any card as you, create and start a task, move a card. Agents share one user,
+so an agent determined to borrow a running turn's token still can; this closes the easy path, as for the vault.
 
 The operator on `127.0.0.1:8096` shares its user with the agents, so it tells the page from an agent by who
 opened the connection (the kernel's socket table): root and the web host's user `dieter-web` get every route;
@@ -82,7 +88,7 @@ agents run arbitrary tooling under `/data`.
 | `claude_code_oauth_token`, `openai_api_key`, `antigravity_token` | provider credentials for the harnesses, see below |
 | `gateway_url`, `gateway_host_ip`, `machine_name` | enroll the add-on's daemon with your Dieter gateway so the apps see it (see Gateway below); `gateway_host_ip` adds a hosts entry for the gateway's name |
 | `api_key` | optional; lets a caller other than Home Assistant (e.g. `dieter_task.py` in the SSH add-on) use Home Assistant's routes with `Authorization: Bearer <key>` (see *What runs in the container*) |
-| `agents_home_assistant` | off by default. On: the agents get `hass-cli` and `ha-logs`, signed in with the add-on's token, an administrator's in Home Assistant: they can call any service, including this add-on's rest_commands as you (see *What runs in the container*). Off: no Home Assistant for the agents; the add-on's events and titles keep working |
+| `agents_home_assistant` | *Home Assistant for every task*, off by default. On: every agent gets `hass-cli` and `ha-logs`, signed in with the add-on's token, an administrator's in Home Assistant: they can call any service, including this add-on's rest_commands as you (see *What runs in the container*). Off: only tasks, chats and schedules created with **Allow Home Assistant access** reach Home Assistant (see *Home Assistant from the agent*); the add-on's events and titles keep working |
 | `projects` | optional list of `{name, git_url, branch}` cloned and registered on start. Any number of repositories can also be added from the page: Projects → **Add** → *Clone repository* (Git URL, optional name and base branch) or *New empty repository* (an empty Git repository `/data/projects/<name>` without a remote, registered; an existing folder there is adopted). Boards are listed in the order you choose: drag a board row (touch: long press first) in Projects; the add-on keeps the order for every device. Projects lists the most recently used project first and opens it when the Projects tab is tapped |
 | `log_level` | `debug` adds the web host's core debug lines to the log |
 
@@ -271,7 +277,9 @@ card under "Waiting for your answer", and Home Assistant receives the event `die
 turn. Unanswered questions expire after a day; cancelling the card cancels the question. Only the page answers:
 agents can ask, but neither see nor answer other cards' questions. The answer goes only to the worker that asked
 (a random token from its registration comes back with every poll), and a question still waiting cannot be
-registered again under its id.
+registered again under its id. Known limit: the operator does not check that a question's card is the asking
+worker's own, so an agent can make a question appear on another card. You would answer thinking that card asked,
+and the asking agent gets the answer; it cannot answer as you. Read a question in the light of its card's task.
 
 Messages, new tasks and new chats take attachments (images and files); the harness saves them in the
 conversation's workspace and tells the agent where they are.
@@ -350,16 +358,21 @@ across updates. A project or board with its own template (`dieter prompt project
 
 ## Home Assistant from the agent
 
-With the option `agents_home_assistant` (off by default), the agents can drive Home Assistant core with `hass-cli`
-(REST API through the Supervisor's proxy, `HASS_SERVER=http://supervisor/core`, `HASS_TOKEN` = the add-on's token,
-`homeassistant_api: true`). Without it, neither variable is set and Claude Code's note says so.
+New task and the schedule editor have **Allow Home Assistant access** next to vault access (`dieter card create
+--home-assistant`, `home_assistant: true` on `POST /api/card`). Like vault access it is fixed at creation, a
+schedule passes it to the cards it creates, and an agent can grant it to a card it creates only when its own
+conversation has it. In such a conversation the agents drive Home Assistant core with `hass-cli` and `ha-logs`:
+`HASS_SERVER` is the web host's relay (`http://127.0.0.1:8098`) and both sign in with the turn's token
+(`DIETER_TURN_TOKEN`); elsewhere they answer 403. With the option `agents_home_assistant` (Home Assistant for every
+task, off by default) every agent gets `HASS_SERVER=http://supervisor/core` and `HASS_TOKEN` = the add-on's token
+instead (`homeassistant_api: true`).
 Examples: `hass-cli state list`, `hass-cli state get sensor.x`, `hass-cli service call light.turn_on
 --arguments entity_id=light.x`, `hass-cli raw get /api/config`; WebSocket commands work too
-(`hass-cli raw ws <type>`). The add-on forwards the two variables to the harness workers
-(`DIETER_HARNESS_ENV`), so every agent inherits them; Claude Code additionally gets a note in
-`/data/.claude/CLAUDE.md` (replaced only while it is the add-on's own text; edit or empty it as you like).
-The token reaches every service of HA core, this add-on's rest_commands included, so turn the option on only for
-agents you would let act as you in Home Assistant, and word your tasks accordingly. The Supervisor API is off
+(`hass-cli raw ws <type>`). The add-on forwards the variables to the harness workers (`DIETER_HARNESS_ENV`), so
+every agent inherits them; Claude Code additionally gets a note in `/data/.claude/CLAUDE.md` (replaced only while it
+is the add-on's own text; edit or empty it as you like), and a conversation with access gets a Home Assistant
+section in its instructions. Access reaches every service of HA core, this add-on's rest_commands included, so give
+it to the tasks you would let act as you in Home Assistant, and word them accordingly. The Supervisor API is off
 (`hassio_api: false`): no `ha` CLI, no add-on, restart or host management from the agents. Home
 Assistant's `/config` is not mounted in the container; edit configuration through another machine (SSH)
 or the API.

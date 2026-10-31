@@ -89,12 +89,14 @@ class CardsTest {
 
     @Test
     fun aCardWithoutStartWaitsInTodoAndPublishModesAreChecked() {
-        cards.create("card", obj("""{"project": "p_a", "board": "b_a", "prompt": "x", "title": "Later", "start": false, "publish": "pull_request", "vault": true}"""))
+        cards.create("card", obj("""{"project": "p_a", "board": "b_a", "prompt": "x", "title": "Later", "start": false, "publish": "pull_request", "vault": true, "home_assistant": true}"""))
         val args = cli.last("card create")
         assertEquals("todo", args[args.indexOf("--lane") + 1])
         assertEquals("Later", args[args.indexOf("--title") + 1])
         assertEquals("pull_request", args[args.indexOf("--remote-publish") + 1])
-        assertTrue("--vault=true" in args)
+        assertTrue("--vault=true" in args && "--home-assistant=true" in args)
+        cards.create("card", obj("""{"project": "p_a", "board": "b_a", "prompt": "x", "title": "Plain"}"""))
+        assertFalse(cli.last("card create").any { it.startsWith("--home-assistant") }, "no Home Assistant access unless asked")
         assertEquals("publish must be manual, pull_request or push_base", assertFailsWith<BadRequest> { Cards.publishMode("force") }.message)
     }
 

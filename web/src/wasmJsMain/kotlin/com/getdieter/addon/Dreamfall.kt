@@ -439,7 +439,8 @@ private fun LazyListScope.ideaGroup(
 ) {
     val shown = !group.collapsible || open[group.kind] == true
     if (group.title.isNotEmpty())
-        item("group-${group.kind}") {
+        // Implementation's lanes share KIND_LANE: kind and title tell a stage's groups apart
+        item("group-${group.kind}-${group.title}") {
             Row(
                 Modifier.fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))

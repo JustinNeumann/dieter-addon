@@ -20,6 +20,8 @@ class Setup(
     private val home: File = File("/data"),
     private val supervisorToken: String? = null,
     private val gh: String? = which("gh"),
+    /** The web host's agent relay is there (DIETER_HA_AGENT_URL): conversations with Home Assistant access reach it. */
+    private val agentRelay: Boolean = false,
 ) {
     /** Provider credentials for the daemon and its harnesses, handed to it with --env-file. */
     val envFile = File(home, "dieter.env")
@@ -97,11 +99,12 @@ class Setup(
     /** Tells Claude Code (global memory ~/.claude/CLAUDE.md) what the container offers. Written when missing or still
      *  one of the add-on's earlier texts; a file the user edited or emptied is kept. */
     fun claudeHint() {
-        // the agents' Home Assistant access (option agents_home_assistant) decides the note's first section
-        val text = if (supervisorToken.isNullOrEmpty()) HINT_WITHOUT_HA else HINT
+        // every agent with the add-on's token (option agents_home_assistant), else the conversations with Home
+        // Assistant access through the relay; outside the add-on no note
+        val text = if (!supervisorToken.isNullOrEmpty()) HINT else if (agentRelay) HINT_PER_TASK else return
         if (claudeHint.exists()) {
             val current = sha256(claudeHint.readBytes())
-            val ours = HINT_EARLIER + sha256(HINT.toByteArray()) + sha256(HINT_WITHOUT_HA.toByteArray())
+            val ours = HINT_EARLIER + sha256(HINT.toByteArray()) + sha256(HINT_PER_TASK.toByteArray())
             if (current == sha256(text.toByteArray()) || current !in ours) return
         }
         claudeHint.parentFile.mkdirs()
@@ -130,17 +133,22 @@ class Setup(
 
         val HINT: String by lazy { Setup::class.java.getResource("/operator/claude-hint.md")!!.readText() }
 
-        /** The note when the agents have no Home Assistant access: its Home Assistant section says so. */
-        val HINT_WITHOUT_HA: String by lazy {
-            HINT.substring(0, HINT.indexOf("# Home Assistant")) +
-                "# Home Assistant\n\nThis container is the Dieter add-on inside Home Assistant. The agents have no access " +
-                "to Home Assistant here: the add-on's option \"Home Assistant for agents\" is off, so `hass-cli` and " +
-                "`ha-logs` are not signed in. When a task needs Home Assistant, say so in your reply; do not look for " +
-                "a token.\n\n" + HINT.substring(HINT.indexOf("# Images in the chat"))
+        /** The note when only conversations created with Home Assistant access reach it (through the relay). */
+        val HINT_PER_TASK: String by lazy {
+            val signedIn = "`hass-cli` is installed and authenticated\n(REST API of Home Assistant core; `HASS_SERVER`/`HASS_TOKEN` are set): "
+            check(signedIn in HINT) { "claude-hint.md changed: adapt HINT_PER_TASK" }
+            HINT.replace(
+                signedIn,
+                "In conversations created with \"Allow Home Assistant access\" (New task, or a\nschedule's " +
+                    "Home Assistant access), `hass-cli` and `ha-logs` sign in with the turn's own token; elsewhere " +
+                    "they answer 403:\nthen say so in your reply, do not look for a token. `hass-cli` is the REST API " +
+                    "of Home Assistant core: ",
+            )
         }
 
         /** Earlier texts of that file: a file with one of these is the add-on's and gets replaced, an edited one is kept. */
         val HINT_EARLIER = setOf(
+            "759f4981f09d89fb7c8a1840824135c926b22c29689035b49fcf0b2ad674e79d",   // 0.6.431.27 without Home Assistant
             "b0b13e392971aa06e72ca1d0ac265f15e563c90f653210dff669f46224b250c6",
             "f6634308d5b763f0261f9f53999c661316086d8730469c9f07109559eb0c8de9",
             "07ac39b466d4bb34ba050f376d5b198d9c251a59d2f76255502db31cb9d1c0ea",

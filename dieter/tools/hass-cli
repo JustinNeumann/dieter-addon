@@ -1,0 +1,9 @@
+#!/bin/sh
+# hass-cli for the agents. Without the add-on's token (option agents_home_assistant off), HASS_SERVER is the add-on's
+# relay and an agent turn signs in with its own token, which the relay lets through only for conversations created
+# with "Allow Home Assistant access".
+if [ -z "${HASS_TOKEN:-}" ] && [ -n "${DIETER_TURN_TOKEN:-}" ]; then
+  HASS_TOKEN="$DIETER_TURN_TOKEN"
+  export HASS_TOKEN
+fi
+exec /opt/hass-cli/bin/hass-cli "$@"

@@ -91,7 +91,7 @@ fun main() {
     val cards = Cards(dieter, board, Dreamfall(dieter), titles, { settings.view()["titles_daemon_id"].truthy() }, home, addon = supervision != null)
     val server = OperatorServer(
         InetSocketAddress(host, port),
-        routes(dieter, settings, projects, supervision?.daemon, access, questions, uploads, titles, housekeeping, Live(board, cards, usage, ha)),
+        routes(dieter, settings, projects, supervision?.daemon, access, questions, uploads, titles, housekeeping, Live(board, cards, usage, ha), TurnCallers(bin)),
         Callers.fromEnv(env["DIETER_OPERATOR_TRUSTED_UIDS"]),
     ).start()
     Log.line("listening on $host:${server.address.port}" + if (env["DIETER_OPERATOR_TRUSTED_UIDS"].isNullOrBlank()) ", every caller trusted" else "")
@@ -128,7 +128,7 @@ private fun setupProjects(projects: Projects, options: JsonObject?) {
 class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
     val userHome = File(env["HOME"] ?: "/data")
     val ssh = Ssh(userHome)
-    private val setup = Setup(options, userHome, env["SUPERVISOR_TOKEN"])
+    private val setup = Setup(options, userHome, env["SUPERVISOR_TOKEN"], agentRelay = !env["DIETER_HA_AGENT_URL"].isNullOrBlank())
     private val harness = env["DIETER_VERSION"]?.takeIf { it.isNotBlank() }?.let {
         Harness(home, it, Harness.machine(), File(env["DIETER_RUNTIME_SRC"] ?: "/opt/dieter-runtime"))
     }
@@ -168,7 +168,10 @@ class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
         /**
          * What the daemon gets on top of the operator's environment: harness workers relay the agents' questions to
          * the operator, and Home Assistant for the agents (hass-cli takes HASS_SERVER/HASS_TOKEN: core's REST API
-         * through the Supervisor's proxy; the token reaches only core, hassio_api is off). The daemon forwards only
+         * through the Supervisor's proxy; the token reaches only core, hassio_api is off). With the add-on's token
+         * (option agents_home_assistant) every agent gets it; else HASS_SERVER is the web host's agent relay
+         * (DIETER_HA_AGENT_URL) and hass-cli signs in with the turn's own token, which the relay lets through only
+         * for conversations created with Home Assistant access. The daemon forwards only
          * whitelisted variables to its workers, DIETER_HARNESS_ENV names the extra ones. The env file's variables go
          * into the daemon's own environment too, so harness processes inherit the tokens either way.
          */
@@ -178,7 +181,7 @@ class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
             if (token.isNotEmpty()) {
                 out["HASS_SERVER"] = "http://supervisor/core"
                 out["HASS_TOKEN"] = token
-            }
+            } else env["DIETER_HA_AGENT_URL"]?.takeIf { it.isNotBlank() }?.let { out["HASS_SERVER"] = it }
             out["DIETER_HARNESS_ENV"] = (listOf(env["DIETER_HARNESS_ENV"].orEmpty()) + out.keys.toList()).filter { it.isNotEmpty() }.joinToString(",")
             if (runtimeDir != null && File(runtimeDir, "runner.mjs").exists()) out["DIETER_HARNESS_RUNTIME_DIR"] = runtimeDir.path
             return out + envFile
@@ -204,6 +207,7 @@ fun routes(
     titles: Titles = Titles(dieter, null) { null },
     housekeeping: Housekeeping? = null,
     live: Live? = null,
+    turnCallers: TurnCallers? = null,
 ): Routes {
     val prompts = Prompts(dieter)
     val dreamfall = Dreamfall(dieter)
@@ -263,6 +267,8 @@ fun routes(
         .post("questions") { r -> questions.register(r.body).also { board?.touch(); questionEvent(r.body) } }
         .get("questions/{id}") { questions.poll(it.params.getValue("id"), it.headers["x-question-token"].orEmpty()) ?: throw NotFound("no such question") }
         .post("questions/{id}/answer") { r -> questions.answer(r.params.getValue("id"), r.body).also { board?.touch() } }
+        // the web host's agent relay: may this agent turn's hass-cli reach Home Assistant? (not an agent route)
+        .post("turns/caller") { r -> (turnCallers ?: throw NotFound("no daemon")).resolve(r.text("token")) }
         .post("dreamfall") { r ->
             dreamfall {
                 val p = dreamfall.create(r.body, r.user)

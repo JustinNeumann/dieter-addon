@@ -42,14 +42,25 @@ class StartupTest {
     fun `Claude's note is written in the add-on when missing, and one the user edited or emptied is kept`() {
         val note = File(home, ".claude/CLAUDE.md")
         Setup(JsonObject(emptyMap()), home, supervisorToken = null).claudeHint()
-        assertEquals(Setup.HINT_WITHOUT_HA, note.readText(), "agents without Home Assistant (option off)")
-        assertTrue("hass-cli state list" !in note.readText() && "A Markdown image in your reply stays a link" in note.readText())
+        assertFalse(note.exists(), "outside the add-on (no Supervisor token, no relay)")
+        // 0.6.431.27's note for agents without Home Assistant is the add-on's: replaced
+        note.parentFile.mkdirs()
+        val earlier = Setup.HINT.substring(0, Setup.HINT.indexOf("# Home Assistant")) +
+            "# Home Assistant\n\nThis container is the Dieter add-on inside Home Assistant. The agents have no access to Home " +
+            "Assistant here: the add-on's option \"Home Assistant for agents\" is off, so `hass-cli` and `ha-logs` are not " +
+            "signed in. When a task needs Home Assistant, say so in your reply; do not look for a token.\n\n" +
+            Setup.HINT.substring(Setup.HINT.indexOf("# Images in the chat"))
+        note.writeText(earlier)
+        val perTask = Setup(JsonObject(emptyMap()), home, supervisorToken = null, agentRelay = true)
+        perTask.claudeHint()
+        assertEquals(Setup.HINT_PER_TASK, note.readText(), "option off: conversations with Home Assistant access")
+        assertTrue("Allow Home Assistant access" in note.readText() && "hass-cli state list" in note.readText())
         val setup = Setup(JsonObject(emptyMap()), home, supervisorToken = "t")
         setup.claudeHint()
-        assertEquals(Setup.HINT, note.readText(), "the option turned on: the note with hass-cli")
+        assertEquals(Setup.HINT, note.readText(), "the option turned on: every agent")
         assertTrue("A Markdown image in your reply stays a link" in Setup.HINT)
-        Setup(JsonObject(emptyMap()), home, supervisorToken = null).claudeHint()
-        assertEquals(Setup.HINT_WITHOUT_HA, note.readText(), "and off again")
+        perTask.claudeHint()
+        assertEquals(Setup.HINT_PER_TASK, note.readText(), "and off again")
         setup.claudeHint()
 
         note.writeText("# mine\n")
@@ -138,6 +149,10 @@ class StartupTest {
             ),
             env,
         )
+        val relayed = Supervision.daemonEnvironment(mapOf("DIETER_HA_AGENT_URL" to "http://127.0.0.1:8098"), File(home, "none"), emptyMap())
+        assertEquals("http://127.0.0.1:8098", relayed["HASS_SERVER"], "option off: agents reach the relay")
+        assertFalse("HASS_TOKEN" in relayed, "and sign in with their turn's token")
+        assertTrue("HASS_SERVER" in relayed.getValue("DIETER_HARNESS_ENV").split(","))
         val plain = Supervision.daemonEnvironment(mapOf("DIETER_OPERATOR_ADDR" to "127.0.0.1:4250"), File(home, "none"), emptyMap())
         assertEquals(mapOf("DIETER_QUESTIONS_URL" to "http://127.0.0.1:4250/api/questions", "DIETER_HARNESS_ENV" to "DIETER_QUESTIONS_URL"), plain)
     }

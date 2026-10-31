@@ -24,8 +24,8 @@ configuration:
     name: API key
     description: "Optional. Lets a caller other than Home Assistant itself use the add-on's Home Assistant routes (sensor, new card, follow-up, move, focus) with the header Authorization: Bearer <key>, e.g. dieter_task.py from the SSH add-on. Empty: only Home Assistant (and its Ingress) can call the add-on."
   agents_home_assistant:
-    name: Home Assistant for agents
-    description: "Gives the agents hass-cli and ha-logs, signed in with the add-on's token. Home Assistant treats that token as its Supervisor user, an administrator: the agents can then call any service, including this add-on's rest_commands (send a message into any card as you, create and start a task, move a card), and read every state and event. Off: the agents have no Home Assistant access; the add-on's notifications and titles keep working."
+    name: Home Assistant for every task
+    description: "Gives every agent hass-cli and ha-logs, signed in with the add-on's token. Home Assistant treats that token as its Supervisor user, an administrator: the agents can then call any service, including this add-on's rest_commands (send a message into any card as you, create and start a task, move a card), and read every state and event. Off: only tasks, chats and schedules created with \"Allow Home Assistant access\" reach Home Assistant, each turn checked by the add-on; the add-on's notifications and titles keep working."
   projects:
     name: Projects
     description: "Repositories to clone into /data/projects and register with Dieter: name, git_url, branch (optional)."

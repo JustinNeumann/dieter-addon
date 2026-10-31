@@ -190,7 +190,10 @@ def main():
     args = ap.parse_args()
     args.level_given = args.level is not None
     args.level = args.level or "warning"
-    server, token = os.environ.get("HASS_SERVER"), os.environ.get("HASS_TOKEN")
+    # without the add-on's token (option agents_home_assistant off) an agent turn signs in with its own token, which
+    # the add-on's relay (HASS_SERVER) lets through for conversations created with Home Assistant access
+    server = os.environ.get("HASS_SERVER")
+    token = os.environ.get("HASS_TOKEN") or os.environ.get("DIETER_TURN_TOKEN")
     if not server or not token:
         die("HASS_SERVER and HASS_TOKEN are not set (hass-cli needs them as well)")
     (full_log if args.full else system_log)(args, server, token)

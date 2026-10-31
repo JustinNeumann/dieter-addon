@@ -2,6 +2,26 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.28 (2026-10-31)
+
+- **"Allow Home Assistant access" per task.** New task and the schedule editor show it next to vault access
+  (`home_assistant: true` on `POST /api/card` and the package's `rest_command.dieter_create_task`). Like vault access
+  it is fixed at creation, a schedule passes it on to its cards, and an agent can grant it only from a conversation
+  that has it. Such a conversation's `hass-cli` and `ha-logs` reach Home Assistant through the web host's new relay
+  (`127.0.0.1:8098`): they sign in with the turn's token, the web host asks the daemon which conversation it belongs
+  to (fork release 0.6.431-antigravity.9: `dieter card caller`, the card flag), and only then passes REST calls and
+  the WebSocket API on with the add-on's token, which the agents never see. Other conversations get 403.
+- The option `agents_home_assistant` is now **Home Assistant for every task**: on, every agent gets the add-on's
+  token as before.
+- The relay for the operator's calls passes `dieter_turn_finished`, `dieter_card_review` and `dieter_question` only
+  with a card id (`c_` and hex) in `id`/`card_id`: an agent can still send such an event with made-up text, but its
+  notification's link can no longer point elsewhere in Home Assistant. The docs list a known limit of questions: an
+  agent can ask under another card's name.
+- **Fix: a Dreamfall board stayed black** once two of Implementation's lanes (Todo, Running, Review) had cards at
+  the same time: both lane headings had the same list key, and Compose stopped drawing the page.
+- Fork 0.6.431-antigravity.9 also carries the harness worker's question poll token, so the add-on no longer patches
+  `host-questions.mjs`.
+
 ## 0.6.431.27 (2026-10-30)
 
 - **The add-on's Supervisor token no longer reaches the agents by default.** Home Assistant treats it as its

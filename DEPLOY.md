@@ -83,6 +83,11 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (scheduled card).
 
+- **2026-10-31**, fork release **`0.6.431-antigravity.9`** (`215c5403`): `antigravity.8` plus Home Assistant access
+  per conversation (card, chat and schedule flag, `CardService.GetTurnCaller` / `dieter card caller`, fork proto
+  fields from 1001) and the harness worker's question poll token. Adapter file unchanged; new runtime sources
+  checksum and both harness archives (`host-questions.mjs`); tarball checksums from its `SHA256SUMS`, verified with
+  cosign v3.1.4. Bumped in 0.6.431.28, which drops the `host-questions.mjs` override.
 - **2026-10-30**, fork release **`0.6.431-antigravity.8`** (`2aafb54b`): `antigravity.6` plus two store/API changes
   (`.7`: a board whose cards are all archived can be retired; `.8`: those archived cards stay readable). Adapter
   file, runtime sources checksum and both harness archives unchanged; tarball checksums from its `SHA256SUMS`,

@@ -71,12 +71,18 @@ class HomeAssistantRelay(
 
     companion object {
         const val MAX_BODY = 64_000
-        private val EVENTS = setOf("dieter_turn_finished", "dieter_card_review", "dieter_question")
+        /** The operator's events and the field that names their card. */
+        private val EVENTS = mapOf("dieter_turn_finished" to "id", "dieter_card_review" to "id", "dieter_question" to "card_id")
+
+        /** The daemon's card and chat ids: `c_` and hex (12 random, 24 deterministic, up to 16 on its fallback). */
+        private val CARD_ID = Regex("^c_[0-9a-f]{12,32}$")
         private val AI_TASK = Regex("^ai_task\\.[a-z0-9_]{1,100}$")
 
         /** Whether the operator does this in Home Assistant (see the class). */
         fun allowed(path: String, body: JsonObject): Boolean = when {
-            path.startsWith("events/") -> path.removePrefix("events/") in EVENTS
+            // the package builds a notification's link and tag from the card id: only a card's id shape passes, so a
+            // forged event can carry made-up text but cannot point the link elsewhere in Home Assistant
+            path.startsWith("events/") -> EVENTS[path.removePrefix("events/")]?.let { key -> body.text(key)?.let(CARD_ID::matches) } == true
             path == "template" -> body == JsonObject(mapOf("template" to JsonPrimitive(OllamaEntity.TEMPLATE)))
             path == "services/ai_task/generate_data?return_response" ->
                 body.keys == setOf("entity_id", "task_name", "instructions") &&
