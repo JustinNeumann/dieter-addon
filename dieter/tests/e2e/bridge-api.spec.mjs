@@ -282,6 +282,11 @@ test("Settings (api/settings, api/boards/order): title models, work folder reten
   expect((await request.post("api/settings", { data: { antigravity_inclusion: { group: "", included: false } } })).status()).toBe(400);
   await request.post("api/settings", { data: { antigravity_inclusion: { group: "Gemini 4 Argon", included: true } } });
   expect((await get()).antigravity_excluded).toEqual([]);
+  // Settings → Appearance → Palette, kept for every device and page load
+  for (const bad of [{ palette: "" }, { palette: 1 }, { palette: "Dream Fall" }]) expect((await request.post("api/settings", { data: bad })).status(), JSON.stringify(bad)).toBe(400);
+  expect((await (await request.post("api/settings", { data: { palette: "dreamfall" } })).json()).palette).toBe("dreamfall");
+  expect((await get()).palette).toBe("dreamfall");
+  await request.post("api/settings", { data: { palette: before.palette || "monochrome" } });
 });
 
 test("the operator supervises the daemon: a restart on request, and an operator that died leaves no second daemon", async () => {

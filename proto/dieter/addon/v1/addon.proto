@@ -90,6 +90,8 @@ message SettingChange {
     int32 worktree_retention_days = 2;
     // Usage → Antigravity → a quota group's "Include in summary".
     AntigravityInclusion antigravity_inclusion = 3;
+    // Settings → Appearance → the palette's slug ("dreamfall"), kept for every device and page load.
+    string palette = 4;
   }
 }
 
@@ -421,6 +423,8 @@ message SettingsSlice {
   string titles_daemon_id = 5;
   // Boards in the order dragged on either page; boards not in it follow in Dieter's order.
   repeated string board_order = 6;
+  // The palette picked on any page or device ("dreamfall"); empty until one is picked.
+  string palette = 7;
 }
 
 message InstructionsSlice {

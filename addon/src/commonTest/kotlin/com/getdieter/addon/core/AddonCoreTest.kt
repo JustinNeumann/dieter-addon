@@ -328,6 +328,20 @@ class AddonCoreTest {
     }
 
     @Test
+    fun thePalettePickedOnOnePageIsASettingOfTheAddOn() = runTest {
+        bridge.answer("GET settings", """{"title_model":"openai","worktree_retention_days":14,"board_order":[],"title_models":[]}""")
+        bridge.answer("POST settings", """{"title_model":"openai","worktree_retention_days":14,"board_order":[],"title_models":[],"palette":"dreamfall"}""")
+        val core = core()
+        val seen = watch(core, Slice.SLICE_SETTINGS)
+        assertEquals("", seen.last().settings!!.palette)
+        assertEquals("", core.dispatch(Command(change_setting = SettingChange(palette = "dreamfall"))).message)
+        assertEquals("""{"palette":"dreamfall"}""", bridge.sent("POST settings").single().toString())
+        runCurrent()
+        assertEquals("dreamfall", seen.last().settings!!.palette)
+        assertEquals(Failure.Kind.KIND_INVALID, core.fails(Command(change_setting = SettingChange(palette = " "))).kind)
+    }
+
+    @Test
     fun questionsAreAnsweredAsTheAgentAskedAndLeaveThePageAtOnce() = runTest {
         bridge.state.emit(
             json(

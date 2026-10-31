@@ -566,6 +566,12 @@ class AddonCore(
             publishSettings()
             return Result()
         }
+        change.palette?.let { palette ->
+            if (palette.isBlank()) invalid("Which palette?")
+            settingsJson = bridge.write("settings", buildJsonObject { put("palette", palette) })
+            publishSettings()
+            return Result()
+        }
         invalid("Choose a setting.")
     }
 
@@ -607,6 +613,7 @@ class AddonCore(
                     ),
                 titles_daemon_id = d.str("titles_daemon_id"),
                 board_order = d.strings("board_order"),
+                palette = d.str("palette"),
             )
     }
 
