@@ -3,8 +3,8 @@
 Status: implemented in add-on 0.6.429.42 (`dieter/bridge/dreamfall.py`, the `dreamfall` command, and a Dreamfall
 view of the classic page, which 0.6.431.9 replaced with the Compose screens `web/…/addon/Dreamfall*.kt`; since
 0.6.431.19 the pipelines, the actions and the command are the operator's `Dreamfall.kt` and `DreamfallCommand.kt`); user
-documentation in `dieter/DOCS.md` → Dreamfall boards. This note keeps the design reasoning; the screenshots of the
-mockup (`board-*.png`, `phone-*.png`, `page-*.png`) predate the implementation, the mockup itself is in the history.
+documentation in `dieter/DOCS.md` → Dreamfall boards. This note keeps the design reasoning; the mockup and its screenshots
+predated the implementation and were removed; they are in the Git history.
 
 ## Answer to the two open choices
 
@@ -29,7 +29,7 @@ Why not a single board with custom lanes:
 - A plain Kanban board keeps working for everything else in the project, and a project may hold several
   pipelines.
 
-## What the view shows (see the mockup)
+## What the view shows
 
 1. **Funnel strip**: one chip per stage with its actor (agent or human), schedule, last run and the count
    of cards waiting in that stage; the arrows carry the pass rate ("1 in 4") or "you" for the human gate.

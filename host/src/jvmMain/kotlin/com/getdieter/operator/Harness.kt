@@ -147,7 +147,7 @@ class Harness(
 
     companion object {
         const val REPO = "JustinNeumann/dieter"
-        /** The archives of the fork release in the Dockerfile's DIETER_VERSION (its SHA256SUMS); see DEPLOY.md. */
+        /** The archives of the fork release in the Dockerfile's DIETER_VERSION (its SHA256SUMS); see docs/maintaining.md. */
         val SHA256 = mapOf(
             "aarch64" to "df1c91d3fd562294e1911146994ba96f8dd0c1fdccdbfd3bbdc460b91fb5688b",
             "x86_64" to "0597dbc83fabe1e747f73314274b8af29c7a7504370bba499d96460d6d15be4c",

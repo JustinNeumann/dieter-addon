@@ -1,4 +1,6 @@
-# Releasing and local deployment
+# Releasing and maintaining
+
+Notes for whoever publishes releases or builds the add-on on a device. Users: see the [README](../README.md).
 
 ## Release (what users install)
 
@@ -31,7 +33,7 @@ itself must be public for the Supervisor to fetch it.
 Installs pick up the new version at the next store reload (Settings → Add-ons → ⋮ → Check for
 updates, or automatically within a day).
 
-## Local add-on on the Pi (building on the device)
+## Local add-on (building on the device)
 
 The `dieter/` folder copied to `/addons/dieter` becomes the local add-on `local_dieter`. Because
 `image:` makes the Supervisor pull instead of build, the copy must drop that line. The image takes the page and the
@@ -39,19 +41,17 @@ web host from `dieter/web-dist`, so build them first:
 
 ```bash
 tools/addon-dist.sh                       # -> dieter/web-dist/dieter-web.tar.gz, dieter-web-host.jar
-tar -C ~/dieter-addon/dieter -czf - --exclude=__pycache__ --exclude=tests/node_modules --exclude=tests/test-results . \
-  | ssh hassio@192.168.0.10 'sudo sh -c "rm -rf /addons/dieter && mkdir -p /addons/dieter && tar -xzf - -C /addons/dieter && sed -i \"/^image:/d\" /addons/dieter/config.yaml"'
-ssh hassio@192.168.0.10 'bash -lc "ha store reload && ha apps rebuild local_dieter"'
+tar -C <checkout>/dieter -czf - --exclude=__pycache__ --exclude=tests/node_modules --exclude=tests/test-results . \
+  | ssh <user>@<ha-host> 'sudo sh -c "rm -rf /addons/dieter && mkdir -p /addons/dieter && tar -xzf - -C /addons/dieter && sed -i \"/^image:/d\" /addons/dieter/config.yaml"'
+ssh <user>@<ha-host> 'bash -lc "ha store reload && ha apps rebuild local_dieter"'
 ```
-
-The same folder is exported over NFS to the Pi as `/share/dieter`.
 
 The local add-on has the slug `local_dieter` (hostname `local-dieter`), the repository install
 `4d8f2a84_dieter`; `homeassistant/packages/dieter.yaml` must match the one in use.
 
-Caveat on this Pi: the scheduled `sync_from_github.sh` resets `/config` from the
-`Home-Assistant-Sem2` repository, so HA-side changes (`packages/dieter.yaml`, `dashboards/dieter.yaml`,
-`configuration.yaml`) must be pushed there to stay. `/addons/dieter` is not touched by the sync.
+If your Home Assistant configuration is synced from a repository, push HA-side changes (`packages/dieter.yaml`,
+`dashboards/dieter.yaml`, `configuration.yaml`) there too, or the sync resets them. `/addons/dieter` is not touched
+by such a sync.
 
 Dieter itself is the fork release `vX.Y.Z-antigravity.N` of `JustinNeumann/dieter` (workflow "Fork server
 release", triggered by pushing such a tag on a branch that carries the Antigravity adapter). Bumping it
@@ -81,7 +81,7 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 ## Upstream screening
 
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
-and release artifacts that affect the add-on (scheduled card).
+and release artifacts that affect the add-on (a scheduled task).
 
 - **2026-10-31**, fork release **`0.6.431-antigravity.9`** (`215c5403`): `antigravity.8` plus Home Assistant access
   per conversation (card, chat and schedule flag, `CardService.GetTurnCaller` / `dieter card caller`, fork proto
