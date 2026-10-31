@@ -52,7 +52,8 @@ class DreamfallView(private val onChange: () -> Unit = {}, private val onBoards:
                 Log.line("dreamfall: kv watch: $e")
             }
             Thread.sleep(backoff * 1000)
-            backoff = minOf(backoff * 2, 60)
+            // at most 10 s: until the watch is back, pages show no Dreamfall boards (after an update: the daemon's start)
+            backoff = minOf(backoff * 2, 10)
         }
     }
 

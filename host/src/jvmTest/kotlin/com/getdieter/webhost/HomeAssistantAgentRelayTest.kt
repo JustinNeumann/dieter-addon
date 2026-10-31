@@ -5,6 +5,7 @@ import java.io.BufferedInputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.URI
+import java.time.Duration
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
@@ -60,10 +61,12 @@ class HomeAssistantAgentRelayTest {
             }
         }
     }
+    private val turnOver = java.util.concurrent.atomic.AtomicBoolean()
     private val access: (String) -> HomeAssistantAgentRelay.Access = { token ->
         asked.incrementAndGet()
         when (token) {
-            "dtt1:c_ha:t1:mac" -> HomeAssistantAgentRelay.Access(true, "c_ha")
+            "dtt1:c_ha:t1:mac" ->
+                if (turnOver.get()) HomeAssistantAgentRelay.Access(false, reason = "its turn has finished") else HomeAssistantAgentRelay.Access(true, "c_ha")
             "dtt1:c_plain:t1:mac" -> HomeAssistantAgentRelay.Access(false, "c_plain")
             else -> HomeAssistantAgentRelay.Access(false, reason = "not a turn token")
         }
@@ -72,7 +75,8 @@ class HomeAssistantAgentRelayTest {
     // two relays to one fake Supervisor each: REST on its HTTP server, the WebSocket on the raw one
     private val restRelay = HomeAssistantAgentRelay("supervisor-t0ken", InetSocketAddress("127.0.0.1", 0), access, URI("http://127.0.0.1:${rest.address.port}/core"))
     private val relayPort = restRelay.start()
-    private val wsRelay = HomeAssistantAgentRelay("supervisor-t0ken", InetSocketAddress("127.0.0.1", 0), access, URI("http://127.0.0.1:${ws.localPort}/core"))
+    private val wsRelay = HomeAssistantAgentRelay("supervisor-t0ken", InetSocketAddress("127.0.0.1", 0), access, URI("http://127.0.0.1:${ws.localPort}/core"),
+        recheck = Duration.ofMillis(300))
     private val wsPort = wsRelay.start()
     private val http = HttpClient.newHttpClient()
 
@@ -135,6 +139,41 @@ class HomeAssistantAgentRelayTest {
             """echo {"id":1,"type":"system_log/list"}"""), allowed)
         val auths = generateSequence { seen.poll(1, TimeUnit.SECONDS) }.filter { it.startsWith("WS auth") }.toList()
         assertEquals(listOf("""WS auth {"type":"auth","access_token":"supervisor-t0ken"}"""), auths, "upstream sees only the add-on's token, and only for the allowed turn")
+    }
+
+    @Test
+    fun anOpenWebSocketClosesOnceItsTurnIsGone() {
+        val received = LinkedBlockingQueue<String>()
+        val closed = java.util.concurrent.CompletableFuture<Int>()
+        val socket = http.newWebSocketBuilder().buildAsync(URI("ws://127.0.0.1:$wsPort/api/websocket"), object : Client.Listener {
+            override fun onText(webSocket: Client, data: CharSequence, last: Boolean): CompletionStage<*>? {
+                received += data.toString()
+                webSocket.request(1)
+                return null
+            }
+
+            override fun onClose(webSocket: Client, statusCode: Int, reason: String): CompletionStage<*>? {
+                closed.complete(statusCode)
+                return null
+            }
+
+            override fun onError(webSocket: Client, error: Throwable) {
+                closed.complete(-1)
+            }
+        }).get(10, TimeUnit.SECONDS)
+        received.poll(10, TimeUnit.SECONDS)
+        socket.sendText("""{"type":"auth","access_token":"dtt1:c_ha:t1:mac"}""", true).join()
+        assertTrue("auth_ok" in received.poll(10, TimeUnit.SECONDS)!!)
+        val before = asked.get()
+        Thread.sleep(1000)
+        assertTrue(asked.get() - before >= 2, "asked again while open, past the 10 s cache")
+        socket.sendText("""{"id":1,"type":"get_states"}""", true).join()
+        assertEquals("""echo {"id":1,"type":"get_states"}""", received.poll(5, TimeUnit.SECONDS), "still open while the turn runs")
+
+        turnOver.set(true)
+        assertEquals(1000, closed.get(5, TimeUnit.SECONDS), "the relay closes the socket once the daemon no longer vouches for the turn")
+        runCatching { socket.sendText("""{"id":2,"type":"get_states"}""", true).get(2, TimeUnit.SECONDS) }
+        assertNull(received.poll(500, TimeUnit.MILLISECONDS), "nothing passes after the close")
     }
 
     private fun readLine(input: java.io.InputStream): String? {
