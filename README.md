@@ -1,102 +1,86 @@
-# dieter-addon
+# Dieter for Home Assistant
 
-Home Assistant add-on repository with one add-on, **Dieter** (`dieter/`): the
-[Dieter](https://github.com/dbpprt/dieter) coding-agent daemon behind HA Ingress, with Claude Code, Codex and an
-Antigravity harness, and Dieter's own Compose Multiplatform UI (`apps/kotlin/ui` of Dieter) compiled for the browser
-with Kotlin/Wasm as its page. Supported: aarch64 (Raspberry Pi 4/5, HA Green/Yellow) and amd64.
-
-## Install
+Run coding agents from your Home Assistant. This add-on puts [Dieter](https://github.com/dbpprt/dieter), a
+daemon and app that runs **Claude Code**, **Codex** and **Antigravity** agents on boards of tasks, behind Home
+Assistant's sidebar. Hand a task to an agent from your phone, let it work in its own Git worktree on your Raspberry
+Pi or mini PC, and get a push notification when it needs you or is ready for review.
 
 [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FJustinNeumann%2Fdieter-addon)
 
-The button opens your Home Assistant with this repository filled in. By hand: Settings → Add-ons → Add-on store → ⋮ → **Repositories** → add
-`https://github.com/JustinNeumann/dieter-addon`, then install **Dieter**. The Supervisor pulls a
-prebuilt multi-arch image `ghcr.io/justinneumann/dieter`. Options, provider login, signing the page in to your
-Dieter gateway and the optional Home Assistant package (sensors, push notification, services) are described in the
-add-on's Documentation tab (`dieter/DOCS.md`).
+<p align="center">
+  <img src="docs/screenshots/dreamfall-board.png" alt="A Dreamfall board for the Atlas API project: Enumeration, Navigation and Implementation stages side by side, in dark mode with the Dreamfall Pearl palette" width="90%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/phone-board.png" alt="The Navigation stage of the Dreamfall board on a phone, in dark mode with the Dreamfall Pearl palette" width="30%">
+  &nbsp;
+  <img src="docs/screenshots/phone-idea.png" alt="An idea's verdict, brief and provenance on a phone, in dark mode with the Dreamfall Pearl palette" width="30%">
+</p>
+<p align="center"><sub>A Dreamfall board with sample ideas for an example project, Atlas API, as the add-on shows it (Dreamfall Pearl palette, dark mode, desktop and phone).</sub></p>
 
-## Layout
+## What you get
 
-| Path | What |
-|---|---|
-| `repository.yaml` | add-on repository metadata |
-| `dieter/` | the add-on: `config.yaml` (Ingress on 8099, options, `image:`), `Dockerfile` (HA Debian base, the fork's daemon release sha256-pinned and cosign-verified, `claude`, `codex`, `agy`, `gh`, Java 21 for the web host), `run.sh`, `apparmor.txt`, `DOCS.md` (Documentation tab), `CHANGELOG.md` (Changelog tab), `patches/` (the add-on's Antigravity adapter) |
-| `dieter/operator/` | the operator's helper scripts in the image (`/opt/operator`) |
-| `dieter/tests/` | the add-on's end-to-end suite (Playwright against the image, below) and the unit tests of its Antigravity adapter (`unit.sh`) |
-| `fork/` | Git submodule: [JustinNeumann/dieter](https://github.com/JustinNeumann/dieter) (upstream + the add-on's changes). The UI, the core and the Wire models are compiled from here, not copied |
-| `web/` | the browser build (`wasmJs`): the browser actuals of the UI's platform hooks, the loader page, the entry point, `RemoteCore` (the UI's core and the add-on core over a WebSocket) and the add-on's screens (`com.getdieter.addon`, plugged into the fork's `MobileExtensions`) |
-| `host/` | the web host (JVM, user `dieter-web`), the add-on's front door on 8099: the page's files, Dieter's Kotlin core (`ClientApi`) with the JVM platform and the add-on core, served to browsers over one WebSocket (Ingress only), sign-in return, and `/api/` passed to the operator. The same jar holds the *operator* (`com.getdieter.operator`, user `dieter`, 127.0.0.1:8096): the add-on's API (the daemon, the board's state and events stream, cards, Dreamfall, settings, sign-ins), and the agents' `dreamfall` command (`DreamfallCommand`) |
-| `addon/` | the add-on core: the add-on's own features (gateway enrollment, SSH key, Claude sign-in, settings, agent questions, repositories, Dreamfall boards) as commands and slices, and their rules (`AddonRules`, also compiled into the page). Runs in the web host; the page only draws its slices ([ADR 0005](https://github.com/JustinNeumann/dieter/blob/web-addon/docs/adr/0005-web-client.md)) |
-| `proto/` | `dieter/web/v1/host.proto` (browser ↔ web host: dispatch/observe of `dieter.client.v1` plus `addon_dispatch`/`addon_observe`) and `dieter/addon/v1/addon.proto` (the add-on core's commands and slices) |
-| `tests/` | browser tests (Playwright) of the packed page: selection, find, HTML islands, keyboard, the add-on's screens; `npm run measure` writes the accessibility checklist of `docs/PLAN.md` Phase 2 |
-| `tools/` | `package.sh` packs the page (hashed file names, `.wasm.gz` for the loader, `.br`/`.gz` copies); `addon-dist.sh` builds and packs the page and the web host into `dieter/web-dist` for the image |
-| `homeassistant/` | optional HA package (sensors, rest_commands, push) and status dashboard |
-| `.github/workflows/builder.yaml` | builds and tests the page and the web host, then builds, signs and publishes the image on every push to main |
+- **A task board per project.** Todo, Running, Review, Done; several agents work in parallel, each card in its own
+  Git worktree. Chat with an agent while it works, answer its questions, attach images and files.
+- **Three agent harnesses in one image:** Claude Code, Codex and Antigravity (Gemini, Claude and GPT-OSS models),
+  with the quota of each shown in the page.
+- **Pull requests included.** The image has the GitHub CLI: agents clone, push, open pull requests and read checks
+  with one token you control; the daemon publishes a card's changes as a pull request.
+- **Opens in HA, works on the phone.** The page is Dieter's own app compiled for the browser, served through
+  Ingress: Home Assistant login, Nabu Casa and the Companion app work without opening a port.
+- **Home Assistant on both sides.** Sensors for running and waiting tasks, a push notification that opens the
+  card, services to create tasks from automations. Agents can use `hass-cli` and `ha-logs` to read and control
+  your Home Assistant (optional, per conversation).
+- **Schedules, Mail and Dreamfall.** Recurring tasks, reports from agents with charts in Dieter Mail, and
+  *Dreamfall boards*: agents enumerate ideas every night, others judge them, and only your pick starts work.
+- **Runs on a Raspberry Pi.** Prebuilt, signed images for aarch64 and amd64; no build on your device.
 
-The fork's own Gradle build is not used (it needs the Android SDK); `web/build.gradle.kts` compiles the needed
-source sets directly and takes every version from the fork's version catalog.
+## What you need
 
-## Development
+- Home Assistant OS or Supervised (add-ons), on aarch64 (Raspberry Pi 4/5, Home Assistant Green/Yellow) or amd64.
+- At least one provider login: a Claude subscription (sign in on the page), an OpenAI API key, or an Antigravity
+  sign-in.
+- Nothing else to install: the Dieter daemon, the agent CLIs (`claude`, `codex`, `agy`), `gh` and the page are all in
+  the add-on's image.
+- Access to a Dieter **gateway**, the one thing outside the add-on: the page, like the Dieter phone apps, signs in to
+  one with your GitHub account. The default, `gateway.getdieter.com`, only admits accounts its operator has allowed;
+  otherwise [run your own](https://github.com/dbpprt/dieter/blob/main/site/content/docs/gateway.md). See [the page](dieter/DOCS.md#the-page).
+  `…/next/?demo` shows the page with demo data without any of it.
+- Optional: a GitHub token, so agents can clone, push and open pull requests.
 
-```bash
-git clone --recurse-submodules https://github.com/JustinNeumann/dieter-addon.git && cd dieter-addon
-./gradlew :web:wasmJsBrowserDistribution           # the page, ~3 min the first time
-./gradlew :host:jvmTest :host:fatJar               # web host + add-on core tests and the host jar
-./gradlew :web:wasmJsBrowserDevelopmentRun -t      # dev server with rebuilds on change (open with ?demo)
-tools/addon-dist.sh                                # both, packed into dieter/web-dist for the image
-```
+About 800 MB of agent runtime is downloaded on the first start.
 
-JDK 21 (with `javac`). Gradle downloads Node and webpack for the wasm build; `npm` must be on the `PATH` as well (the
-build bundles Dieter's offline diagram renderer, `fork/apps/apple/mac/MarkdownPreview`: mermaid, vega, vega-lite).
+## Install
 
-**Browser tests** (Chromium from Playwright, against the newest `build/package/dieter-web-*` or `DIETER_WEB_DIR`):
+1. Click the button above, or: Settings → Add-ons → Add-on store → ⋮ → **Repositories** → add
+   `https://github.com/JustinNeumann/dieter-addon`.
+2. Install **Dieter**, fill in the options you have (a Claude token, an OpenAI key or Antigravity credentials;
+   optionally a GitHub token and your Git name and e-mail) and start it. The first start downloads the agent runtime.
+3. Open **Dieter** in the sidebar and sign the page in to your Dieter gateway with GitHub, then approve the pairing
+   code it shows on a device that is already trusted (the Dieter app, or `dieter device approve <code>`). A gateway you
+   run yourself must accept your Home Assistant's address as a return address once; the steps are in
+   [Signing in the page](dieter/DOCS.md#signing-in-the-page). Signed in, you can also sign in to Claude Code on the
+   page (Tools → Usage) instead of pasting a token.
+4. Optional: copy [`homeassistant/packages/dieter.yaml`](homeassistant/packages/dieter.yaml) into your
+   configuration for sensors and push notifications.
 
-```bash
-cd tests && npm ci && npx playwright install chromium
-npm test                                           # selection, find, islands, keyboard, add-on screens
-MEASURE_LABEL=after npm run measure                # accessibility checklist -> tests/measure-results/
-```
+Every option, the provider logins, the Home Assistant package, Dreamfall, schedules, the gateway and security notes
+are in the add-on's Documentation tab ([`dieter/DOCS.md`](dieter/DOCS.md)); what changed in each release is in
+[`dieter/CHANGELOG.md`](dieter/CHANGELOG.md).
 
-URL options of the page: `?demo` uses demo data instead of the web host, `?theme=dark|light` overrides the theme,
-`?script=tab projects; board Main` replays the app's debug navigation script, `?islands=off` draws mail bodies and
-Markdown files with Compose instead of HTML islands.
+## Security in short
 
-**Against real data without your account:** Dieter's isolated fixture gateway
-(`go run ./tools/fixtures/gateway -showcase-fixture` in `fork/`, prints a session token and a pairing code) plus the
-host jar; the host adopts the fixture session with `AdoptSession` over its WebSocket.
+Agents run arbitrary commands as an unprivileged user inside the container (AppArmor profile, no access to
+`/config`, no Supervisor API). What a token can do, an agent can do: give the GitHub token only the permissions
+[`DOCS.md`](dieter/DOCS.md#github-pull-requests-and-actions) lists and protect your base branch with a ruleset.
 
-**End-to-end tests of the add-on (run before every release):**
+## Contributing
 
-```bash
-cd dieter/tests && npm install && npx playwright install chromium   # once
-./run.sh            # builds the amd64 image (and dieter/web-dist first when it is empty), starts it with Dieter's
-                    # mock harness (DIETER_ENABLE_MOCK_HARNESS=1) behind an Ingress-like proxy, runs e2e/*.spec.mjs
-./run.sh -g "Dreamfall"   # a subset; --trace on for traces (npx playwright show-trace …)
-```
-
-The container uses the host network (Ingress port :18099, daemon :4342, proxy :18100) and keeps its `/data` in
-`~/.cache/dieter-addon-e2e/data` (`E2E_DATA` for another one). The suite covers the page behind Ingress (loading,
-deep links, sign-in relay, the add-on's screens, Dreamfall) and the contract Home Assistant and the agents rely on
-(`/api/ha`, the rest_commands' endpoints, `api/focus`, the `dreamfall` command).
-
-**Reading on the web.** The mail message body and Markdown files are HTML islands: real DOM inside the Compose
-layout, so the browser's selection, translation and screen readers work there, and mermaid, vega and vega-lite
-diagrams render offline in sandboxed frames. Everywhere else the page is a canvas: text is selectable inside the UI's
-selection areas (replies, tool output, subagent details), and Ctrl/⌘+F opens the app's own find bar in a
-conversation, a mail message or a file. On other screens Ctrl/⌘+F stays the browser's.
-
-**Browsers.** Kotlin/Wasm needs WebAssembly GC: current Chrome, Edge and Firefox, Android System WebView (Companion
-app on Android), Safari and the iOS/iPadOS WebView from 18.2. Older browsers get a message saying so.
-
-### Releasing
-
-Every change that should reach installs needs a new `version` in `dieter/config.yaml`
-(`<bundled Dieter release>.<add-on revision>`, e.g. `0.6.431.9`) and a `CHANGELOG.md` entry. The push to `main`
-builds the page and the web host, runs their tests, builds aarch64 and amd64 and publishes the multi-arch manifest
-to ghcr.io tagged with that version; installs see the update after the next store reload. The plan and its progress:
-[docs/PLAN.md](docs/PLAN.md); building on a device instead (local add-on) and bumping the fork: `DEPLOY.md`.
+Issues and pull requests are welcome. The layout of the repository, building the page and the web host, and the
+test suites are in [`docs/development.md`](docs/development.md); releasing and bumping the bundled Dieter fork in
+[`docs/maintaining.md`](docs/maintaining.md); the design of the page in [`docs/PLAN.md`](docs/PLAN.md) and the
+overall picture in [`docs/architecture.mmd`](docs/architecture.mmd).
 
 ## License
 
-MIT (`LICENSE`), like Dieter. JetBrains Mono (`web/src/wasmJsMain/composeResources/files`) is under the SIL Open
-Font License 1.1 (`OFL.txt` next to it).
+MIT ([`LICENSE`](LICENSE)), like Dieter. JetBrains Mono (`web/src/wasmJsMain/composeResources/files`) is under the SIL
+Open Font License 1.1 (`OFL.txt` next to it).

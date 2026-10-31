@@ -8,7 +8,7 @@
 # with the tree it was built from (the pull request merged into main). After the merge, main publishes it only
 # when its tree differs (main moved in between) and otherwise just moves :latest. Other pull requests only
 # build, and on main a version whose tag already exists is not pushed again, so bump
-# config.yaml + CHANGELOG.md for every release (DEPLOY.md). One-time after the first run: make the
+# config.yaml + CHANGELOG.md for every release (docs/maintaining.md). One-time after the first run: make the
 # packages dieter, aarch64-dieter and amd64-dieter public (GitHub → Packages → Package settings).
 # Uses the composite actions of home-assistant/builder (the old builder action is deprecated).
 name: Builder
