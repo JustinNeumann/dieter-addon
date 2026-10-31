@@ -8,14 +8,14 @@ Pi or mini PC, and get a push notification when it needs you or is ready for rev
 [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FJustinNeumann%2Fdieter-addon)
 
 <p align="center">
-  <img src="docs/screenshots/dreamfall-board.png" alt="A Dreamfall board: Enumeration, Navigation and Implementation stages side by side, in dark mode" width="90%">
+  <img src="docs/screenshots/dreamfall-board.png" alt="A Dreamfall board: Enumeration, Navigation and Implementation stages side by side, in dark mode with the Dreamfall Pearl palette" width="90%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/conversation.png" alt="A running agent's conversation next to the Inbox, in dark mode" width="62%">
-  <img src="docs/screenshots/phone.png" alt="The Inbox on a phone, in dark mode" width="22%">
+  <img src="docs/screenshots/conversation.png" alt="A running agent's conversation next to the Inbox, in dark mode with the Dreamfall Pearl palette" width="62%">
+  <img src="docs/screenshots/phone.png" alt="The Inbox on a phone, in dark mode with the Dreamfall Pearl palette" width="22%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/dreamfall-phone.png" alt="A Dreamfall board and an idea's provenance and trail on a phone, in dark mode" width="62%">
+  <img src="docs/screenshots/dreamfall-phone.png" alt="A Dreamfall board and an idea's provenance and trail on a phone, in dark mode with the Dreamfall Pearl palette" width="62%">
 </p>
 <p align="center"><sub>Top and bottom: Dreamfall boards (design renderings of the screens, with sample ideas). Middle: the page with the
 add-on's demo data (<code>…/next/?demo</code>).</sub></p>
