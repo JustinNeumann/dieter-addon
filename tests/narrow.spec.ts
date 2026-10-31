@@ -17,9 +17,10 @@ test.describe("a 360 dp phone", () => {
     await open(page, "");
     const boxes = await filterBoxes(page);
     expect(boxes[0].x).toBeGreaterThanOrEqual(15);
+    expect(boxes[0].width).toBeLessThan(44);
     for (const b of boxes) {
       expect(b.y).toBe(boxes[0].y);
-      expect(b.x + b.width).toBeLessThanOrEqual(360 - 15);
+      expect(b.x + b.width).toBeLessThanOrEqual(344 - 15);
     }
   });
 

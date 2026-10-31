@@ -5,8 +5,9 @@ Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429
 ## 0.6.431.35 (2026-10-31)
 
 - **Fix: the Inbox's filters wrapped onto a second line.** In a narrow list pane (an iPad or Android tablet in
-  portrait, with three-digit counts such as *Review 244*) the last filter dropped below the others. They now stay
-  on one line and scroll sideways when they don't fit, like the board's lane and label filters (fork `web-addon`).
+  portrait, with three-digit counts such as *Review 244*) the last filter dropped below the others. Dense filter
+  pills now size to their label instead of a 48 dp minimum width, and the row scrolls sideways when a pane is still
+  too narrow, like the board's lane and label filters (fork `web-addon`).
 
 ## 0.6.431.34 (2026-10-31)
 
