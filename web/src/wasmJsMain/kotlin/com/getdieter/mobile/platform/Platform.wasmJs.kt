@@ -42,3 +42,8 @@ internal var browserMonospace: androidx.compose.ui.text.font.FontFamily? = null
 
 internal actual fun platformMonospace(): androidx.compose.ui.text.font.FontFamily =
     browserMonospace ?: androidx.compose.ui.text.font.FontFamily.Monospace
+
+/** The page's tests find elements by their own selectors; test tags stay Compose-only here. */
+@Composable
+internal actual fun androidx.compose.ui.Modifier.exposingTestTags(): androidx.compose.ui.Modifier =
+    this

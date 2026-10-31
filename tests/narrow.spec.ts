@@ -17,8 +17,8 @@ test.describe("a 360 dp phone", () => {
     }
   });
 
-  test("Tools scrolls to its last row by touch, and the browser leaves the pan to Compose", async ({ page, context }) => {
-    await open(page, "tab tools");
+  test("More scrolls to its last row by touch, and the browser leaves the pan to Compose", async ({ page, context }) => {
+    await open(page, "tab more");
     const cdp = await context.newCDPSession(page);
     for (let i = 0; i < 4; i++) {
       await cdp.send("Input.synthesizeScrollGesture", { x: 180, y: 420, yDistance: -400, gestureSourceType: "touch", speed: 1200 });

@@ -54,7 +54,7 @@ internal fun GatewaySection(store: MobileStore) {
                                 GatewaySlice.Action.ACTION_DEVICES ->
                                     DButton(
                                         "Devices",
-                                        { store.showFrom(MobileRoute.Root(MobileTab.TOOLS), MobileRoute.Tool(ToolPage.DEVICES)) },
+                                        { store.openMore(MobileRoute.Tool(ToolPage.DEVICES)) },
                                         kind = ButtonKind.PLAIN,
                                     )
                                 else -> {}
