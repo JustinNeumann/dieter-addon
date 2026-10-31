@@ -24,6 +24,8 @@ installs needs
    version again when it is not (`main` moved in between: merge release pull requests one at a time, each up to
    date). Pull requests that keep the version only build, and on `main` a version whose tag already exists is not
    pushed again (`skip-existing`). Pull requests from other repositories never publish.
+4. nothing more for the GitHub Release: when `main` gets a new version, the workflow's last job tags that commit
+   `<version>` and publishes a Release with the version's `CHANGELOG.md` section (marked Latest), after the image is out.
 
 
 One-time: after the first successful run make the packages public (GitHub → Packages →
