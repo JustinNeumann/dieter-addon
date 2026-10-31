@@ -2,6 +2,16 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.32 (2026-10-31)
+
+- **Merging is the person's.** Agents prepare pull requests; you merge them from the card's Changes pane (Git
+  actions → Merge pull request). From an agent turn the daemon now refuses `merge_pr` and `merge_local` (fork
+  0.6.431-antigravity.10), and the image's `gh` refuses `gh pr merge`, the REST merge endpoints and GraphQL merge
+  mutations. The Claude Code note says so (an unedited note is replaced). A guardrail for agents that use the
+  tools: the GitHub token itself can merge, see DOCS.
+- **Fix: "This workspace conflicts with main" on every task.** The Changes pane showed the red conflict banner for
+  any review; it now shows only while the workspace has conflicts (fork `web-addon`).
+
 ## 0.6.431.31 (2026-10-31)
 
 - **The palette you pick is kept for every device.** Settings → Appearance → Palette was stored only in the browser,

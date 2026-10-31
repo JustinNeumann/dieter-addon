@@ -1,0 +1,10 @@
+#!/bin/sh
+# gh for the agents and the daemon. Merging pull requests is the person's: an agent turn (DIETER_TURN_TOKEN) gets no
+# merge through gh (pr merge, the REST merge endpoints, GraphQL merge mutations); the daemon, which merges for a person
+# from the page (merge_pr), has no turn token. A guardrail for agents that follow it, not a lock: the token gh holds can
+# merge (see DOCS).
+if [ -n "${DIETER_TURN_TOKEN:-}" ] && ! /usr/local/lib/gh/merge-check "$@"; then
+  echo "gh: merging is the person's: an agent turn cannot merge a pull request; leave it for them to merge from the page." >&2
+  exit 1
+fi
+exec /usr/local/lib/gh/gh "$@"

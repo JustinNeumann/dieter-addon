@@ -1,0 +1,43 @@
+#!/usr/bin/python3 -I
+"""Exit 1 when gh's arguments merge a pull request or a branch (tools/gh asks only for agent turns)."""
+import re, sys
+
+MUTATIONS = re.compile(r"\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch)\b")
+ENDPOINTS = re.compile(r"(^|/)(pulls/\d+/merge|merges|merge-upstream)$")
+
+
+def texts(args):
+    """The arguments, and the files gh reads for them (--input FILE, -F key=@FILE)."""
+    for i, arg in enumerate(args):
+        yield arg
+        path = None
+        if arg == "--input" and i + 1 < len(args):
+            path = args[i + 1]
+        elif arg.startswith("--input="):
+            path = arg.split("=", 1)[1]
+        elif "=@" in arg:
+            path = arg.split("=@", 1)[1]
+        if path and path != "-":
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    yield f.read(1_000_000)
+            except OSError:
+                pass
+
+
+def merges(args):
+    words = [a for a in args if not a.startswith("-")]
+    if not words:
+        return False
+    if words[0] == "pr" and "merge" in words[1:]:
+        return True
+    if words[0] == "api":
+        if "-" in args or "--input=-" in args:
+            return True   # a body from stdin cannot be read here without taking it from gh
+        return any(ENDPOINTS.search(w.split("?")[0].rstrip("/")) for w in words[1:]) or any(MUTATIONS.search(t) for t in texts(args))
+    if words[0] == "alias":
+        return any("merge" in a for a in args[1:])
+    return False
+
+
+sys.exit(1 if merges(sys.argv[1:]) else 0)

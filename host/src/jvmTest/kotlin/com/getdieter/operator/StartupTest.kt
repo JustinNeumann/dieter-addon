@@ -45,11 +45,12 @@ class StartupTest {
         assertFalse(note.exists(), "outside the add-on (no Supervisor token, no relay)")
         // 0.6.431.27's note for agents without Home Assistant is the add-on's: replaced
         note.parentFile.mkdirs()
-        val earlier = Setup.HINT.substring(0, Setup.HINT.indexOf("# Home Assistant")) +
+        val hint30 = javaClass.getResource("/operator/claude-hint-0.6.431.30.md")!!.readText()
+        val earlier = hint30.substring(0, hint30.indexOf("# Home Assistant")) +
             "# Home Assistant\n\nThis container is the Dieter add-on inside Home Assistant. The agents have no access to Home " +
             "Assistant here: the add-on's option \"Home Assistant for agents\" is off, so `hass-cli` and `ha-logs` are not " +
             "signed in. When a task needs Home Assistant, say so in your reply; do not look for a token.\n\n" +
-            Setup.HINT.substring(Setup.HINT.indexOf("# Images in the chat"))
+            hint30.substring(hint30.indexOf("# Images in the chat"))
         note.writeText(earlier)
         val perTask = Setup(JsonObject(emptyMap()), home, supervisorToken = null, agentRelay = true)
         perTask.claudeHint()
@@ -62,6 +63,11 @@ class StartupTest {
         perTask.claudeHint()
         assertEquals(Setup.HINT_PER_TASK, note.readText(), "and off again")
         setup.claudeHint()
+        // 0.6.431.30's note (merging allowed when a task said so) is replaced by the one that leaves merging to the person
+        note.writeText(hint30)
+        setup.claudeHint()
+        assertEquals(Setup.HINT, note.readText(), "0.6.431.30's note replaced")
+        assertTrue("Merging is the person's, even when a task asks for it" in Setup.HINT && "merge_pr" in Setup.HINT)
 
         note.writeText("# mine\n")
         setup.claudeHint()
