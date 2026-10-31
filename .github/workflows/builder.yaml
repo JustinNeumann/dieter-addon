@@ -8,7 +8,8 @@
 # with the tree it was built from (the pull request merged into main). After the merge, main publishes it only
 # when its tree differs (main moved in between) and otherwise just moves :latest. Other pull requests only
 # build, and on main a version whose tag already exists is not pushed again, so bump
-# config.yaml + CHANGELOG.md for every release (docs/maintaining.md). One-time after the first run: make the
+# config.yaml + CHANGELOG.md for every release (docs/maintaining.md). A new version on main also gets its tag and a
+# GitHub Release with that version's CHANGELOG section. One-time after the first run: make the
 # packages dieter, aarch64-dieter and amd64-dieter public (GitHub → Packages → Package settings).
 # Uses the composite actions of home-assistant/builder (the old builder action is deprecated).
 name: Builder
@@ -49,6 +50,7 @@ jobs:
       publish: ${{ steps.release.outputs.publish }}
       skip-existing: ${{ steps.release.outputs.skip-existing }}
       latest: ${{ steps.release.outputs.latest }}
+      new-version: ${{ steps.release.outputs.new-version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +73,8 @@ jobs:
           echo "add-on version ${version}"
 
       # publish: push the images; skip-existing: keep a tag that exists (empty: overwrite it); latest: only move
-      # :latest to the version, which a pull request published already from the same tree.
+      # :latest to the version, which a pull request published already from the same tree; new-version: main
+      # brings a version it did not have (tag and GitHub Release).
       - name: Decide what to publish
         id: release
         env:
@@ -85,7 +88,7 @@ jobs:
           published=$(docker buildx imagetools inspect "${REGISTRY_PREFIX}/${IMAGE_NAME}:${VERSION}" \
               --format '{{ json (index .Image "linux/amd64").Config.Labels }}' 2>/dev/null \
             | python3 -c 'import json, sys; print(json.load(sys.stdin).get("io.dieter.tree", ""))' 2>/dev/null || true)
-          publish=false skip="" latest=false
+          publish=false skip="" latest=false new=false
           if [[ "$EVENT" == pull_request ]]; then
             # a release not yet on main, from this repository (other repositories' tokens cannot push)
             if [[ "$VERSION" != "$before" && "$OWN_PR" == true ]]; then publish=true; fi
@@ -97,8 +100,9 @@ jobs:
             publish=true                             # built here, or over a pull request's image of another tree
           fi
           echo "version ${before:-?} -> ${VERSION}, published tree ${published:-none}, this tree ${TREE}"
-          echo "publish=${publish} skip-existing=${skip:-none} latest=${latest}"
-          { echo "publish=${publish}"; echo "skip-existing=${skip}"; echo "latest=${latest}"; } >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT" != pull_request && "$VERSION" != "$before" ]]; then new=true; fi
+          echo "publish=${publish} skip-existing=${skip:-none} latest=${latest} new-version=${new}"
+          { echo "publish=${publish}"; echo "skip-existing=${skip}"; echo "latest=${latest}"; echo "new-version=${new}"; } >> "$GITHUB_OUTPUT"
 
   page:
     name: Build the page and the web host
@@ -256,3 +260,26 @@ jobs:
         run: |
           docker buildx imagetools create -t "${REGISTRY_PREFIX}/${IMAGE_NAME}:latest" "${REGISTRY_PREFIX}/${IMAGE_NAME}:${VERSION}"
 
+  release:
+    # Tag <version> on this commit and publish its GitHub Release with that version's CHANGELOG section, once the
+    # image is out. A release that exists already (re-run) stays as it is.
+    name: GitHub Release
+    needs: [init, manifest]
+    if: needs.init.outputs.new-version == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the tag and the release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.init.outputs.version }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then echo "release ${VERSION} exists"; exit 0; fi
+          # the section under "## <version> (date)" up to the next heading, without leading/trailing blank lines
+          awk -v v="$VERSION" '/^## /{p = ($2 == v)} p && !/^## /' dieter/CHANGELOG.md \
+            | sed -e '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > notes.md
+          if [[ ! -s notes.md ]]; then echo "No CHANGELOG section for ${VERSION}." > notes.md; fi
+          gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --notes-file notes.md --latest
