@@ -7,7 +7,9 @@ with Kotlin/Wasm as its page. Supported: aarch64 (Raspberry Pi 4/5, HA Green/Yel
 
 ## Install
 
-Settings → Add-ons → Add-on store → ⋮ → **Repositories** → add
+[![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FJustinNeumann%2Fdieter-addon)
+
+The button opens your Home Assistant with this repository filled in. By hand: Settings → Add-ons → Add-on store → ⋮ → **Repositories** → add
 `https://github.com/JustinNeumann/dieter-addon`, then install **Dieter**. The Supervisor pulls a
 prebuilt multi-arch image `ghcr.io/justinneumann/dieter`. Options, provider login, signing the page in to your
 Dieter gateway and the optional Home Assistant package (sensors, push notification, services) are described in the
