@@ -19,6 +19,7 @@ import java.util.concurrent.CompletionStage
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -32,7 +33,8 @@ import kotlinx.serialization.json.put
  * created with Home Assistant access ([access] asks the daemon through the operator) gets core's REST and WebSocket
  * API through the Supervisor's proxy, signed in with the add-on's token, which never reaches the agent; any other
  * caller gets 403, or `auth_invalid` on the WebSocket. Answers are cached for [CACHE_MS]; a token stops working with
- * its turn. Loopback only (127.0.0.1:8098). Everything an agent with access sends passes: Home Assistant cannot narrow
+ * its turn, and an open WebSocket is asked about again every [recheck] and closed once its turn is gone (a process the
+ * turn left running keeps nothing). Loopback only (127.0.0.1:8098). Everything an agent with access sends passes: Home Assistant cannot narrow
  * the add-on's token, so such a conversation can do what Home Assistant's own administrator can.
  */
 class HomeAssistantAgentRelay(
@@ -40,6 +42,7 @@ class HomeAssistantAgentRelay(
     private val address: InetSocketAddress,
     private val access: (String) -> Access,
     private val target: URI = URI("http://supervisor/core"),
+    private val recheck: Duration = Duration.ofSeconds(30),
 ) {
     /** The daemon's answer for a turn token: whether it may pass, its card, and why not. */
     data class Access(val allowed: Boolean, val card: String = "", val reason: String = "")
@@ -68,9 +71,9 @@ class HomeAssistantAgentRelay(
         server?.close()
     }
 
-    private fun allowed(turnToken: String): Access {
+    private fun allowed(turnToken: String, fresh: Boolean = false): Access {
         val now = System.currentTimeMillis()
-        cache[turnToken]?.let { (at, answer) -> if (now - at < CACHE_MS) return answer }
+        if (!fresh) cache[turnToken]?.let { (at, answer) -> if (now - at < CACHE_MS) return answer }
         val answer = runCatching { access(turnToken) }.getOrElse { Access(false, reason = "the operator did not answer: ${it.message}") }
         if (cache.size > 1000) cache.clear()
         cache[turnToken] = now to answer
@@ -154,6 +157,7 @@ class HomeAssistantAgentRelay(
         socket.soTimeout = 0
         val agent = WebSocket(input, output, headers)
         fun next(): String? = fromHa.poll(15, TimeUnit.SECONDS)?.takeIf { it != closedMark }
+        val ended = AtomicBoolean()
         try {
             agent.sendText((next() ?: return).toByteArray())                                    // auth_required
             val auth = agent.receive()?.let { runCatching { Json.parseToJsonElement(it.decodeToString()) as JsonObject }.getOrNull() } ?: return
@@ -166,6 +170,21 @@ class HomeAssistantAgentRelay(
             }
             upstream.sendText(buildJsonObject { put("type", "auth"); put("access_token", token) }.toString(), true).join()
             Log.line("agent relay ${access.card} WebSocket")
+            // the sign-in was checked once; the turn may end while the socket stays open, so ask again (past the cache)
+            Thread.ofVirtual().start {
+                while (!ended.get()) {
+                    Thread.sleep(recheck.toMillis())
+                    if (ended.get()) break
+                    val now = allowed(turnToken, fresh = true)
+                    if (!now.allowed) {
+                        Log.line("agent relay ${access.card} WebSocket closed: ${now.reason.ifEmpty { "no Home Assistant access" }}")
+                        agent.close()
+                        upstream.abort()
+                        runCatching { socket.close() }
+                        break
+                    }
+                }
+            }
             Thread.ofVirtual().start {
                 while (true) {
                     val message = fromHa.take()
@@ -179,6 +198,7 @@ class HomeAssistantAgentRelay(
                 upstream.sendText(message.decodeToString(), true).join()
             }
         } finally {
+            ended.set(true)
             runCatching { upstream.sendClose(Upstream.NORMAL_CLOSURE, "").get(5, TimeUnit.SECONDS) }
             upstream.abort()
             agent.close()

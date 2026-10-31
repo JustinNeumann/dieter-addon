@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.29 (2026-10-31)
+
+- **The agent relay closes WebSockets whose turn has ended.** The turn's token was checked once, at the WebSocket's
+  sign-in; a process the turn left running could keep Home Assistant access over an open socket. The web host now
+  asks the daemon again every 30 s (past the 10 s cache of REST answers) and closes the socket once the turn is gone.
+- After an update or restart, Dreamfall boards come back within 10 s of the daemon's start (the operator retried its
+  Dreamfall watch up to a minute apart; until then the Projects overview and the Dreamfall list showed none).
+
 ## 0.6.431.28 (2026-10-31)
 
 - **"Allow Home Assistant access" per task.** New task and the schedule editor show it next to vault access

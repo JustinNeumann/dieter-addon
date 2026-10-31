@@ -62,7 +62,8 @@ these events too, with made-up text: each must name a card id (`c_` and hex) in 
 package builds the notification's link and tag, so a forged one opens a card's page at most. For agents it relays on `127.0.0.1:8098`: a
 conversation created with **Allow Home Assistant access** signs in there with its turn's token, which the web host
 checks with the daemon (through the operator, `dieter card caller`), and gets all of core's API; any other caller gets
-403. The operator, the daemon and the agents get the token itself only with the option **`agents_home_assistant`**
+403. The token stops working when its turn ends: REST answers are cached for 10 s, and an open WebSocket is checked
+again every 30 s and closed once its turn is gone, so a process the turn left running keeps no access. The operator, the daemon and the agents get the token itself only with the option **`agents_home_assistant`**
 (Home Assistant for every task); s6's copy of the container's environment is root's. A conversation with Home
 Assistant access, and with the option every agent, can do whatever Home Assistant can, including this add-on's
 rest_commands: post a message into any card as you, create and start a task, move a card. Agents share one user,
