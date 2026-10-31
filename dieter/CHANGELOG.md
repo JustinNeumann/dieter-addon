@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.33 (2026-10-31)
+
+- **Fix: Ollama task titles were never applied.** With Settings → Task titles on Ollama, a new task or chat kept
+  its first line: the page handed the add-on the conversation's local ID from before the daemon had it, and the
+  rename failed (`card "local_…": not found` in the log). The page now waits until the daemon has the
+  conversation and passes its real ID (fork `web-addon`).
+
 ## 0.6.431.32 (2026-10-31)
 
 - **Merging is the person's.** Agents prepare pull requests; you merge them from the card's Changes pane (Git
