@@ -148,6 +148,8 @@ class Setup(
 
         /** Earlier texts of that file: a file with one of these is the add-on's and gets replaced, an edited one is kept. */
         val HINT_EARLIER = setOf(
+            "95b8c35065abc1f9b7daab280c6e16e07f05b8ec46f3be514f773d61b7776b3f",   // 0.6.431.30, merging allowed when a task said so
+            "7e140a3a6c7226970ffc84af9dafa12a82969204b43f58af0526ae340edfca71",   // 0.6.431.30 per task
             "759f4981f09d89fb7c8a1840824135c926b22c29689035b49fcf0b2ad674e79d",   // 0.6.431.27 without Home Assistant
             "b0b13e392971aa06e72ca1d0ac265f15e563c90f653210dff669f46224b250c6",
             "f6634308d5b763f0261f9f53999c661316086d8730469c9f07109559eb0c8de9",

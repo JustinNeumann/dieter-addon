@@ -10,8 +10,8 @@ ARG BUILD_ARCH
 # The harness runtime *sources* (runner.mjs + adapters) are taken from the same tag's source tree and
 # checked against RUNTIME_SOURCES_SHA (sha256 of the `sha256sum` lines of the LC_ALL=C-sorted files); the operator lays
 # them over the release's node_modules archive at start (its checksums: host/…/operator/Harness.kt). Node checksums: nodejs.org/dist/vX/SHASUMS256.txt.
-ARG DIETER_VERSION=0.6.431-antigravity.9
-ARG DIETER_COMMIT=215c5403ea4c202b77a88b6afb950affbc26ec6a
+ARG DIETER_VERSION=0.6.431-antigravity.10
+ARG DIETER_COMMIT=754e3d1c5861a07faedd92094fbb02163ffd70d6
 ARG RUNTIME_SOURCES_SHA=b957b32d519e1b0adc9183d6b5283d9cbd95beba7e876edb1117bf582ae9a496
 ARG NODE_VERSION=22.23.4
 
@@ -25,9 +25,9 @@ RUN apt-get update \
 
 RUN set -eu; \
     case "${BUILD_ARCH}" in \
-      aarch64) D=arm64; DSHA=ea3f81a8e280b0d65d5b9f3db4c8c1acd67459cc840fe0d885a257ab7876f9f2; \
+      aarch64) D=arm64; DSHA=a561bb207d2573f9e5779a9b91489ee42b54b20d0aeeb05b67abf539c2322cab; \
                N=arm64; NSHA=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b ;; \
-      amd64)   D=amd64; DSHA=65c23cd8abb54a755ff5866b2b3e29fb20a6273a92958c558dbe7950d7b28430; \
+      amd64)   D=amd64; DSHA=51a88676554e9446da3c505cf916a12baf470cbfc80967c279cfeebf1fad1e67; \
                N=x64;   NSHA=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce ;; \
       *) echo "unsupported BUILD_ARCH ${BUILD_ARCH}" >&2; exit 1 ;; \
     esac; \
@@ -80,9 +80,14 @@ RUN set -eu; \
     curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${G}.tar.gz"; \
     echo "${GSHA}  /tmp/gh.tar.gz" | sha256sum -c -; \
     tar -xzf /tmp/gh.tar.gz -C /tmp "gh_${GH_VERSION}_linux_${G}/bin/gh"; \
-    install -m 755 "/tmp/gh_${GH_VERSION}_linux_${G}/bin/gh" /usr/local/bin/gh; \
+    install -D -m 755 "/tmp/gh_${GH_VERSION}_linux_${G}/bin/gh" /usr/local/lib/gh/gh; \
     rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${G}"; \
-    gh --version
+    /usr/local/lib/gh/gh --version
+# On PATH, tools/gh refuses merges to agent turns (merging is the person's) and runs the real gh above.
+COPY tools/gh /usr/local/bin/gh
+COPY tools/gh-merge-check /usr/local/lib/gh/merge-check
+RUN chmod 755 /usr/local/bin/gh /usr/local/lib/gh/merge-check && gh --version && \
+    ! DIETER_TURN_TOKEN=build gh pr merge 1 2>/dev/null
 
 # vl-convert for the agents: Vega-Lite and Vega specs to SVG, PNG or PDF with bundled fonts and no browser, so an agent
 # can look at a chart before it mails it (Dieter Mail draws vega-lite fences) or shows it in the chat. Release zip;

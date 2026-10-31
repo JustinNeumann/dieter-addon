@@ -83,6 +83,10 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (a scheduled task).
 
+- **2026-10-31**, fork release **`0.6.431-antigravity.10`** (`754e3d1c`): `antigravity.9` plus the daemon's refusal of
+  `merge_pr` and `merge_local` from agent turns (PermissionDenied), the conflict banner only while a workspace is
+  conflicted, and new tasks starting in a new worktree. Harness runtime sources and both harness archives unchanged;
+  tarball checksums from its `SHA256SUMS`, verified with cosign. Bumped in 0.6.431.32.
 - **2026-10-31**, fork release **`0.6.431-antigravity.9`** (`215c5403`): `antigravity.8` plus Home Assistant access
   per conversation (card, chat and schedule flag, `CardService.GetTurnCaller` / `dieter card caller`, fork proto
   fields from 1001) and the harness worker's question poll token. Adapter file unchanged; new runtime sources

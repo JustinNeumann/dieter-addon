@@ -195,6 +195,19 @@ test("Home Assistant for agents: only a turn the daemon vouches for passes the a
   expect(daemonEnv).toBe("HASS_SERVER=http://127.0.0.1:8098");
 });
 
+test("merging is the person's: gh refuses merges to an agent turn, the daemon's own gh calls pass", async () => {
+  const sh = (cmd) => execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "sh", "-c", `${cmd} 2>&1; echo " rc=$?"`], { stdio: "pipe" }).toString().trim();
+  const turn = "DIETER_TURN_TOKEN=dtt1:c_e2e:t_e2e:x";
+  for (const merge of ["gh pr merge 1 --merge", "gh api --method PUT repos/o/r/pulls/1/merge", "gh api graphql -f 'query=mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'"]) {
+    const out = sh(`${turn} ${merge}`);
+    expect(out, merge).toContain("merging is the person's");
+    expect(out, merge).toMatch(/ rc=1$/);
+  }
+  // reading passes to the real gh (no token here, so it answers about the sign-in, not about merging)
+  expect(sh(`${turn} gh pr view 1 -R o/r`)).not.toContain("merging is the person's");
+  expect(sh("gh --version")).toMatch(/^gh version .* rc=0$/s);
+});
+
 test("questions: the poll token is the asking worker's; an id still waiting cannot be registered again", async ({ request }) => {
   const sh = (cmd) => execFileSync("docker", ["exec", "-u", "dieter", "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
   const id = `toolu_e2e_${stamp}`.replace(/[^A-Za-z0-9_]/g, "_");
