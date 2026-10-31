@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.30 (2026-10-31)
+
+- **Fix: archived cards could not be restored.** A board's Archived Cards sheet sent the restore without its board, and
+  Dieter's core then looked for the card among archived chats: "The archived card is no longer available." The sheet
+  passes its board now (fork `web-addon`; the daemon is unchanged).
+- **New task starts in a new worktree.** The form took the workspace chosen last, so after one task in the project
+  directory every new task started there too. A chat still starts where the last one was made.
+
 ## 0.6.431.29 (2026-10-31)
 
 - **The agent relay closes WebSockets whose turn has ended.** The turn's token was checked once, at the WebSocket's
