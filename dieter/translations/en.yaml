@@ -17,6 +17,18 @@ configuration:
   antigravity_token:
     name: Antigravity credentials
     description: "Sign-in file of the Antigravity CLI (JSON). On a computer where `agy` is signed in, run: cat \"$HOME/.gemini/antigravity-cli/antigravity-oauth-token\" and paste the output here."
+  gateway_mode:
+    name: Gateway mode
+    description: "Choose `embedded` (default) to run a local gateway inside the add-on with automatic enrollment and pairing (standalone, no external gateway or GitHub OAuth app needed), or `external` to connect to a remote Dieter gateway (`gateway_url`) shared with mobile/desktop apps. You can switch between `embedded` and `external` at any time without losing either mode's enrollment or device trust."
+  gateway_url:
+    name: External gateway URL
+    description: "Optional (used when Gateway mode is `external`). HTTPS origin of your remote Dieter gateway, e.g. https://gateway.example.net:4443."
+  gateway_host_ip:
+    name: External gateway host IP
+    description: "Optional. Pins the hostname of `gateway_url` in `/etc/hosts` when the container cannot resolve it (e.g. a Tailscale hostname)."
+  machine_name:
+    name: Machine name
+    description: "How this Home Assistant add-on's daemon appears in Dieter (default: home-assistant)."
   web_sign_in_callback:
     name: New page sign-in address
     description: "Optional. Where your Dieter gateway sends the browser back after GitHub sign-in on the new page, e.g. https://<your Home Assistant address>/app/<this add-on's slug>/next/signin. Empty: the address you opened Home Assistant with. The gateway must list it in DIETER_NATIVE_REDIRECT_URIS."

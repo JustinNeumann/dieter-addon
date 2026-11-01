@@ -4,7 +4,7 @@
 # installs (the Supervisor pulls image:<version> built by .github/workflows/builder.yaml). For a local
 # build on the device (docs/maintaining.md) drop the image: line, otherwise the Supervisor pulls instead of building.
 name: Dieter
-version: "0.6.431.38"
+version: "0.6.431.39"
 slug: dieter
 description: Dieter coding agents (daemon + page) behind Home Assistant Ingress
 url: https://github.com/JustinNeumann/dieter-addon
@@ -32,6 +32,7 @@ options:
   claude_code_oauth_token: ""
   openai_api_key: ""
   antigravity_token: ""
+  gateway_mode: "embedded"
   gateway_url: ""
   gateway_host_ip: ""
   machine_name: "home-assistant"
@@ -47,6 +48,7 @@ schema:
   claude_code_oauth_token: password?
   openai_api_key: password?
   antigravity_token: password?
+  gateway_mode: list(embedded|external)?
   gateway_url: str?
   gateway_host_ip: str?
   machine_name: str?

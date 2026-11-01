@@ -14,14 +14,14 @@ mkdir -p "$DATA"
 MOUNTED=
 if [ -n "${WEB_BUNDLE:-}" ] && [ -n "${WEB_HOST_JAR:-}" ]; then MOUNTED=1
 elif [ -n "${WEB_BUNDLE:-}${WEB_HOST_JAR:-}" ]; then echo "WEB_BUNDLE and WEB_HOST_JAR go together" >&2; exit 1
-elif [ ! -f ../web-dist/dieter-web.tar.gz ] || [ ! -f ../web-dist/dieter-web-host.jar ]; then
-  echo "building the page and the web host (tools/addon-dist.sh)…"; ../../tools/addon-dist.sh >/dev/null
+elif [ ! -f ../web-dist/dieter-web.tar.gz ] || [ ! -f ../web-dist/dieter-web-host.jar ] || [ ! -f ../web-dist/dieter-gateway-amd64 ]; then
+  echo "building the page, web host and embedded gateway (tools/addon-dist.sh)…"; ../../tools/addon-dist.sh >/dev/null
 fi
 echo "building image…"
 docker build -q --build-arg BUILD_ARCH=amd64 ${MOUNTED:+--build-arg DIETER_WEB=mounted} -t "$IMAGE" .. >/dev/null
 docker rm -f dieter-e2e >/dev/null 2>&1 || true
 pkill -f '^node ingress-proxy.mjs' >/dev/null 2>&1 || true
-docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e BRIDGE_INGRESS_NETS=127.0.0.2/32 -e BRIDGE_CORE_NETS=127.0.0.3/32 -e SUPERVISOR_TOKEN=e2e-supervisor-token-2718 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" ${MOUNTED:+-v "$WEB_BUNDLE:/opt/web:ro" -v "$WEB_HOST_JAR:/opt/web-host/dieter-web-host.jar:ro"} "$IMAGE" >/dev/null
+docker run -d --name dieter-e2e --network host -e BRIDGE_PORT=18099 -e BRIDGE_INGRESS_NETS=127.0.0.2/32 -e BRIDGE_CORE_NETS=127.0.0.3/32 -e SUPERVISOR_TOKEN=e2e-supervisor-token-2718 -e DIETER_DAEMON_ADDR=127.0.0.1:4342 -e DIETER_GATEWAY_ADDR=127.0.0.1:4343 -e DIETER_ENABLE_MOCK_HARNESS=1 -v "$DATA:/data" ${MOUNTED:+-v "$WEB_BUNDLE:/opt/web:ro" -v "$WEB_HOST_JAR:/opt/web-host/dieter-web-host.jar:ro"} "$IMAGE" >/dev/null
 cleanup() { kill "${PROXY:-}" 2>/dev/null || true; [ -n "${E2E_KEEP:-}" ] || docker rm -f dieter-e2e >/dev/null 2>&1 || true; }   # E2E_KEEP=1 leaves the container for `docker logs dieter-e2e`
 trap cleanup EXIT
 echo "waiting for the add-on and daemon (first run stages the harness runtime, ~800 MB)…"

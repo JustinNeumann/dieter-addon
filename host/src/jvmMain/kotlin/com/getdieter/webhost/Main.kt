@@ -75,6 +75,7 @@ class WebHostServer(
     private val server: FrontDoor
     private val signIn: SignInRelay
     private val foreground: Foreground
+    private val embedded: EmbeddedGatewaySession?
 
     init {
         state.mkdirs()
@@ -116,8 +117,9 @@ class WebHostServer(
         api = ClientApi(runtime)
         signIn = SignInRelay(api, callback ?: SignInRelay.INTERNAL_CALLBACK)
         val operator = java.net.URI.create(env["DIETER_OPERATOR_URL"] ?: "http://127.0.0.1:8096/")
+        val bridge = OkHttpBridge(env["DIETER_WEB_BRIDGE_URL"] ?: (operator.toString().trimEnd('/') + "/api/"))
         addon = AddonCore(
-            OkHttpBridge(env["DIETER_WEB_BRIDGE_URL"] ?: (operator.toString().trimEnd('/') + "/api/")),
+            bridge,
             commands,
             offsetSeconds = { at, zone ->
                 val id = runCatching { java.time.ZoneId.of(zone) }.getOrDefault(java.time.ZoneId.systemDefault())
@@ -126,6 +128,16 @@ class WebHostServer(
             timezone = { java.util.TimeZone.getDefault().id },
         )
         foreground = Foreground(api, commands, env["DIETER_WEB_HOST_IDLE_MS"]?.toLongOrNull() ?: 120_000)
+        embedded =
+            if (env["DIETER_GATEWAY_MODE"] == "embedded" || !env["DIETER_EMBEDDED_BOOTSTRAP"].isNullOrBlank()) {
+                EmbeddedGatewaySession(
+                    runtime,
+                    bridge,
+                    foreground,
+                    commands,
+                    File(env["DIETER_EMBEDDED_BOOTSTRAP"] ?: "/data/gateway/bootstrap.json"),
+                )
+            } else null
         server =
             FrontDoor(bind, port, File(env["DIETER_WEB_DIR"] ?: "/opt/web"), operator, ingress, core, apiKey, onSignIn = ::signIn) { ws ->
                 val user = ws.headers["x-remote-user-display-name"] ?: ws.headers["x-remote-user-name"].orEmpty()
@@ -151,6 +163,7 @@ class WebHostServer(
     fun start(): Int {
         runtime.start()
         addon.start()
+        embedded?.start()
         return server.start()
     }
 
