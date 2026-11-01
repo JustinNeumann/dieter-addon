@@ -40,14 +40,17 @@ import kotlinx.coroutines.launch
  * The real Dieter Compose UI in the browser. Its core runs in the add-on's web host and is reached
  * over a WebSocket at `core` next to this page ([RemoteCore]), and so is the add-on core for the
  * add-on's own features. `?demo` uses [DemoCore] for Dieter's data instead (no account); the add-on's
- * features still come from the web host. `?script=tab projects; board Main` replays the debug navigation
- * script used for screenshots.
+ * features still come from the web host. `?demo=standalone` needs no web host at all: the add-on core runs in
+ * the page over sample data too ([DemoAddon]). `?script=tab projects; board Main`
+ * replays the debug navigation script used for screenshots.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
     WebHost.start()
-    val remote = RemoteCore("core", MainScope()).also { it.start() }
-    val core: MobileCore = if (queryParameter("demo") != null) DemoCore() else remote
+    val demo = queryParameter("demo")
+    val remote = if (demo == "standalone") null else RemoteCore("core", MainScope()).also { it.start() }
+    val core: MobileCore = if (demo != null || remote == null) DemoCore() else remote
+    val addon: AddonClient = remote ?: DemoAddon(MainScope(), freshDreamfall = queryParameter("dreamfall") == "fresh")
     val store =
         MobileStore(
             core,
@@ -64,14 +67,14 @@ fun main() {
     val script = queryParameter("script").orEmpty()
     onFindShortcut { FindRequests.request() }
     val route = queryParameter("route").orEmpty()
-    PanelRoutes.start(route, focus = queryParameter("demo") == null && route.isBlank() && script.isBlank())
+    PanelRoutes.start(route, focus = demo == null && route.isBlank() && script.isBlank())
     MainScope().launch {
         browserMonospace =
             runCatching {
                     FontFamily(Font("JetBrains Mono", Res.readBytes("files/jetbrains_mono_regular.ttf")))
                 }
                 .getOrNull()
-        show(store, remote, script, route)
+        show(store, addon, script, route)
     }
 }
 

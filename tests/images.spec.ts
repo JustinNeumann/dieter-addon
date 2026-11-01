@@ -3,7 +3,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { open, aria, settle, tap, COMPOSE_112 } from "./helpers";
 
-const TASK = "card Compose web UI behind Ingress";
+const TASK = "card Add per-key rate limiting to the public API";
 
 /** The inbox list beside the conversation: dark under the viewer, unchanged once it is closed. */
 const list = (page: Page) => page.screenshot({ clip: { x: 100, y: 240, width: 360, height: 240 } });
@@ -12,11 +12,11 @@ test("an attached image and a tool's screenshot show as pictures and open full s
   await open(page, TASK);
   await page.waitForTimeout(800);
   const tree = await settle(page);
-  const attachment = page.getByRole("button", { name: "ingress.png", exact: true });
-  const screenshot = page.getByRole("button", { name: "Screenshot of next/ in the iframe", exact: true });
-  expect(tree).toContain('button "ingress.png"');
-  expect(tree).toContain('button "Screenshot of next/ in the iframe"');
-  // pictures, not file tiles (a tile reads "ingress.png PNG · 1009 B")
+  const attachment = page.getByRole("button", { name: "rate-limits.png", exact: true });
+  const screenshot = page.getByRole("button", { name: "Screenshot of /docs/rate-limits", exact: true });
+  expect(tree).toContain('button "rate-limits.png"');
+  expect(tree).toContain('button "Screenshot of /docs/rate-limits"');
+  // pictures, not file tiles (a tile reads "rate-limits.png PNG · 1009 B")
   expect(tree).not.toContain("PNG ·");
   expect((await screenshot.boundingBox())!.height).toBeGreaterThan(200);
 
@@ -42,7 +42,7 @@ test("a tool's output shows its images above the text and their base64 as a plac
   await open(page, TASK);
   await page.waitForTimeout(800);
   await settle(page);
-  await tap(page, page.getByRole("button", { name: "Screenshot of next/ in the iframe Done", exact: true }));
+  await tap(page, page.getByRole("button", { name: "Screenshot of /docs/rate-limits Done", exact: true }));
   const sheet = await settle(page, 600);
   expect(sheet).toContain('button "image-1.png"');
   expect(sheet).toMatch(/‹image\/png · [\d.]+ (B|KB)›/);

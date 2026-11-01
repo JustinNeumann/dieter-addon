@@ -18,8 +18,8 @@ async function find(page, query: string) {
 }
 
 test("conversation: count, step, wrap and close", async ({ page }) => {
-  await open(page, "card Compose web UI behind Ingress");
-  await find(page, "bundle");
+  await open(page, "card Add per-key rate limiting to the public API");
+  await find(page, "bucket");
   const first = await count(page);
   expect(first).toMatch(/^1\/\d+$/);
   const total = Number(first!.split("/")[1]);

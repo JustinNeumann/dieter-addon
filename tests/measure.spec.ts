@@ -17,9 +17,9 @@ type Screen = {
 };
 
 const SCREENS: Screen[] = [
-  { name: "Inbox", script: "", content: "Compose web UI behind Ingress", menus: ["Filter"] },
-  { name: "Board", script: "board Add-on", content: "Compose web UI behind Ingress", menus: ["Board options"] },
-  { name: "Conversation", script: "card Compose web UI behind Ingress", content: "Sora comes from Compose resources", copy: "Sora comes from Compose resources", menus: ["Conversation actions"] },
+  { name: "Inbox", script: "", content: "Add per-key rate limiting to the public API", menus: ["Filter"] },
+  { name: "Board", script: "board Roadmap", content: "Add per-key rate limiting to the public API", menus: ["Board options"] },
+  { name: "Conversation", script: "card Add per-key rate limiting to the public API", content: "Rejected requests return 429 Too Many Requests", copy: "Rejected requests return 429 Too Many Requests", menus: ["Conversation actions"] },
   { name: "Mail message", script: "tab mail; mail Dependency audit", content: "Two dependencies have newer releases", copy: "Two dependencies have newer releases", menus: ["More options"] },
   { name: "Files", script: "file README.md", content: "compiled for the browser", copy: "compiled for the browser", menus: ["Document actions"] },
   { name: "New task", script: "new", content: "What should we do?", modal: true },

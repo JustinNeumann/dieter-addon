@@ -36,6 +36,106 @@
     return;
   }
 
+  // ---- Standalone demo outer Home Assistant shell (?ha=1, or data-ha-demo unless ?ha=0).
+  // Renders HA's left sidebar around an Ingress-style iframe so the demo and recordings show Dieter in its HA frame.
+  var searchParams = new URLSearchParams(location.search);
+  var haParam = searchParams.get("ha");
+  var showHaShell = window.parent === window &&
+    (haParam === "1" || haParam === "true" || (document.documentElement.hasAttribute("data-ha-demo") && haParam !== "0"));
+  if (showHaShell) {
+    var mountHaShell = function () {
+      var html = document.documentElement;
+      html.style.setProperty("--primary-color", "#03a9f4");
+      html.style.setProperty("--accent-color", "#ff9800");
+      html.style.setProperty("--primary-background-color", "#111114");
+      html.style.setProperty("--secondary-background-color", "#1c1c21");
+      html.style.setProperty("--card-background-color", "#1c1c21");
+      html.style.setProperty("--primary-text-color", "#e1e1e6");
+      html.style.setProperty("--sidebar-background-color", "#141418");
+      var style = document.createElement("style");
+      style.textContent = [
+        "home-assistant { position: fixed; inset: 0; display: flex; background: #111114; color: #e1e1e6;",
+        "  font: 400 14px/1.4 Roboto, system-ui, -apple-system, 'Segoe UI', sans-serif; user-select: none; }",
+        ".ha-sidebar { width: 224px; flex-shrink: 0; background: #141418; border-right: 1px solid rgba(255,255,255,.08);",
+        "  display: flex; flex-direction: column; transition: width .18s ease; overflow: hidden; z-index: 2; }",
+        ".ha-sidebar.collapsed { width: 56px; }",
+        ".ha-brand { height: 56px; display: flex; align-items: center; padding: 0 8px 0 8px; gap: 6px;",
+        "  border-bottom: 1px solid rgba(255,255,255,.06); flex-shrink: 0; }",
+        ".ha-menu-btn { width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent;",
+        "  color: #9e9ea8; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }",
+        ".ha-menu-btn:hover { background: rgba(255,255,255,.06); color: #e1e1e6; }",
+        ".ha-logo-badge { width: 28px; height: 28px; border-radius: 7px; background: #18bcf2; color: #fff;",
+        "  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 1px 4px rgba(24,188,242,.35); }",
+        ".ha-title { font-size: 17px; font-weight: 500; color: #e1e1e6; white-space: nowrap; letter-spacing: .1px; margin-left: 4px; }",
+        ".ha-sidebar.collapsed .ha-logo-badge, .ha-sidebar.collapsed .ha-title, .ha-sidebar.collapsed .ha-label, .ha-sidebar.collapsed .ha-badge { display: none; }",
+        ".ha-nav { padding: 8px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; }",
+        ".ha-footer { padding: 8px; border-top: 1px solid rgba(255,255,255,.07); display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }",
+        ".ha-item { height: 40px; border-radius: 8px; padding: 0 12px; display: flex; align-items: center; gap: 16px;",
+        "  color: #9e9ea8; font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; position: relative; }",
+        ".ha-sidebar.collapsed .ha-item { padding: 0; justify-content: center; }",
+        ".ha-item:hover { background: rgba(255,255,255,.05); color: #e1e1e6; }",
+        ".ha-item.active { background: rgba(24,188,242,.16); color: #38bdf8; }",
+        ".ha-item svg { width: 22px; height: 22px; flex-shrink: 0; fill: currentColor; }",
+        ".ha-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;",
+        "  background: #03a9f4; color: #fff; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }",
+        ".ha-avatar { width: 26px; height: 26px; border-radius: 50%; background: #0288d1; color: #fff;",
+        "  font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: -2px; }",
+        ".ha-panel { flex: 1; height: 100%; position: relative; background: #121214; overflow: hidden; }",
+        ".ha-panel iframe { width: 100%; height: 100%; border: 0; display: block; }",
+        "@media (max-width: 960px) { .ha-sidebar { width: 56px; } .ha-sidebar .ha-logo-badge, .ha-sidebar .ha-title, .ha-sidebar .ha-label, .ha-sidebar .ha-badge { display: none; } .ha-sidebar .ha-item { padding: 0; justify-content: center; } }"
+      ].join("\n");
+      document.head.appendChild(style);
+
+      var childParams = new URLSearchParams(location.search);
+      childParams.delete("ha");
+      if (!childParams.has("demo")) childParams.set("demo", "standalone");
+      var childSrc = location.pathname + "?" + childParams.toString() + location.hash;
+
+      var ha = document.createElement("home-assistant");
+      ha.hass = { themes: { darkMode: true, theme: "Home Assistant", default_theme: "Home Assistant" } };
+      ha.innerHTML = [
+        '<aside class="ha-sidebar" id="ha-sidebar" aria-label="Home Assistant sidebar">',
+        '  <div class="ha-brand">',
+        '    <button class="ha-menu-btn" id="ha-menu-toggle" type="button" aria-label="Toggle Home Assistant sidebar" title="Toggle sidebar">',
+        '      <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>',
+        '    </button>',
+        '    <span class="ha-logo-badge" aria-hidden="true">',
+        '      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3L2 12h3v8h14v-8h3L12 3zm0 4.7c.9 0 1.6.7 1.6 1.6 0 .7-.4 1.3-1.1 1.5v2.6l2.1-2.1c-.1-.2-.1-.5-.1-.7 0-.9.7-1.6 1.6-1.6s1.6.7 1.6 1.6-.7 1.6-1.6 1.6c-.3 0-.5-.1-.7-.2l-2.9 2.9v3.1h-1V14l-2.9-2.9c-.2.1-.4.2-.7.2-.9 0-1.6-.7-1.6-1.6S7 8.1 7.9 8.1s1.6.7 1.6 1.6c0 .2 0 .5-.1.7l2.1 2.1v-1.7c-.7-.2-1.1-.8-1.1-1.5 0-.9.7-1.6 1.6-1.6z"/></svg>',
+        '    </span>',
+        '    <span class="ha-title">Home Assistant</span>',
+        '  </div>',
+        '  <nav class="ha-nav">',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M13,3V9H21V3M13,21H21V11H13M3,21H11V15H3M3,13H11V3H3V13Z"/></svg><span class="ha-label">Overview</span></div>',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M11,15H6L13,1V9H18L11,23V15Z"/></svg><span class="ha-label">Energy</span></div>',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22C12,22 19,14.25 19,9A7,7 0 0,0 12,2Z"/></svg><span class="ha-label">Map</span></div>',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M3,4H7V8H3V4M9,5V7H21V5H9M3,10H7V14H3V10M9,11V13H21V11H9M3,16H7V20H3V16M9,17V19H21V17H9"/></svg><span class="ha-label">Logbook</span></div>',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M22,21H2V3H4V19H6V10H10V19H12V6H16V19H18V14H22V21Z"/></svg><span class="ha-label">History</span></div>',
+        '    <div class="ha-item active" id="ha-nav-dieter" aria-current="page"><svg viewBox="0 0 24 24"><path d="M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M9,17H7V10H9V17M13,17H11V7H13V17M17,17H15V13H17V17Z"/></svg><span class="ha-label">Dieter</span></div>',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M12,3V12.26C11.5,12.09 11,12 10.5,12C8,12 6,14 6,16.5C6,19 8,21 10.5,21C13,21 15,19 15,16.5V6H19V3H12Z"/></svg><span class="ha-label">Media</span></div>',
+        '  </nav>',
+        '  <div class="ha-footer">',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M22.7,19L13.6,9.9C14.5,7.6 14,4.9 12.1,3C10.1,1 7.1,0.6 4.7,1.7L9,6L6,9L1.6,4.7C0.4,7.1 0.9,10.1 2.9,12.1C4.8,14 7.5,14.5 9.8,13.6L18.9,22.7C19.3,23.1 19.9,23.1 20.3,22.7L22.6,20.4C23.1,20 23.1,19.3 22.7,19Z"/></svg><span class="ha-label">Developer Tools</span></div>',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg><span class="ha-label">Settings</span><span class="ha-badge">1</span></div>',
+        '    <div class="ha-item"><svg viewBox="0 0 24 24"><path d="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21"/></svg><span class="ha-label">Notifications</span></div>',
+        '    <div class="ha-item"><span class="ha-avatar">A</span><span class="ha-label">Alex</span></div>',
+        '  </div>',
+        '</aside>',
+        '<main class="ha-panel"><iframe id="ha-ingress-frame" title="Dieter"></iframe></main>'
+      ].join("\n");
+      document.body.innerHTML = "";
+      document.body.appendChild(ha);
+      var frame = document.getElementById("ha-ingress-frame");
+      frame.src = childSrc;
+      var sidebar = document.getElementById("ha-sidebar");
+      document.getElementById("ha-menu-toggle").addEventListener("click", function () {
+        sidebar.classList.toggle("collapsed");
+      });
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mountHaShell);
+    else mountHaShell();
+    return;
+  }
+
   // ---- Home Assistant's theme. Behind Ingress the page is same origin with HA's frontend, so it
   // reads the parent page: hass.themes (dark mode, theme name) and the CSS variables HA applies to its
   // <html>. HA's app-panel messages (home-assistant/properties) carry only narrow and route, no theme.

@@ -21,7 +21,7 @@ test("the browser's Back closes New task, then leaves a board", async ({ page })
   await page.goBack();
   await expect.poll(async () => (await aria(page)).includes("What should we do?")).toBe(false);
   expect(page.url()).toBe(url);
-  await open(page, "board Add-on");
+  await open(page, "board Roadmap");
   expect(await aria(page)).toContain("Search cards");
   await page.goBack();
   await expect.poll(async () => (await aria(page)).includes("Search cards")).toBe(false);
@@ -32,12 +32,12 @@ test("rows and cards are named by their titles", async ({ page }) => {
   await open(page, "");
   const inbox = await aria(page);
   expect(inbox).not.toMatch(/button "Chat"/);
-  expect(inbox).toMatch(/button "Kotlin\/Wasm vs Node inside an add-on/);
-  expect(inbox).not.toMatch(/button "D Compose web UI/);
-  await open(page, "board Add-on");
+  expect(inbox).toMatch(/button "Why is the search index rebuild slow\?/);
+  expect(inbox).not.toMatch(/button "A Add per-key rate limiting/);
+  await open(page, "board Roadmap");
   const board = await aria(page);
   expect(board).not.toMatch(/button "Last activity/);
-  expect(board).toMatch(/button "[^"]*Compose web UI behind Ingress[^"]*Last activity/);
-  await open(page, "card Compose web UI behind Ingress");
+  expect(board).toMatch(/button "[^"]*Add per-key rate limiting to the public API[^"]*Last activity/);
+  await open(page, "card Add per-key rate limiting to the public API");
   expect(await aria(page)).not.toMatch(/"Done, Done, Open, Open"/);
 });

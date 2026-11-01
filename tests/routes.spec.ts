@@ -6,7 +6,7 @@ import { open, aria } from "./helpers";
 test("?route=card/<id> opens that conversation; a card that is gone opens the Inbox", async ({ page }) => {
   await open(page, "", "route=card/c-web");
   expect(await aria(page)).toContain('textbox "Message"');
-  expect(await aria(page)).toContain("text: Compose web UI behind Ingress dieter-addon");
+  expect(await aria(page)).toContain("text: Add per-key rate limiting to the public API atlas-api");
   await open(page, "", "route=card/c-gone");
   expect(await aria(page)).not.toContain('textbox "Message"');
 });

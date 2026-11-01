@@ -5,7 +5,7 @@ import { open, aria, settle, tap, COMPOSE_112, STALE_POPUPS } from "./helpers";
 
 test.fail(COMPOSE_112, STALE_POPUPS); // the screen readers' gap while the page builds with 1.12
 
-const TASK = "card Compose web UI behind Ingress";
+const TASK = "card Add per-key rate limiting to the public API";
 
 /** Opens a popup with [button], closes it with Escape; the tree must hold the screen again and nothing of the popup. */
 async function closes(page: Page, button: string, screen: string) {
@@ -24,13 +24,13 @@ async function closes(page: Page, button: string, screen: string) {
 test("a conversation's menu, a tool's output sheet and the image viewer leave the tree to the conversation", async ({ page }) => {
   await open(page, TASK);
   await page.waitForTimeout(800);
-  const screen = "Sora comes from Compose resources";
+  const screen = "Rejected requests return 429 Too Many Requests";
   await closes(page, "Conversation actions", screen);
-  await closes(page, "Screenshot of next/ in the iframe Done", screen);
-  await closes(page, "Screenshot of next/ in the iframe", screen);
+  await closes(page, "Screenshot of /docs/rate-limits Done", screen);
+  await closes(page, "Screenshot of /docs/rate-limits", screen);
 });
 
 test("the Inbox's filter menu leaves the tree to the Inbox", async ({ page }) => {
   await open(page, "");
-  await closes(page, "Filter", "Compose web UI behind Ingress");
+  await closes(page, "Filter", "Add per-key rate limiting to the public API");
 });

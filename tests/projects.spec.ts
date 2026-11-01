@@ -13,16 +13,16 @@ async function run(page: Page, script: string) {
 test("the project used last leads the Projects list and opens from the Projects tab", async ({ page }) => {
   expect(await run(page, "tab projects")).not.toContain("Last used");
   // a board in use makes its project the last used; choosing Projects again returns to the list ...
-  let tree = await run(page, "tab projects; board Automations; wait 100; tab projects");
+  let tree = await run(page, "tab projects; board Sprint 42; wait 100; tab projects");
   const last = tree.indexOf("Last used"), all = tree.indexOf("All projects");
   expect(last).toBeGreaterThan(-1);
   expect(all).toBeGreaterThan(last);
-  expect(tree.slice(last, all)).toContain("Home-Assistant-Sem2");
-  expect(tree.slice(last, all)).not.toContain("dieter-addon");
+  expect(tree.slice(last, all)).toContain("storefront");
+  expect(tree.slice(last, all)).not.toContain("atlas-api");
   // ... and choosing it from another tab opens the project
-  tree = await run(page, "tab projects; board Automations; wait 100; tab projects; tab inbox; tab projects");
+  tree = await run(page, "tab projects; board Sprint 42; wait 100; tab projects; tab inbox; tab projects");
   expect(tree).not.toContain("Last used");
   expect(tree).not.toContain("All projects");
-  expect(tree).toContain("Home-Assistant-Sem2");
-  expect(tree).toContain('button "Automations');
+  expect(tree).toContain("storefront");
+  expect(tree).toContain('button "Sprint 42');
 });
