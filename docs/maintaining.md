@@ -32,10 +32,6 @@ One-time: after the first successful run make the packages public (GitHub → Pa
 `dieter`, `aarch64-dieter`, `amd64-dieter` → Package settings → Change visibility), and the repository
 itself must be public for the Supervisor to fetch it.
 
-The demo on GitHub Pages (`.github/workflows/demo.yaml`) follows by itself: after each successful Builder run of a push
-to `main` it publishes that run's page as the standalone demo (`https://justinneumann.github.io/dieter-addon/`).
-One-time: Settings → Pages → Build and deployment → Source: **GitHub Actions**.
-
 Installs pick up the new version at the next store reload (Settings → Add-ons → ⋮ → Check for
 updates, or automatically within a day).
 

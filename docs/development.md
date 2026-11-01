@@ -48,8 +48,7 @@ MEASURE_LABEL=after npm run measure                # accessibility checklist -> 
 
 URL options of the page: `?demo` uses demo data instead of the web host for Dieter's data (the add-on's own screens
 still ask the web host), `?demo=standalone` needs no web host at all: the add-on core runs in the page over sample
-data too (`DemoAddon.kt`; the [demo on GitHub Pages](https://justinneumann.github.io/dieter-addon/), published by
-`.github/workflows/demo.yaml`), `?theme=dark|light` overrides the theme,
+data too (`DemoAddon.kt`), `?theme=dark|light` overrides the theme,
 `?script=tab projects; board Main` replays the app's debug navigation script, `?islands=off` draws mail bodies and
 Markdown files with Compose instead of HTML islands.
 

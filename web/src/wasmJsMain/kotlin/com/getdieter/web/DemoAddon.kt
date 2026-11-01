@@ -31,7 +31,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * The add-on's own features for the standalone demo (`?demo=standalone`, the page on GitHub Pages): the real
+ * The add-on's own features for the standalone demo (`?demo=standalone`): the real
  * [AddonCore], running in the page over [DemoBridge] instead of in the web host. No server is involved.
  */
 class DemoAddon(scope: CoroutineScope, freshDreamfall: Boolean = false) : AddonClient {

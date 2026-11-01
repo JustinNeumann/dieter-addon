@@ -7,13 +7,8 @@ Pi or mini PC, and get a push notification when it needs you or is ready for rev
 
 [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FJustinNeumann%2Fdieter-addon)
 
-**[Try it in your browser](https://justinneumann.github.io/dieter-addon/)**: the add-on's page with sample projects,
-conversations and a Dreamfall board you can pick ideas on — nothing to install, no account.
-
 <p align="center">
-  <a href="https://justinneumann.github.io/dieter-addon/">
-    <img src="docs/screenshots/dreamfall-flow.gif" alt="The Atlas ideas Dreamfall board inside Home Assistant: Enumeration generates ideas, Navigation judges and promotes them, and you pick what moves to Implementation" width="90%">
-  </a>
+  <img src="docs/screenshots/dreamfall-flow.gif" alt="The Atlas ideas Dreamfall board inside Home Assistant: Enumeration generates ideas, Navigation judges and promotes them, and you pick what moves to Implementation" width="90%">
 </p>
 <p align="center">
   <img src="docs/screenshots/phone-board.png" alt="The Navigation stage of the Dreamfall board on a phone, in dark mode with the Dreamfall Pearl palette" width="30%">
@@ -49,7 +44,7 @@ conversations and a Dreamfall board you can pick ideas on — nothing to install
 - Access to a Dieter **gateway**, the one thing outside the add-on: the page, like the Dieter phone apps, signs in to
   one with your GitHub account. The default, `gateway.getdieter.com`, only admits accounts its operator has allowed;
   otherwise [run your own](https://github.com/dbpprt/dieter/blob/main/site/content/docs/gateway.md). See [the page](dieter/DOCS.md#the-page).
-  The [live demo](https://justinneumann.github.io/dieter-addon/) (`…/next/?demo`) shows the page without any of it.
+  `…/next/?demo` shows the page with demo data without any of it.
 - Optional: a GitHub token, so agents can clone, push and open pull requests.
 
 About 800 MB of agent runtime is downloaded on the first start.

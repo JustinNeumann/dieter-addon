@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
  * over a WebSocket at `core` next to this page ([RemoteCore]), and so is the add-on core for the
  * add-on's own features. `?demo` uses [DemoCore] for Dieter's data instead (no account); the add-on's
  * features still come from the web host. `?demo=standalone` needs no web host at all: the add-on core runs in
- * the page over sample data too ([DemoAddon], the demo on GitHub Pages). `?script=tab projects; board Main`
+ * the page over sample data too ([DemoAddon]). `?script=tab projects; board Main`
  * replays the debug navigation script used for screenshots.
  */
 @OptIn(ExperimentalComposeUiApi::class)
