@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # The add-on's Antigravity adapter (host tools over MCP, per-step usage, /compact, lost-conversation
 # recovery, the --effort fix) replaces the fork's; sha256 of the fork's file at DIETER_COMMIT.
 OVERRIDES = {
-    "antigravity-runtime.mjs": "e5284a82635a9ffd8db13ec4827ff290d6809cf8654e77fbe70a875b287068eb",
+    "antigravity-runtime.mjs": "5b963e047a2617b10ff9096bd324bbb62e3b4bb79777c6c3c98352731796839c",
 }
 # The stdio MCP proxy agy launches to reach the host tools of a turn (see antigravity-runtime.mjs).
 ADDITIONS = ["antigravity-host-tools.mjs"]

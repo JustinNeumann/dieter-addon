@@ -85,6 +85,11 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (a scheduled task).
 
+- **2026-10-31**, fork release **`0.6.431-antigravity.11`** (`23f605ef`): `antigravity.10` plus Antigravity parity with
+  Claude Code (MCP host tools proxy `antigravity-host-tools.mjs`, per-step usage, `/compact`, lost-conversation
+  recovery, `agy models` discovery, model `contextWindow` / `defaultEffort` / `efforts`, `invoke_subagent` lifecycle,
+  `board_task_plan` host tool, channel write-scope & `PreToolUse` hook enforcement, and live tool UI summaries).
+  Tarball and harness archive checksums from its `SHA256SUMS`, verified with cosign. Bumped in 0.6.431.36.
 - **2026-10-31**, fork release **`0.6.431-antigravity.10`** (`754e3d1c`): `antigravity.9` plus the daemon's refusal of
   `merge_pr` and `merge_local` from agent turns (PermissionDenied), the conflict banner only while a workspace is
   conflicted, and new tasks starting in a new worktree. Harness runtime sources and both harness archives unchanged;
