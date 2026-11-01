@@ -2,6 +2,20 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.36 (2026-10-31)
+
+- **Antigravity parity with Claude Code (fork `0.6.431-antigravity.11` & `web-addon`):**
+  - **Model discovery & context windows:** the daemon discovers models from `agy models` and `agy --help`, and sets
+    `contextWindow` (`1048576` for Gemini 4 / 3.8, `200000` for Claude 5.5, `131072` for GPT-OSS 120B), `defaultEffort`,
+    and fixed tier `efforts` across all 13 catalog models so the conversation context usage bar renders accurately.
+  - **Subagents & task plans:** `subagents: lifecycle` (`invoke_subagent`) and `task-plan: host-tool` (`board_task_plan`
+    via MCP) are enabled for Antigravity turns.
+  - **Agent Channels:** write-scope detection, commit sweeps, and `dieter channel hook` enforce channel path ownership
+    on Antigravity's `write_file`, `edit_file`, and `run_command` tools (`PreToolUse` hook payload).
+  - **Live activity & channel visuals:** the page shows live activity summaries for `view_file`, `run_command`,
+    `grep_search`, `find_by_name`, `search_web`, `read_url_content`, and `manage_task`, and gives Antigravity its own
+    channel avatar badge.
+
 ## 0.6.431.35 (2026-10-31)
 
 - **Fix: the Inbox's filters wrapped onto a second line.** In a narrow list pane (an iPad or Android tablet in

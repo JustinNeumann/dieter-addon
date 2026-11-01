@@ -10,9 +10,9 @@ ARG BUILD_ARCH
 # The harness runtime *sources* (runner.mjs + adapters) are taken from the same tag's source tree and
 # checked against RUNTIME_SOURCES_SHA (sha256 of the `sha256sum` lines of the LC_ALL=C-sorted files); the operator lays
 # them over the release's node_modules archive at start (its checksums: host/…/operator/Harness.kt). Node checksums: nodejs.org/dist/vX/SHASUMS256.txt.
-ARG DIETER_VERSION=0.6.431-antigravity.10
-ARG DIETER_COMMIT=754e3d1c5861a07faedd92094fbb02163ffd70d6
-ARG RUNTIME_SOURCES_SHA=b957b32d519e1b0adc9183d6b5283d9cbd95beba7e876edb1117bf582ae9a496
+ARG DIETER_VERSION=0.6.431-antigravity.11
+ARG DIETER_COMMIT=23f605efbf07d0de3cd441b3e4e783c5ce3a8b97
+ARG RUNTIME_SOURCES_SHA=ec239dd57f74f7de65cc3bba7459905a15b6d4230eecca61f2d5dccf4b50092a
 ARG NODE_VERSION=22.23.4
 
 # glibc base (musl breaks the OMP harness; trixie for Python 3.13, which hass-cli needs); git, tmux and
@@ -25,9 +25,9 @@ RUN apt-get update \
 
 RUN set -eu; \
     case "${BUILD_ARCH}" in \
-      aarch64) D=arm64; DSHA=a561bb207d2573f9e5779a9b91489ee42b54b20d0aeeb05b67abf539c2322cab; \
+      aarch64) D=arm64; DSHA=f45ed1b7fbc865201afe5b15b6b83d1dff3fdbf7a29e37df77bc38c6a81b7519; \
                N=arm64; NSHA=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b ;; \
-      amd64)   D=amd64; DSHA=51a88676554e9446da3c505cf916a12baf470cbfc80967c279cfeebf1fad1e67; \
+      amd64)   D=amd64; DSHA=9038af38c1a84ac3b05fa319ae84e10c02456ebbb1252a75c58cd2a9b4e0af39; \
                N=x64;   NSHA=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce ;; \
       *) echo "unsupported BUILD_ARCH ${BUILD_ARCH}" >&2; exit 1 ;; \
     esac; \

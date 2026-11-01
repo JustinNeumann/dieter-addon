@@ -149,8 +149,8 @@ class Harness(
         const val REPO = "JustinNeumann/dieter"
         /** The archives of the fork release in the Dockerfile's DIETER_VERSION (its SHA256SUMS); see docs/maintaining.md. */
         val SHA256 = mapOf(
-            "aarch64" to "df1c91d3fd562294e1911146994ba96f8dd0c1fdccdbfd3bbdc460b91fb5688b",
-            "x86_64" to "0597dbc83fabe1e747f73314274b8af29c7a7504370bba499d96460d6d15be4c",
+            "aarch64" to "b132fc5e7e521347f2754f9acb713241c13a7a3b56cdb8d1e52dd8d5c5ea260b",
+            "x86_64" to "1a9899c23c987371660cb81c6deae2aa26bc365c3f7a9453868f3e9df5a04746",
         )
         val ASSET = mapOf("aarch64" to "dieter-harness-runtime-linux-arm64.tar.gz", "x86_64" to "dieter-harness-runtime-linux-amd64.tar.gz")
 
