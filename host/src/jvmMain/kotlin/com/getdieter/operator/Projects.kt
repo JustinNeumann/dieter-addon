@@ -57,6 +57,21 @@ class Projects(
         return register(path, name, emptyList(), "folder ")
     }
 
+    /** Registers any existing git repositories in [dir] that the current daemon replica does not yet know. */
+    fun adoptExisting() {
+        val folders = dir.listFiles()?.filter { it.isDirectory && NAME.matches(it.name) && it.resolve(".git").isDirectory }.orEmpty()
+        if (folders.isEmpty()) return
+        val known = runCatching {
+            dieter.run("project", "list", "--format", "json", timeout = 20.seconds).unwrap("projects").associateBy { it.str("path") }
+        }.getOrDefault(emptyMap())
+        for (folder in folders.sortedBy { it.name }) {
+            if (folder.path !in known) {
+                runCatching { register(folder, folder.name, emptyList(), "existing ") }
+                    .onFailure { Log.line("projects: ${folder.name}: ${it.message}") }
+            }
+        }
+    }
+
     /** The daemon's project at [path], created when it has none; `existed` tells which. */
     private fun register(path: File, name: String, extra: List<String>, what: String): JsonObject {
         val known = dieter.run("project", "list", "--format", "json", timeout = 20.seconds).unwrap("projects").associateBy { it.str("path") }

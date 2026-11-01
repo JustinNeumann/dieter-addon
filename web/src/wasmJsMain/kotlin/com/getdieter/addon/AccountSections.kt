@@ -45,6 +45,7 @@ internal fun GatewaySection(store: MobileStore) {
                         g.title,
                         position = position,
                         subtitle = g.detail,
+                        subtitleMaxLines = 3,
                         glyph = Glyph.GLOBE,
                         tile = toneColor(g.tone),
                         trailing = {

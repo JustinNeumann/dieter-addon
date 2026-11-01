@@ -190,4 +190,63 @@ class AccessTest {
         assertEquals(2, restarts)
         assertNull(enrollment.status().text("url"))
     }
+
+    @Test
+    fun gatewayModeDefaultsToEmbeddedAndSwitchesTwoWaysWithoutLosingState() {
+        val store = File(home, "mode-store")
+        assertEquals("embedded", GatewayMode.of(json("""{}""")))
+        assertEquals("embedded", GatewayMode.of(json("""{"gateway_mode": "embedded", "gateway_url": "https://gw.example"}""")))
+        assertEquals("external", GatewayMode.of(json("""{"gateway_mode": "external"}""")))
+        assertEquals("external", GatewayMode.of(json("""{"gateway_url": "https://gw.example"}""")))
+
+        // Populate embedded state
+        GatewayMode.switchTo(store, "embedded")
+        File(store, "daemon").mkdirs()
+        File(store, "peers").mkdirs()
+        File(store, "checkouts").mkdirs()
+        File(store, "daemon/identity.json").writeText("""{"id":"d_emb","gatewayUrl":"http://127.0.0.1:4243"}""")
+        File(store, "daemon/identity-key.pem").writeText("emb-key")
+        File(store, "daemon/roster.pb").writeText("emb-roster")
+        File(store, "daemon/trust.json").writeText("""{"syncedAt":"2026-11-01T00:00:00Z"}""")
+        File(store, "peers/identity.json").writeText("""{"account":"emb-acc","daemonId":"d_emb"}""")
+        File(store, "checkouts/c1.json").writeText("""{"projectId":"p_emb"}""")
+
+        // Switch to external: embedded files are archived and active store is clean for external enrollment
+        assertTrue(GatewayMode.switchTo(store, "external"))
+        assertTrue(!File(store, "daemon/identity.json").exists())
+        assertTrue(!File(store, "checkouts/c1.json").exists())
+        File(store, "daemon").mkdirs()
+        File(store, "peers").mkdirs()
+        File(store, "checkouts").mkdirs()
+        File(store, "daemon/identity.json").writeText("""{"id":"d_ext","gatewayUrl":"https://gw.example:4443"}""")
+        File(store, "peers/identity.json").writeText("""{"account":"ext-acc","daemonId":"d_ext"}""")
+        File(store, "checkouts/c1.json").writeText("""{"projectId":"p_ext"}""")
+
+        // Switch back to embedded: embedded files are restored, external files are archived
+        assertTrue(GatewayMode.switchTo(store, "embedded"))
+        assertTrue(File(store, "daemon/identity.json").readText().contains("d_emb"))
+        assertTrue(File(store, "peers/identity.json").readText().contains("emb-acc"))
+        assertTrue(File(store, "checkouts/c1.json").readText().contains("p_emb"))
+
+        // Switch to external again: external files are restored intact
+        assertTrue(GatewayMode.switchTo(store, "external"))
+        assertTrue(File(store, "daemon/identity.json").readText().contains("d_ext"))
+        assertTrue(File(store, "peers/identity.json").readText().contains("ext-acc"))
+        assertTrue(File(store, "checkouts/c1.json").readText().contains("p_ext"))
+    }
+
+    @Test
+    fun embeddedModeApprovesLocalPairingAndRefusesManualEnrollOrUnenroll() {
+        val cli = Cli()
+        val options = json("""{"gateway_mode": "embedded", "machine_name": "Home Assistant"}""")
+        val enrollment = Enrollment("/bin/false", File(home, "emb-store"), home, cli, { options }, {})
+        assertEquals("embedded", enrollment.gateway().text("mode"))
+        assertFailsWith<CliError> { enrollment.enroll(json("""{"url": "https://gw.example:4443"}""")) }
+        assertFailsWith<CliError> { enrollment.unenroll() }
+        assertEquals(true, enrollment.approveEmbedded("ABCD-EFGH-JKMN-PQRS")["ok"]!!.jsonPrimitive.boolean)
+        assertEquals(
+            listOf("--store", File(home, "emb-store").path, "device", "approve", "--format", "json", "ABCD-EFGH-JKMN-PQRS"),
+            cli.calls.last(),
+        )
+    }
 }

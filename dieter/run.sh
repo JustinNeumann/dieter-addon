@@ -12,7 +12,11 @@ export BRIDGE_LOG_LEVEL="$(bashio::config 'log_level' 'info')"
 # A Dieter gateway on a name this container cannot resolve (e.g. a Tailscale host) gets a hosts entry:
 # gateway_host_ip pins the host of gateway_url; the TLS certificate is still verified against the name.
 # (read with jq: bashio::config asks the Supervisor for a key the options file lacks, which has no answer outside HA)
+GW_MODE="$(jq -r '.gateway_mode // ""' /data/options.json 2>/dev/null || true)"
 GW_URL="$(jq -r '.gateway_url // ""' /data/options.json 2>/dev/null || true)"; GW_IP="$(jq -r '.gateway_host_ip // ""' /data/options.json 2>/dev/null || true)"
+if [ "${GW_MODE}" != "embedded" ] && [ "${GW_MODE}" != "external" ]; then
+  if [ -n "${GW_URL}" ]; then GW_MODE="external"; else GW_MODE="embedded"; fi
+fi
 if [ -n "${GW_URL}" ] && [ -n "${GW_IP}" ]; then
   GW_HOST="$(printf '%s' "${GW_URL}" | sed -E 's#^[a-z]+://##; s#[:/].*$##')"
   if [ -n "${GW_HOST}" ] && ! grep -q " ${GW_HOST}$" /etc/hosts; then
@@ -25,7 +29,7 @@ if [ ! -f /data/.owned-by-dieter ]; then
   bashio::log.info "handing /data to the dieter user…"
   chown -R dieter:dieter /data && touch /data/.owned-by-dieter
 fi
-chown dieter:dieter /data 2>/dev/null || true
+chown dieter:dieter /data "${DIETER_HOME}" /data/projects 2>/dev/null || true
 # The add-on's options: the operator reads a copy without the API key (it shares its user with the agents); the
 # original, which the Supervisor rewrites at every start, stays root's. The key goes to the web host only, never
 # into an exported variable (the operator's children, the daemon and the agents, inherit those).
@@ -46,7 +50,33 @@ operator_env=(-u SUPERVISOR_TOKEN -u HASSIO_TOKEN)
 [ "$(jq -r '.agents_home_assistant // false' /data/options.json 2>/dev/null)" = true ] && operator_env=()
 ha_relay="" ha_agents=""
 [ -n "${SUPERVISOR_TOKEN:-}" ] && ha_relay="http://127.0.0.1:8097" ha_agents="http://127.0.0.1:8098"
-bashio::log.info "Dieter $(dieter --version) · node $(node --version) · Ingress on :${BRIDGE_PORT:-8099} · store ${DIETER_HOME} · user dieter"
+bashio::log.info "Dieter $(dieter --version) · node $(node --version) · gateway ${GW_MODE} · Ingress on :${BRIDGE_PORT:-8099} · store ${DIETER_HOME} · user dieter"
+
+# In embedded gateway mode (default), start the local loopback gateway as user dieter-web so the add-on works
+# standalone out of the box without an external gateway or GitHub OAuth app.
+GW_ADDR="${DIETER_GATEWAY_ADDR:-127.0.0.1:4243}"
+EMBEDDED_GW_URL="http://${GW_ADDR}"
+WEB_HOST_STATE=/data/web-host
+EMBEDDED_BOOTSTRAP=""
+if [ "${GW_MODE}" = "embedded" ]; then
+  install -d -o dieter-web -g dieter-web -m 700 /data/gateway
+  chown -R dieter-web:dieter-web /data/gateway
+  WEB_HOST_STATE=/data/web-host/embedded
+  EMBEDDED_BOOTSTRAP=/data/gateway/bootstrap.json
+  (
+    while true; do
+      setpriv --reuid=dieter-web --regid=dieter-web --init-groups \
+        env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/data/gateway LANG=C.UTF-8 TZ="${TZ:-}" \
+        /usr/local/bin/dieter-gateway -store /data/gateway -addr "${GW_ADDR}" || true
+      bashio::log.warning "embedded gateway exited; restarting in 2 s"
+      sleep 2
+    done
+  ) &
+  for _ in $(seq 1 50); do
+    [ -f /data/gateway/bootstrap.json ] && curl -sf "${EMBEDDED_GW_URL}/healthz" >/dev/null 2>&1 && break
+    sleep 0.1
+  done
+fi
 
 # The operator: the add-on's API in Kotlin (same jar as the web host): the daemon, the board's state and its events
 # stream, the cards, Dreamfall, the settings, on loopback (127.0.0.1:8096). It runs as the dieter user, the daemon's
@@ -57,6 +87,7 @@ bashio::log.info "Dieter $(dieter --version) · node $(node --version) · Ingres
   while true; do
     setpriv --reuid=dieter --regid=dieter --init-groups env "${operator_env[@]}" HOME=/data USER=dieter LOGNAME=dieter \
       DIETER_OPTIONS_FILE=/data/.operator-options.json DIETER_OPERATOR_TRUSTED_UIDS="0,$(id -u dieter-web)" \
+      DIETER_EMBEDDED_GATEWAY_URL="${EMBEDDED_GW_URL}" \
       DIETER_HA_RELAY_URL="${ha_relay}" DIETER_HA_AGENT_URL="${ha_agents}" \
       java -XX:+UseSerialGC -Xms16m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=24m \
         -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError -Djava.net.preferIPv4Stack=true \
@@ -71,13 +102,15 @@ bashio::log.info "Dieter $(dieter --version) · node $(node --version) · Ingres
 # (user dieter) can neither read the session nor reach it. It answers Ingress (172.30.32.2) in full, Home Assistant
 # (172.30.32.1) or a caller with the API key on Home Assistant's routes only, and nobody else: not other add-ons,
 # not the agents on loopback. This loop keeps the add-on running.
-install -d -o dieter-web -g dieter-web -m 700 /data/web-host
+install -d -o dieter-web -g dieter-web -m 700 /data/web-host "${WEB_HOST_STATE}"
 chown -R dieter-web:dieter-web /data/web-host
 WEB_CALLBACK="$(jq -r '.web_sign_in_callback // ""' /data/options.json 2>/dev/null || true)"
 while true; do
   setpriv --reuid=dieter-web --regid=dieter-web --init-groups \
     env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/data/web-host LANG=C.UTF-8 TZ="${TZ:-}" \
-      DIETER_WEB_HOST_STATE=/data/web-host \
+      DIETER_WEB_HOST_STATE="${WEB_HOST_STATE}" \
+      DIETER_GATEWAY_MODE="${GW_MODE}" \
+      DIETER_EMBEDDED_BOOTSTRAP="${EMBEDDED_BOOTSTRAP}" \
       BRIDGE_PORT="${BRIDGE_PORT:-8099}" BRIDGE_INGRESS_NETS="${BRIDGE_INGRESS_NETS:-}" \
       BRIDGE_CORE_NETS="${BRIDGE_CORE_NETS:-}" BRIDGE_API_KEY="${api_key}" \
       SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-}" DIETER_HA_RELAY_ADDR=127.0.0.1:8097 DIETER_HA_AGENT_ADDR=127.0.0.1:8098 \

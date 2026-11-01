@@ -2,6 +2,22 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.39 (2026-11-01)
+
+- **Embedded standalone gateway (`gateway_mode: embedded` by default), switchable two ways (`embedded` ↔ `external`).**
+  - **Standalone out of the box (`embedded`):** the add-on now bundles `dieter-gateway` and runs it on loopback
+    (`127.0.0.1:4243`, state in `/data/gateway`, owned by `dieter-web`). Before the daemon starts, the operator
+    automatically enrolls `/data/dieter` with the embedded gateway, binds its peer store, and initializes the device
+    roster; the web host adopts a pre-seeded local session and pairs its device automatically via the operator. Opening
+    the add-on in Home Assistant Ingress goes straight to the board without needing an external gateway server, TLS
+    certificates, or a GitHub OAuth app.
+  - **Two-way switchable (`embedded` ↔ `external`):** set `gateway_mode` in the add-on configuration to `external` to
+    connect the web host and daemon to a remote Dieter gateway (`gateway_url`) shared with mobile/desktop apps, or back
+    to `embedded` for standalone operation. Switching modes preserves each mode's daemon identity, device roster, peer
+    binding, and checkouts under `/data/dieter/gateway-modes/<mode>/` (and the web host's state under `/data/web-host/`
+    vs `/data/web-host/embedded/`), and automatically adopts existing `/data/projects/*` repositories in the active
+    mode's replica.
+
 ## 0.6.431.38 (2026-11-01)
 
 - **Mount `/share` (`share:rw`) and include `rsync`.** The add-on now maps Home Assistant's `/share` directory

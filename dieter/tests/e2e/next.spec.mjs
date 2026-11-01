@@ -179,6 +179,8 @@ test("agents cannot use the web host: private state, another user's process, its
   const sh = (cmd, user = "dieter") => execFileSync("docker", ["exec", "-u", user, "dieter-e2e", "sh", "-c", cmd], { stdio: "pipe" }).toString().trim();
   expect(sh("ls /data/web-host >/dev/null 2>&1 && echo readable || echo denied")).toBe("denied");
   expect(sh("stat -c '%U %a' /data/web-host")).toBe("dieter-web 700");
+  expect(sh("ls /data/gateway >/dev/null 2>&1 && echo readable || echo denied")).toBe("denied");
+  expect(sh("stat -c '%U %a' /data/gateway")).toBe("dieter-web 700");
   const host = sh("ps -o user:20=,rss=,args= -C java", "root");
   expect(host).toMatch(/^dieter-web\s+\d+\s+java .*dieter-web-host\.jar/m);
   const pid = sh("pgrep -u dieter-web -f dieter-web-host.jar", "root");

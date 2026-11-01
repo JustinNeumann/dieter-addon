@@ -52,7 +52,7 @@ fun main() {
         else runCatching { Json.parseToJsonElement(optionsFile.readText()) as? JsonObject }.getOrNull() ?: JsonObject(emptyMap())
     }
     val projects = Projects(dieter, File(env["DIETER_PROJECTS_DIR"] ?: "/data/projects"), options)
-    val supervision = options()?.let { Supervision(it, env, home) }
+    val supervision = options()?.let { Supervision(it, env, home, options) }
     val access = supervision?.let { s ->
         val restart = { s.daemon.restart(); Unit }
         Access(
@@ -122,10 +122,16 @@ private fun setupProjects(projects: Projects, options: JsonObject?) {
             Log.line("projects: ${p.field("name").ifEmpty { p.field("git_url") }}: ${e.message}")
         }
     }
+    projects.adoptExisting()
 }
 
 /** The add-on's start: the setup the options ask for, the harness runtime, then the daemon for good. */
-class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
+class Supervision(
+    options: JsonObject,
+    env: Map<String, String>,
+    home: File,
+    private val optionsProvider: () -> JsonObject? = { options },
+) {
     val userHome = File(env["HOME"] ?: "/data")
     val ssh = Ssh(userHome)
     private val setup = Setup(options, userHome, env["SUPERVISOR_TOKEN"], agentRelay = !env["DIETER_HA_AGENT_URL"].isNullOrBlank())
@@ -141,7 +147,10 @@ class Supervision(options: JsonObject, env: Map<String, String>, home: File) {
                 if (setup.envFile.exists()) listOf("--env-file", setup.envFile.path) else emptyList()
         },
         environment = { daemonEnvironment(env, harness?.runtimeDir, setup.envFileVariables()) },
-        beforeStart = setup::writeEnvFile,
+        beforeStart = {
+            setup.writeEnvFile()
+            GatewayMode.prepareDaemon(home, optionsProvider() ?: options, env)
+        },
     )
 
     fun run() {
@@ -219,6 +228,7 @@ fun routes(
         Thread.ofVirtual().start {
             Thread.sleep(3000)
             Board.waitHealthy(dieter, 180_000)
+            projects.adoptExisting()
             board.pollSlow()
             board.refresh()
         }
@@ -347,6 +357,7 @@ fun routes(
         .post("gateway/enroll") { enrollment.enroll(it.body) }
         .post("gateway/enroll/cancel") { enrollment.cancel(); ok }
         .post("gateway/unenroll") { enrollment.unenroll().also { afterRestart(probe = false) } }
+        .post("gateway/embedded-trust") { enrollment.approveEmbedded(it.text("pairing_code")) }
 }
 
 /** `/api/events?fields=`: the keys a subscriber asks for. */

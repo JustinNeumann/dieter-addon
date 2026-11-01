@@ -50,6 +50,8 @@ class Enrollment(
 
     /** Starts `dieter daemon enroll` for {url, name} (else the options'); the status once the URL is printed (≤ 25 s). */
     fun enroll(body: JsonObject): JsonObject {
+        if (GatewayMode.of(options()) == GatewayMode.EMBEDDED)
+            throw CliError("set gateway_mode to external in the add-on configuration to enroll with an external gateway")
         val target = (body.text("url")?.ifBlank { null } ?: option("gateway_url")).trim().trimEnd('/')
         val name = (body.text("name")?.ifBlank { null } ?: option("machine_name")).trim().replace(Regex("[^A-Za-z0-9 ._-]"), "").take(40).ifEmpty { "home-assistant" }
         if (!GATEWAY.matches(target)) throw CliError("the gateway must be an https origin such as https://gateway.example.net:4443")
@@ -108,6 +110,8 @@ class Enrollment(
      * roster, so it cannot be approved again); the next enrollment makes a new key. Projects stay.
      */
     fun unenroll(): JsonObject {
+        if (GatewayMode.of(options()) == GatewayMode.EMBEDDED)
+            throw CliError("set gateway_mode to external in the add-on configuration to unenroll from an external gateway")
         synchronized(lock) { if (process != null && done == null) throw CliError("an enrollment is in progress") }
         dieter.run(listOf("--store", store.path, "daemon", "unenroll"), 60.seconds)
         url = null; code = null; output = ""; done = null
@@ -116,9 +120,15 @@ class Enrollment(
         return buildJsonObject { put("ok", true) }
     }
 
+    /** Approves the local web host's pairing request in `embedded` gateway mode. */
+    fun approveEmbedded(pairingCode: String): JsonObject =
+        GatewayMode.approveEmbeddedClient(dieter, store, options(), pairingCode)
+
     /** The enrollment as `dieter daemon status` and `device status` report it, with the options and [status]. */
     fun gateway(): JsonObject {
+        val mode = GatewayMode.of(options())
         val out = linkedMapOf<String, JsonElement>(
+            "mode" to JsonPrimitive(mode),
             "option_url" to JsonPrimitive(option("gateway_url").trim()),
             "host_ip" to JsonPrimitive(option("gateway_host_ip").trim()),
             "name" to JsonPrimitive(option("machine_name").trim().ifEmpty { "home-assistant" }),

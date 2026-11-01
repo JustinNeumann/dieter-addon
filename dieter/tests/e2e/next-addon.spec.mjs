@@ -67,19 +67,46 @@ test("Settings: the add-on's SSH key, and the connection test reports a failure 
   await expect.poll(() => aria(page), { timeout: 40_000 }).toMatch(/Failed:/);
 });
 
-test("Devices: the add-on offers enrollment with the gateway; an unreachable gateway is reported, Close puts it away", async ({ page, request }) => {
+test("Devices: embedded gateway is active by default, and switching to external mode offers enrollment with a remote gateway", async ({ page, request }) => {
+  await expect.poll(async () => {
+    const gw = await (await request.get("api/gateway")).json();
+    return `${gw.mode}:${gw.enrolled}:${gw.state}:${gw.trust}`;
+  }, { timeout: 30_000 }).toBe("embedded:true:connected:TRUSTED");
   await openDevices(page);
-  // the add-on core's rule: an https origin (with a port of 2 to 5 digits)
-  await typeInto(page, page.getByRole("textbox", { name: "Gateway address" }), "https://127.0.0.1:1");
-  await expect.poll(() => aria(page)).toContain("The gateway must be an https origin");
-  await typeInto(page, page.getByRole("textbox", { name: "Gateway address" }), "https://127.0.0.1:19");
-  await tap(page, page.getByRole("button", { name: "Enroll", exact: true }));
-  await expect.poll(() => aria(page), { timeout: 60_000 }).toMatch(/Enroll with the gateway[\s\S]*(refused|connect|enroll)[\s\S]*button "Close"/i);
-  await tap(page, page.getByRole("button", { name: "Close", exact: true }));
-  expect((await (await request.get("api/gateway")).json()).enrolled).toBe(false);
-  await open(page, "script=more%20devices");
-  await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Gateway of this add-on");
-  expect(await aria(page)).not.toContain("Enroll with the gateway"); // the attempt was put away
+  await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("(embedded gateway)");
+  expect(await aria(page)).toContain("Standalone mode");
+
+  // Switch options to external mode and restart the daemon: the add-on switches store state and offers remote enrollment
+  const setMode = (mode) => execFileSync("docker", ["exec", "-u", "root", "dieter-e2e", "sh", "-c",
+    `jq '.gateway_mode = "${mode}"' /data/.operator-options.json > /data/.operator-options.json.tmp && chown dieter:dieter /data/.operator-options.json.tmp && mv /data/.operator-options.json.tmp /data/.operator-options.json`]);
+  setMode("external");
+  try {
+    await request.post("api/daemon/restart");
+    await expect.poll(async () => {
+      const gw = await (await request.get("api/gateway")).json();
+      return `${gw.mode}:${gw.enrolled}`;
+    }, { timeout: 30_000 }).toBe("external:false");
+
+    await openDevices(page);
+    // the add-on core's rule: an https origin (with a port of 2 to 5 digits)
+    await typeInto(page, page.getByRole("textbox", { name: "Gateway address" }), "https://127.0.0.1:1");
+    await expect.poll(() => aria(page)).toContain("The gateway must be an https origin");
+    await typeInto(page, page.getByRole("textbox", { name: "Gateway address" }), "https://127.0.0.1:19");
+    await tap(page, page.getByRole("button", { name: "Enroll", exact: true }));
+    await expect.poll(() => aria(page), { timeout: 60_000 }).toMatch(/Enroll with the gateway[\s\S]*(refused|connect|enroll)[\s\S]*button "Close"/i);
+    await tap(page, page.getByRole("button", { name: "Close", exact: true }));
+    expect((await (await request.get("api/gateway")).json()).enrolled).toBe(false);
+    await open(page, "script=more%20devices");
+    await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Gateway of this add-on");
+    expect(await aria(page)).not.toContain("Enroll with the gateway"); // the attempt was put away
+  } finally {
+    setMode("embedded");
+    await request.post("api/daemon/restart");
+    await expect.poll(async () => {
+      const gw = await (await request.get("api/gateway")).json();
+      return `${gw.mode}:${gw.enrolled}:${gw.state}:${gw.trust}`;
+    }, { timeout: 30_000 }).toBe("embedded:true:connected:TRUSTED");
+  }
 });
 
 test("Usage: Claude sign-in opens claude.com, Cancel aborts, a wrong code shows an error", async ({ page, request }) => {

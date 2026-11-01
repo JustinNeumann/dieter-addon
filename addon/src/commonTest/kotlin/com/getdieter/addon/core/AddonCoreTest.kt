@@ -152,6 +152,22 @@ class AddonCoreTest {
     }
 
     @Test
+    fun embeddedGatewayShowsStandaloneStatusAndDevicesAction() = runTest {
+        bridge.answer(
+            "GET gateway",
+            """{"mode":"embedded","enrolled":true,"daemon_name":"home-assistant","url":"http://127.0.0.1:4243","state":"connected","trust":"TRUSTED","name":"home-assistant","enroll":{"running":false}}""",
+        )
+        val core = core()
+        val row = watch(core, Slice.SLICE_GATEWAY).last().gateway!!
+        assertTrue(row.enrolled)
+        assertEquals("home-assistant (embedded gateway)", row.title)
+        assertTrue(row.detail.contains("Standalone mode · connected"))
+        assertEquals(Tone.TONE_SUCCESS, row.tone)
+        assertEquals(GatewaySlice.Action.ACTION_DEVICES, row.action)
+        assertTrue(row.gateway_url_locked)
+    }
+
+    @Test
     fun theSshTestReportsTheOutcomeOnThePage() = runTest {
         bridge.answer("GET ssh", """{"public_key":"ssh-ed25519 AAAA dieter@ha","fingerprint":"SHA256:x"}""")
         bridge.answer("POST ssh/test", """{"ok":false,"error":"Connection refused"}""")

@@ -122,6 +122,11 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: fork/go.mod
+          cache-dependency-path: fork/go.sum
+
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build the page and the web host, test the web host and the add-on core
@@ -138,7 +143,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: web-dist
-          path: dieter/web-dist/dieter-web*
+          path: dieter/web-dist/dieter-*
 
   browser-tests:
     # Selection, find, HTML islands, keyboard and the add-on's screens (tests/, Playwright) against the packed page.

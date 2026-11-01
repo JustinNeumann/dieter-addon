@@ -347,6 +347,7 @@ class AddonCore(
             gateway.value = GatewaySlice(loading = gatewayError.isEmpty(), error = gatewayError, enrollment = enrollment)
             return
         }
+        val embedded = g.str("mode") == "embedded" || g.str("url").startsWith("http://127.0.0.1:")
         val enrolled = g.bool("enrolled")
         val state = g.str("state")
         val lastError = g.str("last_error")
@@ -354,21 +355,35 @@ class AddonCore(
         gateway.value =
             GatewaySlice(
                 error = gatewayError,
-                enrolled = enrolled,
-                title = if (enrolled) g.str("daemon_name").ifEmpty { "Enrolled" } else "",
+                enrolled = enrolled || embedded,
+                title =
+                    when {
+                        embedded -> g.str("daemon_name").ifEmpty { g.str("name").ifEmpty { "Home Assistant" } } + " (embedded gateway)"
+                        enrolled -> g.str("daemon_name").ifEmpty { "Enrolled" }
+                        else -> ""
+                    },
                 detail =
-                    if (!enrolled) ""
-                    else listOf(g.str("url"), state + if (lastError.isEmpty()) "" else ": $lastError").filter { it.isNotBlank() }.joinToString(" · "),
+                    when {
+                        embedded ->
+                            listOf(
+                                "Standalone mode",
+                                (state.ifEmpty { "connecting" }) + if (lastError.isEmpty()) "" else ": $lastError",
+                                "Switch gateway_mode to external in the add-on options to use a remote gateway.",
+                            ).joinToString(" · ")
+                        !enrolled -> ""
+                        else -> listOf(g.str("url"), state + if (lastError.isEmpty()) "" else ": $lastError").filter { it.isNotBlank() }.joinToString(" · ")
+                    },
                 tone = if (!enrolled) Tone.TONE_NEUTRAL else if (state == "connected") Tone.TONE_SUCCESS else Tone.TONE_WARNING,
                 action =
                     when {
+                        embedded -> if (enrolled) GatewaySlice.Action.ACTION_DEVICES else GatewaySlice.Action.ACTION_NONE
                         !enrolled -> GatewaySlice.Action.ACTION_NONE
                         trust == "REVOKED" || trust == "CONFLICT" -> GatewaySlice.Action.ACTION_REENROLL
                         else -> GatewaySlice.Action.ACTION_DEVICES
                     },
                 machine_name = g.str("name"),
                 gateway_url = g.str("option_url"),
-                gateway_url_locked = g.str("option_url").isNotEmpty(),
+                gateway_url_locked = embedded || g.str("option_url").isNotEmpty(),
                 enrollment = enrollment,
             )
     }

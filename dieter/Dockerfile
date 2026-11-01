@@ -159,13 +159,21 @@ RUN set -eu; \
 ARG DIETER_WEB=built
 COPY web-dist/ /tmp/web-dist/
 RUN set -eu; \
+    case "${BUILD_ARCH}" in \
+      aarch64) GWA=arm64 ;; \
+      amd64)   GWA=amd64 ;; \
+      *) echo "unsupported BUILD_ARCH ${BUILD_ARCH}" >&2; exit 1 ;; \
+    esac; \
     mkdir -p /opt/web /opt/web-host; \
-    if [ -f /tmp/web-dist/dieter-web.tar.gz ] && [ -f /tmp/web-dist/dieter-web-host.jar ]; then \
+    if [ -f "/tmp/web-dist/dieter-gateway-${GWA}" ]; then \
+      install -m 755 "/tmp/web-dist/dieter-gateway-${GWA}" /usr/local/bin/dieter-gateway; \
+    fi; \
+    if [ -f /tmp/web-dist/dieter-web.tar.gz ] && [ -f /tmp/web-dist/dieter-web-host.jar ] && [ -x /usr/local/bin/dieter-gateway ]; then \
       tar -xzf /tmp/web-dist/dieter-web.tar.gz -C /opt/web --strip-components=1 --no-same-owner; \
       cp /tmp/web-dist/dieter-web-host.jar /opt/web-host/dieter-web-host.jar; \
       test -f /opt/web/index.html && cat /opt/web/BUILD.json; \
     elif [ "${DIETER_WEB}" = mounted ]; then echo "page and web host left out (DIETER_WEB=mounted)"; \
-    else echo "web-dist/ has no page or web host: run tools/addon-dist.sh first" >&2; exit 1; fi; \
+    else echo "web-dist/ has no page, web host or gateway: run tools/addon-dist.sh first" >&2; exit 1; fi; \
     rm -rf /tmp/web-dist
 
 # the fork release this image carries: the operator stages its harness runtime (harness-staged/<version>)
