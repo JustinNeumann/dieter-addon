@@ -4,7 +4,7 @@
 # installs (the Supervisor pulls image:<version> built by .github/workflows/builder.yaml). For a local
 # build on the device (docs/maintaining.md) drop the image: line, otherwise the Supervisor pulls instead of building.
 name: Dieter
-version: "0.6.431.37"
+version: "0.6.431.38"
 slug: dieter
 description: Dieter coding agents (daemon + page) behind Home Assistant Ingress
 url: https://github.com/JustinNeumann/dieter-addon
@@ -15,6 +15,8 @@ arch:
 init: false
 startup: services
 boot: auto
+map:
+  - share:rw
 ingress: true
 ingress_port: 8099
 ingress_stream: true

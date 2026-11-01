@@ -20,7 +20,7 @@ ARG NODE_VERSION=22.23.4
 # with the add-on's key (/data/.ssh), python3-venv for hass-cli; the GitHub CLI (below) for the daemon's
 # pull-request operations and the agents
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git tmux python3 python3-venv xz-utils procps openssh-client \
+    && apt-get install -y --no-install-recommends git tmux python3 python3-venv xz-utils procps openssh-client rsync \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eu; \

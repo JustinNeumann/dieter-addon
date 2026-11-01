@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.38 (2026-11-01)
+
+- **Mount `/share` (`share:rw`) and include `rsync`.** The add-on now maps Home Assistant's `/share` directory
+  read-write into the container (for example `/share/dieter-desk` mounted over NFS from `dieter-desk@192.168.68.107`),
+  includes `rsync` in the image, and marks `safe.directory = *` in global Git config so agents can sync and inspect
+  repositories on network shares owned by another UID without slow SSH/SCP transfers.
+
 ## 0.6.431.37 (2026-11-01)
 
 - **Fix: every changed file in Changes showed `+0 −0`.** The daemon's `GetChangeset` reads `git status
