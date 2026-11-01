@@ -43,7 +43,8 @@ fun main() {
     val dieter = ProcessDieter(bin)
     val home = File(env["DIETER_HOME"] ?: "/data/dieter")
     val ha = HomeAssistant.of(env)
-    val settings = Settings(File(env["BRIDGE_SETTINGS_FILE"] ?: "/data/bridge_settings.json"), OllamaEntity(ha)) {
+    val ollama = OllamaEntity(ha)
+    val settings = Settings(File(env["BRIDGE_SETTINGS_FILE"] ?: "/data/bridge_settings.json"), ollama) {
         Settings.localDaemonId(home)
     }
     val optionsFile = File(env["DIETER_OPTIONS_FILE"] ?: "/data/options.json")
@@ -62,7 +63,6 @@ fun main() {
         )
     }
     val uploads = Uploads(File(home, "uploads"))
-    val titles = Titles(dieter, ha, settings::titleEntity)
     // the work folders of finished worktree cards, in the add-on only (the daemon never removes them)
     val housekeeping = supervision?.let {
         val dreamfall = Dreamfall(dieter)
@@ -87,6 +87,12 @@ fun main() {
         },
         usage = usage,
         claudeAuth = access?.claude?.let { c -> c::auth },
+    )
+    val titles = Titles(
+        dieter, ha,
+        onFailure = ollama::forget,
+        onRenamed = { id, title -> board.patch(id, "title" to title) },
+        entity = settings::titleEntity,
     )
     val cards = Cards(dieter, board, Dreamfall(dieter), titles, { settings.view()["titles_daemon_id"].truthy() }, home, addon = supervision != null)
     val server = OperatorServer(

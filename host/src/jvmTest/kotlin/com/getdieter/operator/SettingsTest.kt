@@ -117,5 +117,13 @@ class SettingsTest {
         assertEquals("No AI Task entity of the Ollama integration found; OpenAI titles instead", v["title_models"]!!.jsonArray[1].jsonObject["detail"]!!.jsonPrimitive.content)
         val outside = Settings(file, OllamaEntity(null)) { "d_addon" }.view()
         assertEquals("Works in the Home Assistant add-on only", outside["title_models"]!!.jsonArray[1].jsonObject["detail"]!!.jsonPrimitive.content)
+        val home = kotlin.io.path.createTempDirectory().toFile()
+        assertEquals("", Settings.localDaemonId(home))
+        java.io.File(home, "daemon").apply { mkdirs() }.resolve("identity.json").writeText("""{"id":"d_ident"}""")
+        assertEquals("d_ident", Settings.localDaemonId(home))
+        java.io.File(home, "peers").apply { mkdirs() }.resolve("identity.json").writeText("""{"daemonId":"d_peer"}""")
+        assertEquals("d_peer", Settings.localDaemonId(home))
+        java.io.File(home, "runtime").apply { mkdirs() }.resolve("daemon.json").writeText("""{"daemonId":"d_run"}""")
+        assertEquals("d_run", Settings.localDaemonId(home))
     }
 }

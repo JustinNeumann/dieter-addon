@@ -143,10 +143,15 @@ class Settings(private val file: File, private val ollama: OllamaEntity, private
         const val ANTIGRAVITY_EXCLUDED_MAX = 50
         private val PALETTE = Regex("[a-z0-9][a-z0-9-]{0,39}")
 
-        /** The add-on daemon's id from the store's runtime file, "" when unknown. */
-        fun localDaemonId(dieterHome: File): String =
-            runCatching {
-                ((Json.parseToJsonElement(dieterHome.resolve("runtime/daemon.json").readText()) as JsonObject)["daemonId"] as? JsonPrimitive)?.content
-            }.getOrNull().orEmpty()
+        /** The add-on daemon's id from the store's runtime file (or its identity files while the daemon is starting), "" when unknown. */
+        fun localDaemonId(dieterHome: File): String {
+            for ((path, key) in listOf("runtime/daemon.json" to "daemonId", "peers/identity.json" to "daemonId", "daemon/identity.json" to "id")) {
+                val id = runCatching {
+                    ((Json.parseToJsonElement(dieterHome.resolve(path).readText()) as? JsonObject)?.get(key) as? JsonPrimitive)?.content
+                }.getOrNull().orEmpty()
+                if (id.isNotEmpty()) return id
+            }
+            return ""
+        }
     }
 }

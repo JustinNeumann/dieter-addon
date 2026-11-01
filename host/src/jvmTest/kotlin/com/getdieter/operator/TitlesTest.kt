@@ -32,7 +32,8 @@ class TitlesTest {
         override fun run(args: List<String>, timeout: Duration): JsonElement? {
             calls += args
             return when (args[1]) {
-                "show" -> Json.parseToJsonElement("""{"${args[0]}": {"id": "${args[2]}", "title": "$title"}}""").also { shown.countDown() }
+                // Both `dieter card show` and `dieter chat show` return {"card": {...}}.
+                "show" -> Json.parseToJsonElement("""{"card": {"id": "${args[2]}", "title": "$title"}}""").also { shown.countDown() }
                 "rename" -> null.also { title = args[3]; renamed.countDown() }
                 else -> throw IllegalStateException("unexpected $args")
             }
@@ -68,14 +69,27 @@ class TitlesTest {
     fun aNewTaskIsRenamedWhenTheModelAnswers() {
         val store = Store("Fix it")
         val ha = Ha("Title: Fix the heater.")
-        val titles = Titles(store, ha) { "ai_task.ollama" }
+        val patched = CopyOnWriteArrayList<Pair<String, String>>()
+        val titles = Titles(store, ha, onRenamed = { id, t -> patched += id to t }) { "ai_task.ollama" }
         assertEquals(obj("""{"ok": true}"""), titles.nameLater(obj("""{"kind": "chat", "id": "c_new", "prompt": "Fix it\nnow", "provisional": "Fix it"}""")))
         assertTrue(store.renamed.await(5, TimeUnit.SECONDS))
         assertEquals(listOf("chat", "rename", "--title", "Fix the heater", "c_new"), store.calls.last())
+        assertEquals(listOf("c_new" to "Fix the heater"), patched.toList())
         val (path, body) = ha.asked.single()
         assertEquals("services/ai_task/generate_data?return_response", path)
         assertEquals("ai_task.ollama", body.jsonObject["entity_id"]!!.jsonPrimitive.content)
         assertTrue(body.jsonObject["instructions"]!!.jsonPrimitive.content.endsWith("Task:\nFix it\nnow"))
+    }
+
+    @Test
+    fun aFailedModelCallInvalidatesTheCachedEntity() {
+        val store = Store("Fix it")
+        val forgotten = CountDownLatch(1)
+        val failingHa = HomeAssistant { _, _, _ -> throw IllegalStateException("HTTP 502: Ollama unreachable") }
+        val titles = Titles(store, failingHa, onFailure = forgotten::countDown) { "ai_task.ollama" }
+        titles.nameLater(obj("""{"kind": "card", "id": "c_fail", "prompt": "Fix it", "provisional": "Fix it"}"""))
+        assertTrue(forgotten.await(5, TimeUnit.SECONDS))
+        assertTrue(store.calls.isEmpty())
     }
 
     @Test

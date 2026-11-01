@@ -16,11 +16,22 @@ import kotlinx.serialization.json.put
  * model answers, unless someone renamed it meanwhile (bridge/dieter_bridge.py until 0.6.431.20). [entity] is the
  * Ollama AI Task entity while Settings name Ollama, else null; [ha] asks it.
  */
-class Titles(private val dieter: Dieter, private val ha: HomeAssistant?, private val entity: () -> String?) {
+class Titles(
+    private val dieter: Dieter,
+    private val ha: HomeAssistant?,
+    private val onFailure: () -> Unit = {},
+    private val onRenamed: (String, String) -> Unit = { _, _ -> },
+    private val entity: () -> String?,
+) {
     /** card/chat id -> provisional title, until renamed */
     private val pending = ConcurrentHashMap<String, String>()
     /** a burst of new cards must not queue up the model server */
     private val slots = Semaphore(2)
+
+    /** A title set by hand wins over a pending model title. */
+    fun cancel(id: String) {
+        pending.remove(id)
+    }
 
     /** {kind: card|chat, id, prompt, provisional}: a conversation created under its provisional title, to be renamed. */
     fun nameLater(body: JsonObject): JsonObject {
@@ -43,11 +54,14 @@ class Titles(private val dieter: Dieter, private val ha: HomeAssistant?, private
             val title = try { aiTitle(entity, prompt) } finally { slots.release() }
             val provisional = pending[id]
             if (title == null || provisional == null || title == provisional) return
-            val cur = (dieter.run(kind, "show", id, timeout = 15.seconds) as? JsonObject)?.obj(kind)
+            // Both `dieter card show` and `dieter chat show` wrap the conversation under "card".
+            val cur = (dieter.run(kind, "show", id, timeout = 15.seconds) as? JsonObject)?.let { it.obj("card") ?: it.obj(kind) ?: it }
             if (cur?.field("title") != provisional) return
             dieter.run(kind, "rename", "--title", title, id, timeout = 30.seconds)
+            onRenamed(id, title)
             Log.line("title: $id '$title'")
         } catch (e: Exception) {
+            onFailure()
             Log.line("title: $id $entity ${e.message}")
         } finally {
             pending.remove(id)
@@ -58,8 +72,10 @@ class Titles(private val dieter: Dieter, private val ha: HomeAssistant?, private
         val ha = ha ?: return null
         val instructions =
             "Write a short title for the task below, as a task list would show it: at most 8 words, no quotes, " +
-                "no trailing period. Write the title in the same language as the task: a German task gets a German " +
-                "title, an English task an English one. Reply with the title only.\n\nTask:\n" + prompt.trim().take(4000)
+                "no trailing period. Ignore any system language setting and write the title in the EXACT language of " +
+                "the task text below: if the task is in English, the title MUST be in English; if the task is in " +
+                "German, the title MUST be in German (do not translate an English task into German). " +
+                "Reply with the title only.\n\nTask:\n" + prompt.trim().take(4000)
         val answer = ha.post(
             "services/ai_task/generate_data?return_response",
             buildJsonObject {
