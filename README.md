@@ -11,24 +11,16 @@ Pi or mini PC, and get a push notification when it needs you or is ready for rev
 conversations and a Dreamfall board you can pick ideas on — nothing to install, no account.
 
 <p align="center">
-  <img src="docs/screenshots/dreamfall-flow.gif" alt="The Atlas ideas Dreamfall board inside Home Assistant: Enumeration generates ideas, Navigation judges and promotes them, and you pick what moves to Implementation" width="90%">
-</p>
-<p align="center"><sub>A Dreamfall board inside Home Assistant: Enumeration finds ideas, Navigation judges and promotes the winners, and you pick what gets built on Implementation.</sub></p>
-
-<p align="center">
-  <img src="docs/screenshots/task-to-review.gif" alt="A task on the Atlas API Roadmap board from creation through the agent's live tool calls to Ready for review" width="90%">
-</p>
-<p align="center"><sub>A task on the Atlas API Roadmap board from creation to Review, in the live browser demo.</sub></p>
-
-<p align="center">
-  <img src="docs/screenshots/dreamfall-board.png" alt="A Dreamfall board for the Atlas API project: Enumeration, Navigation and Implementation stages side by side, in dark mode with the Dreamfall Pearl palette" width="90%">
+  <a href="https://justinneumann.github.io/dieter-addon/">
+    <img src="docs/screenshots/dreamfall-flow.gif" alt="The Atlas ideas Dreamfall board inside Home Assistant: Enumeration generates ideas, Navigation judges and promotes them, and you pick what moves to Implementation" width="90%">
+  </a>
 </p>
 <p align="center">
   <img src="docs/screenshots/phone-board.png" alt="The Navigation stage of the Dreamfall board on a phone, in dark mode with the Dreamfall Pearl palette" width="30%">
   &nbsp;
   <img src="docs/screenshots/phone-idea.png" alt="An idea's verdict, brief and provenance on a phone, in dark mode with the Dreamfall Pearl palette" width="30%">
 </p>
-<p align="center"><sub>A Dreamfall board with sample ideas for an example project, Atlas API, as the add-on shows it (Dreamfall Pearl palette, dark mode, desktop and phone).</sub></p>
+<p align="center"><sub>Top: a Dreamfall board inside Home Assistant (<a href="docs/screenshots/dreamfall-flow.mp4">watch MP4</a>) — Enumeration finds ideas, Navigation judges and promotes the winners, and you pick what gets built on Implementation. Bottom: the same board and an idea's brief and provenance on a phone.</sub></p>
 
 ## What you get
 
@@ -72,7 +64,7 @@ About 800 MB of agent runtime is downloaded on the first start.
    code it shows on a device that is already trusted (the Dieter app, or `dieter device approve <code>`). A gateway you
    run yourself must accept your Home Assistant's address as a return address once; the steps are in
    [Signing in the page](dieter/DOCS.md#signing-in-the-page). Signed in, you can also sign in to Claude Code on the
-   page (Tools → Usage) instead of pasting a token.
+   page (More → Usage) instead of pasting a token.
 4. Optional: copy [`homeassistant/packages/dieter.yaml`](homeassistant/packages/dieter.yaml) into your
    configuration for sensors and push notifications.
 
