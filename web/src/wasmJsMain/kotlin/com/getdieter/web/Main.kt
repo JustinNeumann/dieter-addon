@@ -50,7 +50,7 @@ fun main() {
     val demo = queryParameter("demo")
     val remote = if (demo == "standalone") null else RemoteCore("core", MainScope()).also { it.start() }
     val core: MobileCore = if (demo != null || remote == null) DemoCore() else remote
-    val addon: AddonClient = remote ?: DemoAddon(MainScope())
+    val addon: AddonClient = remote ?: DemoAddon(MainScope(), freshDreamfall = queryParameter("dreamfall") == "fresh")
     val store =
         MobileStore(
             core,

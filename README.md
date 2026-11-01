@@ -11,6 +11,11 @@ Pi or mini PC, and get a push notification when it needs you or is ready for rev
 conversations and a Dreamfall board you can pick ideas on — nothing to install, no account.
 
 <p align="center">
+  <img src="docs/screenshots/dreamfall-flow.gif" alt="The Atlas ideas Dreamfall board inside Home Assistant: Enumeration generates ideas, Navigation judges and promotes them, and you pick what moves to Implementation" width="90%">
+</p>
+<p align="center"><sub>A Dreamfall board inside Home Assistant: Enumeration finds ideas, Navigation judges and promotes the winners, and you pick what gets built on Implementation.</sub></p>
+
+<p align="center">
   <img src="docs/screenshots/task-to-review.gif" alt="A task on the Atlas API Roadmap board from creation through the agent's live tool calls to Ready for review" width="90%">
 </p>
 <p align="center"><sub>A task on the Atlas API Roadmap board from creation to Review, in the live browser demo.</sub></p>

@@ -67,3 +67,28 @@ test("creating a task runs a simulated turn from Running to Review", async ({ pa
   await expect.poll(() => aria(page), { timeout: 15_000 }).toContain("atlas-api · Roadmap · Review");
   expect(await aria(page)).toContain("Opened PR #43");
 });
+
+test("?ha=1 wraps the standalone demo in Home Assistant's outer sidebar shell", async ({ page }) => {
+  await page.goto("./?demo=standalone&ha=1");
+  await expect(page.locator("#ha-sidebar")).toBeVisible();
+  await expect(page.locator("#ha-nav-dieter")).toHaveText("Dieter");
+  const frame = page.frameLocator("#ha-ingress-frame");
+  await expect(frame.locator("#loading")).toBeHidden({ timeout: 60_000 });
+  await page.locator("#ha-menu-toggle").click();
+  await expect(page.locator("#ha-sidebar")).toHaveClass(/collapsed/);
+});
+
+test("Dreamfall stage runs populate Enumeration, then Navigation, then Implementation", async ({ page }) => {
+  test.skip(COMPOSE_112, `the outcome shows after a dialog: ${STALE_POPUPS}`);
+  await page.goto("./?demo=standalone&dreamfall=fresh&route=dreamfall/df-atlas");
+  await page.waitForSelector("#loading", { state: "detached", timeout: 60_000 });
+  await expect.poll(() => aria(page)).toContain("No ideas waiting.");
+  await tap(page, page.getByRole("button", { name: "Run now", exact: true }).first());
+  await expect.poll(() => aria(page), { timeout: 15_000 }).toContain("6 new ideas");
+  await tap(page, page.getByRole("button", { name: "Run now", exact: true }).nth(1));
+  await expect.poll(() => aria(page), { timeout: 15_000 }).toContain("5 judged, 4 promoted");
+  await tap(page, page.getByRole("button", { name: "Pick", exact: true }).first());
+  await expect.poll(() => aria(page)).toContain("Pick for Implementation");
+  await tap(page, page.getByRole("button", { name: "Pick", exact: true }).last());
+  await expect.poll(() => aria(page)).toMatch(/Implementation[\s\S]*Scoped API keys per endpoint group/);
+});

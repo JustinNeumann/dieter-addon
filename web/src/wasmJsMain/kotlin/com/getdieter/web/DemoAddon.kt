@@ -14,12 +14,15 @@ import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -31,8 +34,8 @@ import kotlinx.serialization.json.contentOrNull
  * The add-on's own features for the standalone demo (`?demo=standalone`, the page on GitHub Pages): the real
  * [AddonCore], running in the page over [DemoBridge] instead of in the web host. No server is involved.
  */
-class DemoAddon(scope: CoroutineScope) : AddonClient {
-    private val core = AddonCore(DemoBridge(), scope).also { it.start() }
+class DemoAddon(scope: CoroutineScope, freshDreamfall: Boolean = false) : AddonClient {
+    private val core = AddonCore(DemoBridge(scope, freshDreamfall), scope).also { it.start() }
 
     override suspend fun dispatch(command: Command): Result = core.dispatch(command)
 
@@ -44,10 +47,15 @@ class DemoAddon(scope: CoroutineScope) : AddonClient {
  * The operator's JSON API answered from sample data: the `Atlas ideas` Dreamfall board on `atlas-api` (ideas on all
  * three stages, five of them waiting for a pick, one picked on Implementation), a signed-in Claude account,
  * Antigravity quota windows, an enrolled gateway, settings and agent instructions. Decisions on ideas (Pick, Park,
- * Start, Promote, Release, Back to the queue, Review) change the sample like the operator would, and settings are kept,
- * until the page reloads; what needs a real add-on (sign-ins, clones, new boards, runs) answers that this is a demo.
+ * Start, Promote, Release, Back to the queue, Review) and stage runs (`Run now` on Enumeration and Navigation) change
+ * the sample like the operator would, and settings are kept, until the page reloads; what needs a real add-on
+ * (sign-ins, clones, new boards) answers that this is a demo.
  */
-internal class DemoBridge(now: Instant = Clock.System.now()) : Bridge {
+internal class DemoBridge(
+    private val scope: CoroutineScope? = null,
+    private val freshDreamfall: Boolean = false,
+    now: Instant = Clock.System.now(),
+) : Bridge {
     /** Last night's 02:00 on this device: today's, or yesterday's before 06:00, when the night's runs are done. */
     private val night: Instant = run {
         val offset = localUtcOffsetSeconds(now)
@@ -104,7 +112,7 @@ internal class DemoBridge(now: Instant = Clock.System.now()) : Bridge {
     private val state: MutableStateFlow<JsonObject>
 
     init {
-        sample()
+        if (!freshDreamfall) sample()
         state = MutableStateFlow(snapshot())
     }
 
@@ -163,6 +171,7 @@ internal class DemoBridge(now: Instant = Clock.System.now()) : Bridge {
                 publish()
                 ok("rev" to rev.toString())
             }
+            path == "dreamfall/$PIPELINE/run" -> runStage(body.str("stage"))
             path.startsWith("dreamfall/") && path.endsWith("/act") -> act(body)
             path.startsWith("card/") && path.endsWith("/move") -> {
                 val id = path.removePrefix("card/").removeSuffix("/move")
@@ -209,7 +218,10 @@ internal class DemoBridge(now: Instant = Clock.System.now()) : Bridge {
                                 "branch" to if (worktree) "dreamfall/" + title.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').take(32) else "",
                             ),
                     )
-                    if (start) event(to, "started", "actor" to "human")
+                    if (start) {
+                        event(to, "started", "actor" to "human")
+                        simulateImplementationRun(to)
+                    }
                 }
             }
             "park" -> {
@@ -247,11 +259,199 @@ internal class DemoBridge(now: Instant = Clock.System.now()) : Bridge {
             "start" -> {
                 moveTo(card, "running", "runtime" to "working", "initial_prompt_sent" to true)
                 event(id, "started", "actor" to "human")
+                simulateImplementationRun(id)
             }
             else -> return demoOnly()
         }
         publish()
         return ok("rev" to rev.toString(), "created" to created.toString())
+    }
+
+    private data class CandidateIdea(
+        val category: String,
+        val title: String,
+        val why: String,
+        val promote: Boolean,
+        val score: Int,
+        val rationale: String,
+    )
+
+    private val candidatePool =
+        listOf(
+            CandidateIdea(
+                "Developer experience", "A /v2/search playground in the docs",
+                "Try queries against a sandbox index without an API key; shows the request as curl.",
+                promote = false, score = 4, rationale = "Nice, but the docs team owns it and it needs a sandbox index first.",
+            ),
+            CandidateIdea(
+                "Billing", "Usage alerts at 80% and 100% of the plan",
+                "E-mail and webhook when a key approaches its monthly quota.",
+                promote = true, score = 7, rationale = "Cheap, and it turns surprise bills into planned upgrades.",
+            ),
+            CandidateIdea(
+                "Reliability", "Retry budget for outgoing webhooks",
+                "Cap retries per endpoint so one dead consumer cannot fill the delivery queue.",
+                promote = true, score = 8, rationale = "Removes the one failure mode that filled the queue in March.",
+            ),
+            CandidateIdea(
+                "Developer experience", "Idempotency keys on every POST",
+                "Clients retry safely after a timeout: the same key returns the first response for 24 hours.",
+                promote = true, score = 9, rationale = "Prevents double charges and duplicate webhooks; small, well understood change.",
+            ),
+            CandidateIdea(
+                "Security", "Scoped API keys per endpoint group",
+                "Read-only search keys for browsers, write keys for servers.",
+                promote = true, score = 9, rationale = "Blocks the biggest blast radius today: one leaked key reads and writes everything.",
+            ),
+            CandidateIdea(
+                "Reliability", "Graceful drain on deploys",
+                "Stop accepting work, finish in-flight requests, then exit: no more 502s during rollouts.",
+                promote = true, score = 8, rationale = "Zero-downtime deploys need only a 10-second readiness drain.",
+            ),
+        )
+
+    private val extraCandidates =
+        listOf(
+            CandidateIdea(
+                "Security", "Per-key IP allowlists with CIDR ranges",
+                "Restrict server-to-server keys to known egress subnets without rotating secrets.",
+                promote = true, score = 8, rationale = "Requested by three enterprise tenants; fits in the auth middleware.",
+            ),
+            CandidateIdea(
+                "Developer experience", "OpenAPI 3.1 diff check in CI",
+                "Fail pull requests that remove a field or narrow a status code on /v2/*.",
+                promote = true, score = 9, rationale = "Catches accidental breaking changes before review.",
+            ),
+        )
+
+    private var candidateOffset = 0
+
+    private fun runStage(stage: String): BridgeResponse {
+        if (stage != "enumeration" && stage != "navigation") return demoOnly()
+        val s = scope
+        if (s == null) return ok("rev" to rev.toString())
+        val runId = "df-run-${stage.first()}${++serial}"
+        val boardId = if (stage == "enumeration") ENUMERATION else NAVIGATION
+        val start = clock()
+        val runCard =
+            mutableMapOf<String, JsonElement>(
+                "id" to json(runId),
+                "title" to json(if (stage == "enumeration") "Enumeration run" else "Navigation run"),
+                "lane" to json("running"),
+                "board_id" to json(boardId),
+                "runtime" to json("working"),
+                "created_at" to json(start),
+                "updated_at" to json(start),
+                "phase_changed_at" to json(start),
+            )
+        cards += runCard
+        runs += obj("card" to runId, "stage" to stage, "status" to "running", "started_at" to start)
+        publish()
+        if (stage == "enumeration") {
+            val batch =
+                if (freshDreamfall && candidateOffset == 0) {
+                    candidateOffset = candidatePool.size
+                    candidatePool
+                } else {
+                    val list = extraCandidates.drop(candidateOffset % extraCandidates.size).take(2).ifEmpty { extraCandidates }
+                    candidateOffset += list.size
+                    list
+                }
+            s.launch {
+                for ((idx, item) in batch.withIndex()) {
+                    delay(360.milliseconds)
+                    val id = "df-e-live-${++serial}"
+                    val at = clock()
+                    unjudged(id, runId, at, item.category, item.title, item.why)
+                    records[id]?.put(
+                        "planned_verdict",
+                        obj("kind" to if (item.promote) "promote" else "release", "score" to item.score, "rationale" to item.rationale),
+                    )
+                    runs[runs.lastIndex] =
+                        obj("card" to runId, "stage" to "enumeration", "status" to "running", "started_at" to start, "counts" to mapOf("created" to (idx + 1)))
+                    publish()
+                }
+                delay(350.milliseconds)
+                val end = clock()
+                moveTo(runCard, "done", "runtime" to "idle")
+                runs[runs.lastIndex] =
+                    obj(
+                        "card" to runId, "stage" to "enumeration", "status" to "done",
+                        "started_at" to start, "finished_at" to end, "counts" to mapOf("created" to batch.size),
+                    )
+                publish()
+            }
+        } else {
+            val waiting =
+                cards.filter { it.str("board_id") == ENUMERATION && it.str("lane") == "todo" && it.str("title") != "Enumeration run" }
+            // Keep one unjudged idea in Enumeration's queue when judging the full initial batch so the left column stays populated
+            val toJudge = if (waiting.size >= 6) waiting.dropLast(1) else waiting
+            s.launch {
+                var promotedCount = 0
+                var releasedCount = 0
+                for (c in toJudge) {
+                    delay(400.milliseconds)
+                    val id = c.str("id")
+                    val planned = records[id]?.get("planned_verdict") as? JsonObject
+                    val kind = planned?.let { (it["kind"] as? JsonPrimitive)?.contentOrNull } ?: "promote"
+                    val score = planned?.let { (it["score"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() } ?: 8
+                    val rationale =
+                        planned?.let { (it["rationale"] as? JsonPrimitive)?.contentOrNull }
+                            ?: "High leverage and fits cleanly within a single worktree."
+                    val at = clock()
+                    val verdictObj = obj("kind" to kind, "score" to score, "rationale" to rationale)
+                    records[id]?.put("verdict", verdictObj)
+                    event(id, "judged", "actor" to "agent", "name" to "Navigation agent", "run" to runId, "verdict" to kind, "rationale" to rationale, "score" to score, at = at)
+                    if (kind == "promote") {
+                        promotedCount++
+                        val navId = "df-n-live-${++serial}"
+                        moveTo(c, "done")
+                        records[id]?.put("transferred_to", json(navId))
+                        event(id, "transferred", "actor" to "agent", "name" to "Navigation agent", "run" to runId, "stage" to "navigation", at = at)
+                        promoted(navId, id, runId, at)
+                    } else {
+                        releasedCount++
+                        moveTo(c, "review")
+                        event(id, "released", "actor" to "agent", "name" to "Navigation agent", "run" to runId, at = at)
+                    }
+                    runs[runs.lastIndex] =
+                        obj(
+                            "card" to runId, "stage" to "navigation", "status" to "running", "started_at" to start,
+                            "counts" to mapOf("promoted" to promotedCount, "released" to releasedCount),
+                        )
+                    publish()
+                }
+                delay(350.milliseconds)
+                val end = clock()
+                moveTo(runCard, "done", "runtime" to "idle")
+                runs[runs.lastIndex] =
+                    obj(
+                        "card" to runId, "stage" to "navigation", "status" to "done", "started_at" to start, "finished_at" to end,
+                        "counts" to mapOf("promoted" to promotedCount, "released" to releasedCount),
+                    )
+                publish()
+            }
+        }
+        return ok("rev" to rev.toString())
+    }
+
+    private fun simulateImplementationRun(cardId: String) {
+        val s = scope ?: return
+        s.launch {
+            delay(700.milliseconds)
+            card(cardId)?.let { c ->
+                c["tokens"] = obj("totalTokens" to 54_200)
+                c["last_activity_at"] = json(clock())
+                publish()
+            }
+            delay(900.milliseconds)
+            card(cardId)?.let { c ->
+                c["tokens"] = obj("totalTokens" to 128_400)
+                c["runtime"] = json("idle")
+                c["last_activity_at"] = json(clock())
+                publish()
+            }
+        }
     }
 
     private fun moveTo(card: MutableMap<String, JsonElement>, lane: String, vararg also: Pair<String, Any?>) {

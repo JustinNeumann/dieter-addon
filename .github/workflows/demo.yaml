@@ -63,10 +63,10 @@ jobs:
             <meta charset="utf-8">
             <title>Dieter for Home Assistant · demo</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <meta http-equiv="refresh" content="0; url=app/?demo=standalone">
-            <script>location.replace("app/?demo=standalone" + location.hash);</script>
+            <meta http-equiv="refresh" content="0; url=app/?demo=standalone&amp;ha=1">
+            <script>location.replace("app/?demo=standalone&ha=1" + location.hash);</script>
           </head>
-          <body><a href="app/?demo=standalone">Open the demo</a></body>
+          <body><a href="app/?demo=standalone&amp;ha=1">Open the demo</a></body>
           </html>
           EOF
 
