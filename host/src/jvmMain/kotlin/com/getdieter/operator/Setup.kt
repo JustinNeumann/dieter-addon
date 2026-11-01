@@ -68,8 +68,6 @@ class Setup(
         for ((key, opt) in listOf("user.name" to "git_user", "user.email" to "git_email")) {
             option(opt).takeIf { it.isNotEmpty() }?.let { git(listOf("config", "--global", key, it)) }
         }
-        // /share mounts (such as /share/dieter-desk over NFS) may be owned by another UID on the remote host
-        git(listOf("config", "--global", "safe.directory", "*"))
         val token = option("github_token")
         var signedIn = false
         if (token.isNotEmpty() && gh != null) {
