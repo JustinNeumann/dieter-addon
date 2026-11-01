@@ -2,6 +2,18 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.37 (2026-11-01)
+
+- **Fix: every changed file in Changes showed `+0 −0`.** The daemon's `GetChangeset` reads `git status
+  --porcelain=v2`, which lists paths and statuses without line statistics. Both Changes views (a conversation's
+  Changes pane and Project → Changes) now count added and removed lines from each file's patch at the changeset's
+  revision, reuse those counts and first diff pages while the revision is unchanged, and omit the delta label on files
+  with no line changes (fork `web-addon`).
+- **Fix: a project-directory conversation's Changes pane failed with `gRPC FAILED_PRECONDITION: project-directory
+  changes are project-scoped; request them with project_id`.** Opening Changes on a conversation that runs in the
+  project directory rather than a worktree now requests the changeset, diffs, and project-scoped Git operations by
+  `project_id` and `checkout_id`, and hides the worktree-only *Merge readiness* section (fork `web-addon`).
+
 ## 0.6.431.36 (2026-10-31)
 
 - **Antigravity parity with Claude Code (fork `0.6.431-antigravity.11` & `web-addon`):**
