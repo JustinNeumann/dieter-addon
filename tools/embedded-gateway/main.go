@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -582,6 +583,27 @@ func recordDominatesWithSameValue(existing, incoming crdt.Record, desired json.R
 	return clockDominatesRecord(existing.Versions[0].Clock, incoming)
 }
 
+func setDominantField(target *replica.PeerData, actor, kind, id string, desired json.RawMessage) error {
+	key := crdt.Key(kind, id)
+	existing := target.Record(key)
+	if recordDominatesWithSameValue(existing, existing, desired) {
+		return nil
+	}
+	base := existing
+	if base.Kind == "" {
+		base = crdt.Record{Kind: kind, ID: id}
+	}
+	updated, err := putDominantVersion(existing, base, actor, desired)
+	if err != nil {
+		return err
+	}
+	if existing.Revision() != updated.Revision() {
+		target.Records[key] = updated
+		target.Dirty[key] = true
+	}
+	return nil
+}
+
 func itemOwnerAndCheckoutIn(data replica.PeerData, itemID string) (string, string) {
 	raw, ok := crdt.Selected(data.Record(crdt.Key("item", itemID+".identity")))
 	if !ok {
@@ -597,7 +619,7 @@ func itemOwnerAndCheckoutIn(data replica.PeerData, itemID string) (string, strin
 	return identity.OwnerDaemonID, identity.CheckoutID
 }
 
-func collectLocalCheckouts(storeDir string, data replica.PeerData, defaultDaemonID string) (map[string]model.Checkout, map[string]string) {
+func collectLocalCheckouts(storeDir string, data replica.PeerData) (map[string]model.Checkout, map[string]string) {
 	byID := map[string]model.Checkout{}
 	byProject := map[string]string{}
 	for _, id := range replica.EntityIDs(data, "checkout", "registration") {
@@ -631,22 +653,331 @@ func collectLocalCheckouts(storeDir string, data replica.PeerData, defaultDaemon
 		candidatePath := filepath.Join(projectsRoot, checkout.Name)
 		if info, err := os.Stat(filepath.Join(candidatePath, ".git")); err == nil && info.IsDir() {
 			checkout.Path = candidatePath
-			local := model.Checkout{
-				ID:        checkout.ID,
-				ProjectID: checkout.ProjectID,
-				DaemonID:  defaultDaemonID,
-				Name:      checkout.Name,
-				Path:      candidatePath,
-			}
-			coFile := filepath.Join(storeDir, "checkouts", id+".json")
-			_ = os.MkdirAll(filepath.Dir(coFile), 0o700)
-			_ = home.WriteJSON(coFile, local)
 			byID[id] = checkout
 			byProject[checkout.ProjectID] = id
 			byProject[canonProj] = id
 		}
 	}
 	return byID, byProject
+}
+
+func reconcileTargetProjectsAndCheckouts(
+	storeDir string,
+	target *replica.PeerData,
+	next replica.PeerIdentity,
+	old replica.PeerIdentity,
+	hasOld bool,
+	isEmbedded bool,
+	prepareOnce func() error,
+) (map[string]bool, map[string]string, error) {
+	projectsRoot := filepath.Join(filepath.Dir(storeDir), "projects")
+	checkoutsByID := map[string]model.Checkout{}
+	checkoutRawByID := map[string]map[string]any{}
+	for _, coID := range replica.EntityIDs(*target, "checkout", "registration") {
+		fields, _ := replica.EntityFields(*target, "checkout", coID)
+		var co model.Checkout
+		if json.Unmarshal(fields["registration"], &co) != nil {
+			continue
+		}
+		var rawMap map[string]any
+		if json.Unmarshal(fields["registration"], &rawMap) != nil {
+			continue
+		}
+		if co.ID == "" {
+			co.ID = coID
+		}
+		coFile := filepath.Join(storeDir, "checkouts", coID+".json")
+		var local model.Checkout
+		if err := home.ReadJSON(coFile, &local); err == nil && local.Path != "" {
+			co.Path = local.Path
+			co.ValidationCommands = local.ValidationCommands
+		} else if co.Name != "" {
+			candidatePath := filepath.Join(projectsRoot, co.Name)
+			if info, err := os.Stat(filepath.Join(candidatePath, ".git")); err == nil && info.IsDir() {
+				co.Path = candidatePath
+			}
+		}
+		checkoutsByID[coID] = co
+		checkoutRawByID[coID] = rawMap
+	}
+
+	projectUsage := map[string]int{}
+	checkoutUsage := map[string]int{}
+	for _, itemID := range replica.EntityIDs(*target, "item", "identity") {
+		raw, ok := crdt.Selected(target.Record(crdt.Key("item", itemID+".identity")))
+		if !ok {
+			continue
+		}
+		var ident struct {
+			ProjectID  string `json:"projectId"`
+			CheckoutID string `json:"checkoutId"`
+		}
+		if json.Unmarshal(raw, &ident) != nil {
+			continue
+		}
+		if ident.ProjectID != "" {
+			canon := kanban.CanonicalProjectID(*target, ident.ProjectID)
+			projectUsage[canon]++
+			if canon != ident.ProjectID {
+				projectUsage[ident.ProjectID]++
+			}
+		}
+		if ident.CheckoutID != "" {
+			checkoutUsage[ident.CheckoutID]++
+		}
+	}
+	for _, schedID := range replica.EntityIDs(*target, "schedule", "summary") {
+		raw, ok := crdt.Selected(target.Record(crdt.Key("schedule", schedID+".summary")))
+		if !ok {
+			continue
+		}
+		var summary struct {
+			ProjectID  string `json:"projectId"`
+			CheckoutID string `json:"checkoutId"`
+			Deleted    bool   `json:"deleted"`
+		}
+		if json.Unmarshal(raw, &summary) != nil || summary.Deleted {
+			continue
+		}
+		if summary.ProjectID != "" {
+			canon := kanban.CanonicalProjectID(*target, summary.ProjectID)
+			projectUsage[canon]++
+			if canon != summary.ProjectID {
+				projectUsage[summary.ProjectID]++
+			}
+		}
+		if summary.CheckoutID != "" {
+			checkoutUsage[summary.CheckoutID]++
+		}
+	}
+
+	projectBoards := map[string][]string{}
+	for _, boardID := range replica.EntityIDs(*target, "board", "identity") {
+		raw, ok := crdt.Selected(target.Record(crdt.Key("board", boardID+".identity")))
+		if !ok {
+			continue
+		}
+		var ident struct {
+			ProjectID string `json:"projectId"`
+		}
+		if json.Unmarshal(raw, &ident) != nil || ident.ProjectID == "" {
+			continue
+		}
+		canon := kanban.CanonicalProjectID(*target, ident.ProjectID)
+		projectBoards[canon] = append(projectBoards[canon], boardID)
+	}
+
+	projByID := map[string]model.Project{}
+	projRepoPath := map[string]string{}
+	projectCheckouts := map[string][]string{}
+	for coID, co := range checkoutsByID {
+		canon := kanban.CanonicalProjectID(*target, co.ProjectID)
+		projectCheckouts[canon] = append(projectCheckouts[canon], coID)
+		if co.Path != "" {
+			if projRepoPath[canon] == "" || !co.Detached {
+				projRepoPath[canon] = co.Path
+			}
+		}
+	}
+	for _, projID := range replica.EntityIDs(*target, "project", "identity") {
+		if kanban.CanonicalProjectID(*target, projID) != projID {
+			continue
+		}
+		fields, _ := replica.EntityFields(*target, "project", projID)
+		if len(fields["name"]) == 0 || len(fields["archived"]) == 0 {
+			continue
+		}
+		var proj model.Project
+		if replica.DecodeFields(fields, &proj) != nil {
+			continue
+		}
+		if proj.ID == "" {
+			proj.ID = projID
+		}
+		if projRepoPath[projID] == "" && proj.Name != "" {
+			candidatePath := filepath.Join(projectsRoot, proj.Name)
+			if info, err := os.Stat(filepath.Join(candidatePath, ".git")); err == nil && info.IsDir() {
+				projRepoPath[projID] = candidatePath
+			}
+		}
+		projByID[projID] = proj
+	}
+
+	byRepoPath := map[string][]model.Project{}
+	for projID, proj := range projByID {
+		if proj.Archived {
+			continue
+		}
+		if repoPath := projRepoPath[projID]; repoPath != "" {
+			byRepoPath[repoPath] = append(byRepoPath[repoPath], proj)
+		}
+	}
+
+	archivedProj := map[string]bool{}
+	winnerByLoserProj := map[string]string{}
+	for _, group := range byRepoPath {
+		if len(group) <= 1 {
+			continue
+		}
+		sort.Slice(group, func(i, j int) bool {
+			a, b := group[i], group[j]
+			if projectUsage[a.ID] != projectUsage[b.ID] {
+				return projectUsage[a.ID] > projectUsage[b.ID]
+			}
+			if len(projectBoards[a.ID]) != len(projectBoards[b.ID]) {
+				return len(projectBoards[a.ID]) > len(projectBoards[b.ID])
+			}
+			if a.CreatedAt != "" && b.CreatedAt != "" && a.CreatedAt != b.CreatedAt {
+				return a.CreatedAt < b.CreatedAt
+			}
+			return a.ID < b.ID
+		})
+		winner := group[0]
+		for _, loser := range group[1:] {
+			if projectUsage[loser.ID] > 0 {
+				continue
+			}
+			if err := setDominantField(target, next.Actor, "project", loser.ID+".archived", replica.RawValue(true)); err != nil {
+				return nil, nil, err
+			}
+			for _, boardID := range projectBoards[loser.ID] {
+				if err := setDominantField(target, next.Actor, "board", boardID+".retired", replica.RawValue(true)); err != nil {
+					return nil, nil, err
+				}
+			}
+			archivedProj[loser.ID] = true
+			winnerByLoserProj[loser.ID] = winner.ID
+		}
+	}
+
+	isOurCheckout := func(co model.Checkout) bool {
+		return isEmbedded ||
+			co.DaemonID == next.DaemonID ||
+			(hasOld && co.DaemonID == old.DaemonID) ||
+			localCheckoutExists(storeDir, co.ID)
+	}
+
+	activeCheckouts := map[string]bool{}
+	projectLocalCheckout := map[string]string{}
+	for canonProj, coIDs := range projectCheckouts {
+		proj, hasProj := projByID[canonProj]
+		projArchived := !hasProj || proj.Archived || archivedProj[canonProj]
+		winnerCoID := ""
+		if !projArchived {
+			var candidates []string
+			for _, coID := range coIDs {
+				co := checkoutsByID[coID]
+				if co.Path != "" && isOurCheckout(co) {
+					candidates = append(candidates, coID)
+				}
+			}
+			sort.Slice(candidates, func(i, j int) bool {
+				a, b := candidates[i], candidates[j]
+				if checkoutUsage[a] != checkoutUsage[b] {
+					return checkoutUsage[a] > checkoutUsage[b]
+				}
+				if checkoutsByID[a].Detached != checkoutsByID[b].Detached {
+					return !checkoutsByID[a].Detached
+				}
+				aExists, bExists := localCheckoutExists(storeDir, a), localCheckoutExists(storeDir, b)
+				if aExists != bExists {
+					return aExists
+				}
+				return a < b
+			})
+			if len(candidates) > 0 {
+				winnerCoID = candidates[0]
+				activeCheckouts[winnerCoID] = true
+				projectLocalCheckout[canonProj] = winnerCoID
+				projectLocalCheckout[checkoutsByID[winnerCoID].ProjectID] = winnerCoID
+			}
+		}
+
+		for _, coID := range coIDs {
+			co := checkoutsByID[coID]
+			if !isOurCheckout(co) {
+				continue
+			}
+			rawMap := checkoutRawByID[coID]
+			if coID == winnerCoID {
+				rawMap["daemonId"] = next.DaemonID
+				rawMap["detached"] = false
+				if err := setDominantField(target, next.Actor, "checkout", coID+".registration", replica.RawValue(rawMap)); err != nil {
+					return nil, nil, err
+				}
+				coFile := filepath.Join(storeDir, "checkouts", coID+".json")
+				var existingLocal model.Checkout
+				readErr := home.ReadJSON(coFile, &existingLocal)
+				if readErr != nil || existingLocal.DaemonID != next.DaemonID || existingLocal.Path != co.Path || existingLocal.Detached {
+					if err := prepareOnce(); err != nil {
+						return nil, nil, err
+					}
+					if err := os.MkdirAll(filepath.Dir(coFile), 0o700); err != nil {
+						return nil, nil, err
+					}
+					local := model.Checkout{
+						ID:                 co.ID,
+						ProjectID:          co.ProjectID,
+						DaemonID:           next.DaemonID,
+						Name:               co.Name,
+						Path:               co.Path,
+						ValidationCommands: co.ValidationCommands,
+					}
+					if err := home.WriteJSON(coFile, local); err != nil {
+						return nil, nil, err
+					}
+				}
+			} else {
+				rawMap["daemonId"] = next.DaemonID
+				rawMap["detached"] = true
+				if err := setDominantField(target, next.Actor, "checkout", coID+".registration", replica.RawValue(rawMap)); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+	}
+
+	for loserID, winnerID := range winnerByLoserProj {
+		if winCo := projectLocalCheckout[winnerID]; winCo != "" {
+			projectLocalCheckout[loserID] = winCo
+		}
+	}
+
+	for _, itemID := range replica.EntityIDs(*target, "item", "identity") {
+		raw, ok := crdt.Selected(target.Record(crdt.Key("item", itemID+".identity")))
+		if !ok {
+			continue
+		}
+		var value map[string]any
+		if json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+		owner, _ := value["ownerDaemonId"].(string)
+		coID, _ := value["checkoutId"].(string)
+		projID, _ := value["projectId"].(string)
+		if !(isEmbedded || owner == next.DaemonID || (hasOld && owner == old.DaemonID) || localCardExists(storeDir, itemID)) {
+			continue
+		}
+		desiredOwner := next.DaemonID
+		desiredCheckout := coID
+		if !activeCheckouts[coID] {
+			canon := kanban.CanonicalProjectID(*target, projID)
+			if localCo := projectLocalCheckout[canon]; localCo != "" {
+				desiredCheckout = localCo
+			} else if localCo := projectLocalCheckout[projID]; localCo != "" {
+				desiredCheckout = localCo
+			}
+		}
+		if owner != desiredOwner || coID != desiredCheckout {
+			value["ownerDaemonId"] = desiredOwner
+			value["checkoutId"] = desiredCheckout
+			if err := setDominantField(target, next.Actor, "item", itemID+".identity", replica.RawValue(value)); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
+	return activeCheckouts, projectLocalCheckout, nil
 }
 
 func adoptStore(s *store.Store, storeDir string, next replica.PeerIdentity, isEmbedded bool, logger *slog.Logger) error {
@@ -697,7 +1028,6 @@ func adoptStore(s *store.Store, storeDir string, next replica.PeerIdentity, isEm
 		return nil
 	}
 
-	validCheckouts := map[string]bool{}
 	if hasOld {
 		source, err := s.Replica.OpenPeerView(old.Account)
 		if err != nil {
@@ -709,10 +1039,7 @@ func adoptStore(s *store.Store, storeDir string, next replica.PeerIdentity, isEm
 		}
 		target.State = replica.ClonePeerState(target.State)
 
-		sourceCheckouts, projectLocalCheckout := collectLocalCheckouts(storeDir, source, next.DaemonID)
-		for id := range sourceCheckouts {
-			validCheckouts[id] = true
-		}
+		_, projectLocalCheckout := collectLocalCheckouts(storeDir, source)
 
 		err = source.Each("", func(record crdt.Record) error {
 			key := crdt.Key(record.Kind, record.ID)
@@ -878,23 +1205,24 @@ func adoptStore(s *store.Store, storeDir string, next replica.PeerIdentity, isEm
 	if err != nil {
 		return err
 	}
-	targetCheckouts, projectLocalCheckout := collectLocalCheckouts(storeDir, target, next.DaemonID)
-	for id, reg := range targetCheckouts {
-		validCheckouts[id] = true
-		if reg.DaemonID != next.DaemonID {
-			continue
+	target.State = replica.ClonePeerState(target.State)
+	validCheckouts, projectLocalCheckout, err := reconcileTargetProjectsAndCheckouts(
+		storeDir, &target, next, old, hasOld, isEmbedded, prepareOnce,
+	)
+	if err != nil {
+		return err
+	}
+	if len(target.Dirty) > 0 {
+		if err := prepareOnce(); err != nil {
+			return err
 		}
-		coPath := filepath.Join(storeDir, "checkouts", id+".json")
-		var local model.Checkout
-		if err := home.ReadJSON(coPath, &local); err == nil && local.DaemonID != next.DaemonID {
-			if err := prepareOnce(); err != nil {
-				return err
-			}
-			local.DaemonID = next.DaemonID
-			if err := home.WriteJSON(coPath, local); err != nil {
-				return err
-			}
+		if err := s.Replica.SavePeerData(next.Account, target); err != nil {
+			return err
 		}
+		logger.Info("reconciled target projects and checkouts",
+			"targetAccount", next.Account,
+			"records", len(target.Dirty),
+		)
 	}
 
 	if len(validCheckouts) > 0 {
@@ -933,7 +1261,7 @@ func adoptStore(s *store.Store, storeDir string, next replica.PeerIdentity, isEm
 			if desiredCheckout == "" {
 				desiredCheckout = item.CheckoutID
 			}
-			if isEmbedded && !localCheckoutExists(storeDir, desiredCheckout) {
+			if isEmbedded && !validCheckouts[desiredCheckout] {
 				if localCo := projectLocalCheckout[kanban.CanonicalProjectID(target, item.ProjectID)]; localCo != "" {
 					desiredCheckout = localCo
 				} else if localCo := projectLocalCheckout[item.ProjectID]; localCo != "" {

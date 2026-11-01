@@ -2,6 +2,16 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.41 (2026-11-01)
+
+- **Deduplicate empty auto-registered projects and extra local checkouts during gateway mode reconciliation.**
+  - When a replica already holds both a canonical project and an empty duplicate project pointing at the same local
+    repository path (such as when `0.6.431.39` auto-registered empty projects before store adoption), `adoptStore`
+    now archives the empty duplicate project, retires its initial board, and detaches its checkout in CRDT so the
+    embedded gateway does not sync empty duplicates back.
+  - Ensures each surviving local project has at most one active local checkout (preferring checkouts referenced by
+    cards, chats, and schedules) so `AccountView` and `sharedProjects` always resolve `project.path`.
+
 ## 0.6.431.40 (2026-11-01)
 
 - **Adopt projects, boards, cards, chats, checkouts, schedules, and Dreamfall pipelines across gateway modes (`external` ↔ `embedded`).**
