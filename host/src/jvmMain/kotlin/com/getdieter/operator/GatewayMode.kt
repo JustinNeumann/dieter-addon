@@ -31,7 +31,6 @@ object GatewayMode {
         "daemon/roster.pb",
         "daemon/trust.json",
         "peers/identity.json",
-        "checkouts",
     )
 
     /** Resolves `embedded` or `external` from the add-on's [options]. */
@@ -81,6 +80,14 @@ object GatewayMode {
                 val saved = File(restoreDir, rel)
                 if (saved.exists()) movePath(saved, File(store, rel))
             }
+            val savedCheckouts = File(restoreDir, "checkouts")
+            if (savedCheckouts.isDirectory) {
+                val checkoutsDir = File(store, "checkouts").apply { mkdirs() }
+                for (file in savedCheckouts.listFiles().orEmpty()) {
+                    val dst = File(checkoutsDir, file.name)
+                    if (file.isFile && !dst.exists()) movePath(file, dst)
+                }
+            }
             restoreDir.deleteRecursively()
         }
 
@@ -90,17 +97,19 @@ object GatewayMode {
         return true
     }
 
-    /** Prepares [store] before `dieter daemon start`: switches mode state and, in `embedded` mode, enrolls with the loopback gateway. */
+    /** Prepares [store] before `dieter daemon start`: switches mode state, enrolls with the loopback gateway in `embedded` mode, and adopts records across modes. */
     fun prepareDaemon(store: File, options: JsonObject?, env: Map<String, String>) {
         val mode = of(options)
         switchTo(store, mode)
-        if (mode != EMBEDDED) return
         val bin = File(env["DIETER_GATEWAY_BIN"] ?: "/usr/local/bin/dieter-gateway")
         if (!bin.canExecute()) return
-        val url = gatewayUrl(env)
-        val name = machineName(options)
+        val args = if (mode == EMBEDDED) {
+            listOf(bin.path, "-prepare-daemon", store.path, "-daemon-name", machineName(options), "-gateway", gatewayUrl(env))
+        } else {
+            listOf(bin.path, "-adopt-store", store.path)
+        }
         val done = Command.run(
-            listOf(bin.path, "-prepare-daemon", store.path, "-daemon-name", name, "-gateway", url),
+            args,
             timeout = 30.seconds,
             env = mapOf("HOME" to (env["HOME"] ?: "/data")),
         )

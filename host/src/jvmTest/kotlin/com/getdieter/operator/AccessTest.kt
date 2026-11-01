@@ -211,18 +211,16 @@ class AccessTest {
         File(store, "peers/identity.json").writeText("""{"account":"emb-acc","daemonId":"d_emb"}""")
         File(store, "checkouts/c1.json").writeText("""{"projectId":"p_emb"}""")
 
-        // Switch to external: embedded files are archived and active store is clean for external enrollment
+        // Switch to external: embedded files are archived, checkouts stay shared, and active store is clean for external enrollment
         assertTrue(GatewayMode.switchTo(store, "external"))
         assertTrue(!File(store, "daemon/identity.json").exists())
-        assertTrue(!File(store, "checkouts/c1.json").exists())
+        assertTrue(File(store, "checkouts/c1.json").exists())
         File(store, "daemon").mkdirs()
         File(store, "peers").mkdirs()
-        File(store, "checkouts").mkdirs()
         File(store, "daemon/identity.json").writeText("""{"id":"d_ext","gatewayUrl":"https://gw.example:4443"}""")
         File(store, "peers/identity.json").writeText("""{"account":"ext-acc","daemonId":"d_ext"}""")
-        File(store, "checkouts/c1.json").writeText("""{"projectId":"p_ext"}""")
 
-        // Switch back to embedded: embedded files are restored, external files are archived
+        // Switch back to embedded: embedded files are restored, external files are archived, checkouts remain shared
         assertTrue(GatewayMode.switchTo(store, "embedded"))
         assertTrue(File(store, "daemon/identity.json").readText().contains("d_emb"))
         assertTrue(File(store, "peers/identity.json").readText().contains("emb-acc"))
@@ -232,7 +230,7 @@ class AccessTest {
         assertTrue(GatewayMode.switchTo(store, "external"))
         assertTrue(File(store, "daemon/identity.json").readText().contains("d_ext"))
         assertTrue(File(store, "peers/identity.json").readText().contains("ext-acc"))
-        assertTrue(File(store, "checkouts/c1.json").readText().contains("p_ext"))
+        assertTrue(File(store, "checkouts/c1.json").readText().contains("p_emb"))
     }
 
     @Test
