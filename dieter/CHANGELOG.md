@@ -2,6 +2,19 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.40 (2026-11-01)
+
+- **Adopt projects, boards, cards, chats, checkouts, schedules, and Dreamfall pipelines across gateway modes (`external` ↔ `embedded`).**
+  - Switching between `external` and `embedded` gateway modes now adopts the previous mode's CRDT peer replica records
+    (`project/*`, `board/*`, `label/*`, `assignment/*`, `checkout/*`, `item/*`, `schedule/*`, and `kv.*` including
+    Dreamfall pipelines) into the active mode's account scope, re-signs owner-bound records (`checkout.registration`,
+    `item.identity`, `item.summary`, `schedule.summary`) with the active mode's daemon identity, and updates local
+    card markdown files (`/data/dieter/cards/*.md`, `/data/dieter/archived-cards/*.md`), checkouts
+    (`/data/dieter/checkouts/*.json`), and `schedules.db`.
+  - If `0.6.431.39` previously initialized an empty `embedded` replica (with 0 items and duplicate auto-registered
+    projects) before adopting `external` items, the empty replica is automatically reset and replaced with the full
+    canonical projects, boards, cards, chats, and Dreamfall pipelines from `external` mode.
+
 ## 0.6.431.39 (2026-11-01)
 
 - **Embedded standalone gateway (`gateway_mode: embedded` by default), switchable two ways (`embedded` ↔ `external`).**
