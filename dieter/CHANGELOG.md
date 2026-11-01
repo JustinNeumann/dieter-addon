@@ -2,6 +2,18 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.42 (2026-11-01)
+
+- **Fix: Ollama task titles now rename standalone chats, keep the task's language, and recover when Ollama fails.**
+  - Both `dieter card show` and `dieter chat show` wrap the conversation under `"card"`, whereas `Titles.retitle`
+    previously looked up `.obj(kind)` (`"chat"`), which was always `null` for standalone chats and aborted before
+    renaming.
+  - Tightened the `ai_task.generate_data` instructions to ignore any Home Assistant system language setting and keep
+    the exact language of the task text (preventing English prompts from getting German titles).
+  - Invalidates `OllamaEntity`'s 10-minute cache immediately when `aiTitle` fails, patches the board state on rename,
+    cancels pending model titles on manual rename (`Cards.update`), and falls back to `peers/identity.json` /
+    `daemon/identity.json` in `Settings.localDaemonId` while the daemon is starting.
+
 ## 0.6.431.41 (2026-11-01)
 
 - **Deduplicate empty auto-registered projects and extra local checkouts during gateway mode reconciliation.**

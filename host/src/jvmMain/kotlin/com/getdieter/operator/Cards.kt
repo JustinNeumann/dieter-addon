@@ -123,6 +123,7 @@ class Cards(
     fun update(kind: String, cid: String, b: JsonObject): JsonObject {
         val title = b.field("title").trim()
         val prompt = (b["prompt"] as? JsonPrimitive)?.contentOrNull
+        if (title.isNotEmpty()) titles.cancel(cid)
         if (title.isEmpty() && prompt == null) throw BadRequest("title or prompt required")
         val args =
             if (kind == "chat") {
