@@ -64,7 +64,7 @@ kotlin {
             // submodule's Gradle build needs the Android SDK, so they run here.
             kotlin.srcDir(apps.resolve("core/testing/src/commonMain/kotlin"))
             kotlin.srcDir(rootDir.resolve("addon/src/commonTest/kotlin"))
-            for (area in listOf("identity", "navigation", "notifications", "schedules"))
+            for (area in listOf("identity", "navigation", "notifications", "schedules", "workspace"))
 
                 kotlin.srcDir(apps.resolve("core/runtime/src/commonTest/kotlin/com/getdieter/core/$area"))
             dependencies {
