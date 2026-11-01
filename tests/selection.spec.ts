@@ -3,10 +3,10 @@ import { test, expect } from "@playwright/test";
 import { open, dragCopy, clipboard, tap } from "./helpers";
 
 test("conversation reply: drag-select and copy", async ({ page }) => {
-  await open(page, "card Compose web UI behind Ingress");
-  const copied = await dragCopy(page, page.getByText("Sora comes from Compose resources").last());
+  await open(page, "card Add per-key rate limiting to the public API");
+  const copied = await dragCopy(page, page.getByText("Rejected requests return 429 Too Many Requests").last());
   expect(copied.length).toBeGreaterThan(10);
-  expect("Sora comes from Compose resources, so it is served next to the bundle and works in the iframe. The development build is about 50 MB of wasm; I'm building the optimized one now to get the real number.").toContain(copied.trim());
+  expect("Rejected requests return 429 Too Many Requests with Retry-After and the draft RateLimit headers, so SDKs can back off without guessing. Next I'm running the race tests across the limiter and the HTTP middleware.").toContain(copied.trim());
 });
 
 test("mail body (HTML island): native selection across blocks", async ({ page }) => {
@@ -56,9 +56,9 @@ test("file viewer: Markdown preview (island) and plain text", async ({ page }) =
 });
 
 test("subagent details are selectable", async ({ page }) => {
-  await open(page, "card Compose web UI behind Ingress; pane subagents");
+  await open(page, "card Add per-key rate limiting to the public API; pane subagents");
   // The card is one node for assistive tech; its last line is the subagent's recent output.
-  const card = (await page.getByText("Build the optimized bundle and report the size").last().boundingBox())!;
+  const card = (await page.getByText("Benchmark Allow under parallel key contention").last().boundingBox())!;
   const y = card.y + card.height - 21;
   await page.evaluate(() => navigator.clipboard.writeText(""));
   await page.mouse.move(card.x + 16, y);
@@ -67,5 +67,5 @@ test("subagent details are selectable", async ({ page }) => {
   await page.mouse.up();
   await page.keyboard.press("ControlOrMeta+c");
   await page.waitForTimeout(300);
-  expect(await clipboard(page)).toContain("skiko.wasm");
+  expect(await clipboard(page)).toContain("BenchmarkAllow");
 });

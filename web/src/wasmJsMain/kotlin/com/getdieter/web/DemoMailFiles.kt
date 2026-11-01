@@ -32,49 +32,49 @@ class DemoMailFiles {
         listOf(
             Message(
                 "m-audit", "Dependency audit: 2 updates, 1 advisory", "Nightly dependency audit",
-                "dieter-addon · workstation · Claude", "DA", 35, "09:14",
+                "atlas-api · workstation · Claude", "DA", 35, "09:14",
                 """
                 # Dependency audit
 
                 Two dependencies have newer releases and one has a security advisory. Nothing is
-                exploitable in the add-on as configured, but the advisory affects the **sigstore**
+                exploitable in the service as configured, but the advisory affects the **sigstore**
                 verification path, so it is worth updating this week.
 
                 ## Updates
 
                 | Package | Current | Latest | Notes |
                 |---|---|---|---|
-                | okhttp | 5.5.0 | 5.5.1 | Bug fixes only |
-                | wire | 7.1.0 | 7.2.0 | Faster proto parsing |
+                | pgx | 5.7.1 | 5.7.2 | Connection pool fixes |
+                | x/net | 0.32.0 | 0.33.0 | HTTP/2 header parsing |
                 | cosign | 2.4.1 | 2.4.3 | Advisory GHSA-demo-0001 |
 
                 ## Suggested change
 
                 ```bash
-                sed -i 's/cosign 2.4.1/cosign 2.4.3/' dieter/Dockerfile
-                tools/package.sh 0.1.1
+                sed -i 's/cosign 2.4.1/cosign 2.4.3/' deploy/Dockerfile
+                make test
                 ```
 
-                - Run the e2e suite before the release
-                - Bump the add-on revision
+                - Run the integration suite before the release
+                - Bump the service revision
                 - Mention the advisory in the changelog
 
                 The release steps are in [the checklist](notes.txt) and [the changelog](docs/CHANGELOG.md);
                 [the shared secrets](../secrets.txt) are outside the checkout.
                 """.trimIndent(),
-                checkout = "dieter-addon-daemon-desktop",
+                checkout = "atlas-api-daemon-desktop",
             ),
             Message(
-                "m-build", "Nightly build: bundle size and timings", "Nightly build",
-                "dieter-addon · workstation · Codex", "NB", 180, "07:02",
+                "m-build", "Nightly build: index size and timings", "Nightly build",
+                "atlas-api · workstation · Codex", "NB", 180, "07:02",
                 """
                 # Nightly build
 
-                The production bundle is **15.2 MB** (5.3 MB compressed). Build times stayed flat.
+                The search snapshot is **15.2 MB** (5.3 MB compressed). Build times stayed flat.
 
                 ```mermaid
                 flowchart LR
-                  Gradle --> Webpack --> Package --> Release
+                  Postgres --> Indexer --> Snapshot --> S3
                 ```
 
                 ```vega-lite
@@ -82,16 +82,16 @@ class DemoMailFiles {
                  "mark": "bar", "encoding": {"x": {"field": "day", "type": "nominal"}, "y": {"field": "s", "type": "quantitative"}}}
                 ```
 
-                The slowest step is webpack's minification of the Skia glue.
+                The slowest step is tokenizing the archived webhook payloads.
                 """.trimIndent() + "\n\n## Step log\n\n" +
                     (1..36).joinToString("\n") { "- Step $it finished in ${it * 3 % 17 + 2} s" } +
                     "\n\nThe last step uploads the tarball; its checksum ends in quokka.",
                 read = true,
             ),
             Message(
-                "m-ha", "Frigate zones checked", "Frigate zones for the driveway",
-                "Home-Assistant-Sem2 · Home Assistant · Codex", "FZ", 1500, "Mon",
-                "The driveway zone now ends at the gate. Motion from the street no longer starts a recording.",
+                "m-ha", "Checkout LCP down to 1.6 s", "Lazy-load product images below the fold",
+                "storefront · Home Assistant · Codex", "SF", 1500, "Mon",
+                "Only the first row of `ProductGrid` gets `priority` now. Category LCP dropped from **2.8 s to 1.6 s**, performance score 96.",
                 read = true,
                 flagged = true,
             ),
@@ -184,40 +184,46 @@ class DemoMailFiles {
     private val tree: Map<String, String> =
         mapOf(
             "README.md" to """
-                # dieter-addon
+                # atlas-api
 
-                Dieter's Compose UI compiled for the browser with **Kotlin/Wasm** and served by the
-                Home Assistant add-on behind Ingress.
+                The public API behind Atlas: search, webhooks and billing for every workspace, with an OpenAPI
+                explorer compiled for the browser.
 
                 ## Build
 
                 ```bash
-                ./gradlew :web:wasmJsBrowserDistribution
-                tools/package.sh 0.0.0-local
+                go test -race ./...
+                make run
                 ```
 
-                - The loader inflates `.wasm.gz` in the browser
-                - Hashed files are cached as immutable
-                - Themes follow Home Assistant
+                - Requests pass through request-ID, logging, auth and rate-limit middleware
+                - Errors return RFC 9457 `application/problem+json` documents
+                - Webhooks sign every delivery with HMAC-SHA256
                 """.trimIndent(),
-            "web/Main.kt" to """
-                package com.getdieter.web
+            "cmd/atlas/main.go" to """
+                package main
 
-                /** The entry point of the browser build. */
-                fun main() {
-                    WebHost.start()
-                    val store = MobileStore(DemoCore())
-                    show(store, queryParameter("script").orEmpty())
+                import (
+                    "log/slog"
+                    "net/http"
+                    "os"
+
+                    "example.com/atlas/internal/httpapi"
+                )
+
+                func main() {
+                    logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+                    http.ListenAndServe(":8080", httpapi.NewRouter(httpapi.Dependencies{Logger: logger}))
                 }
                 """.trimIndent(),
-            "notes.txt" to "Release checklist\n1. e2e green\n2. bump the revision\n3. tag and push\n",
+            "notes.txt" to "Release checklist\n1. integration suite green\n2. bump the revision\n3. tag and push\n",
             "docs/CHANGELOG.md" to "# Changelog\n\n" +
                 (40 downTo 1).joinToString("\n\n") {
-                    "## 0.1.$it\n\n- Bundle rebuilt against Dieter 0.6.${400 + it}\n- Loader tweaks for release $it"
+                    "## 2.1.$it\n\n- Search index and webhook delivery improvements for 2.1.$it\n- OpenAPI schema updates for release $it"
                 } + "\n\nThe first release was called quokka.",
         )
     private val defaultTarget =
-        FilesTarget(daemon_id = "daemon-desktop", project_id = "p-addon", checkout_id = "ck-dieter-addon-daemon-desktop")
+        FilesTarget(daemon_id = "daemon-desktop", project_id = "p-addon", checkout_id = "atlas-api-daemon-desktop")
     // Listed from the start: the demo project has two checkouts, so Files never binds one itself.
     private var files = FilesSlice(target = defaultTarget, entries = entries(""))
 
@@ -256,7 +262,7 @@ class DemoMailFiles {
                     document_unchanged = false,
                     document_error = if (content == null) "No such file in the demo checkout." else "",
                     document_key = "demo:$p",
-                    language_name = if (p.endsWith(".kt")) "Kotlin" else if (p.endsWith(".md")) "Markdown" else "Plain text",
+                    language_name = if (p.endsWith(".go")) "Go" else if (p.endsWith(".md")) "Markdown" else "Plain text",
                     type_label = if (p.endsWith(".md")) "Markdown" else "text/plain",
                 )
         }

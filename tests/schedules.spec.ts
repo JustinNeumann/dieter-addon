@@ -10,8 +10,8 @@ test("Schedules lists every project's schedules, each under its project in the p
   await expect.poll(() => aria(page)).toContain("Dependency check");
   const list = await aria(page);
   expect(list).toContain("All projects");
-  expect(list).toMatch(/dieter-addon[\s\S]*Dependency check[\s\S]*Home-Assistant-Sem2[\s\S]*Backup review[\s\S]*Morning ideas/);
-  expect(list).not.toMatch(/text: dieter\n/); // a project without schedules gets no heading
+  expect(list).toMatch(/atlas-api[\s\S]*Dependency check[\s\S]*storefront[\s\S]*Backup review[\s\S]*Morning ideas/);
+  expect(list).not.toMatch(/text: pocket\n/); // a project without schedules gets no heading
 });
 
 test("the menu offers All projects, switched on", async ({ page }) => {

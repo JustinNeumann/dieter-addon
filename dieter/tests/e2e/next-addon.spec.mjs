@@ -131,7 +131,7 @@ test("Questions: the Inbox lists the waiting conversation; the answer and a decl
   expect((await register(`q-${stamp}-1`)).ok()).toBeTruthy();
   await open(page, "");
   await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("Waiting for your answer");
-  await tap(page, page.getByRole("button", { name: /Compose web UI behind Ingress Which colour\?/ }));
+  await tap(page, page.getByRole("button", { name: /Add per-key rate limiting to the public API Which colour\?/ }));
   await expect.poll(() => aria(page), { timeout: 30_000 }).toContain("The agent asks");
   await tap(page, page.getByRole("button", { name: "Blue calm" }));
   await typeInto(page, page.getByRole("textbox", { name: "Or your own answer" }), "and green");
@@ -200,17 +200,17 @@ test("Settings: agent instructions are edited and reset through the add-on core"
 });
 
 test("Projects: a board dragged after a long press keeps its place for every device (the bridge's board order)", async ({ page, request }) => {
-  // the demo's dieter project has Upstream, Releases and Website; start from that order
+  // the demo's pocket project has Release 2.4, Releases and Website; start from that order
   expect((await request.post("api/boards/order", { data: { ids: ["b-dieter", "b-releases", "b-site"] } })).ok()).toBeTruthy();
   const shown = async () => {
     const tree = await aria(page);
-    return ["Upstream", "Releases", "Website"].sort((a, b) => tree.indexOf(`button "${a}`) - tree.indexOf(`button "${b}`));
+    return ["Release 2.4", "Releases", "Website"].sort((a, b) => tree.indexOf(`button "${a}`) - tree.indexOf(`button "${b}`));
   };
   // the web host re-reads the bridge's settings when a page opens and its copy is older than 15 s
   await expect.poll(async () => { await open(page, "script=tab%20projects"); return shown(); }, { timeout: 60_000, intervals: [4_000] })
-    .toEqual(["Upstream", "Releases", "Website"]);
+    .toEqual(["Release 2.4", "Releases", "Website"]);
   const row = (name) => page.getByRole("button", { name: new RegExp(`^${name} \\d`) }).first();
-  const from = await row("Website").boundingBox(), to = await row("Upstream").boundingBox();
+  const from = await row("Website").boundingBox(), to = await row("Release 2.4").boundingBox();
   await page.mouse.move(from.x + 60, from.y + from.height / 2);
   await page.mouse.down();
   await page.waitForTimeout(900); // the long press
@@ -218,7 +218,7 @@ test("Projects: a board dragged after a long press keeps its place for every dev
   await page.mouse.up();
   await expect.poll(async () => (await (await request.get("api/settings")).json()).board_order.slice(0, 3), { timeout: 15_000 })
     .toEqual(["b-site", "b-dieter", "b-releases"]);
-  await expect.poll(shown).toEqual(["Website", "Upstream", "Releases"]);
+  await expect.poll(shown).toEqual(["Website", "Release 2.4", "Releases"]);
   await open(page, "script=tab%20projects"); // kept: another load (device) shows the same order
-  await expect.poll(shown).toEqual(["Website", "Upstream", "Releases"]);
+  await expect.poll(shown).toEqual(["Website", "Release 2.4", "Releases"]);
 });

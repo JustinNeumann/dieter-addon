@@ -1,0 +1,81 @@
+# Publishes the page's standalone demo (?demo=standalone: sample data, Dreamfall included, no web host, no account) on
+# GitHub Pages: https://justinneumann.github.io/dieter-addon/. It takes the page the Builder built and tested for main
+# (the run's web-dist artifact), after every successful Builder run of a push to main; by hand, the newest such run.
+# One-time: Settings → Pages → Build and deployment → Source: GitHub Actions.
+name: Demo
+
+on:
+  workflow_run:
+    workflows: [Builder]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Publish the demo
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read   # the Builder run's artifact
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Find the Builder run
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          if [[ -z "$RUN_ID" ]]; then
+            RUN_ID=$(gh run list -R "$GITHUB_REPOSITORY" -w Builder -b main -e push -s success -L 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          echo "page of Builder run ${RUN_ID}"
+          echo "id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+
+      # the page under app/, and a front door that opens it in the standalone demo
+      - name: Lay out the site
+        run: |
+          mkdir -p _site/app
+          tar xzf web-dist/dieter-web.tar.gz -C _site/app --strip-components=1
+          find _site -name '*.br' -delete   # Pages does not serve them; the loader inflates the .wasm.gz itself
+          cat > _site/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Dieter for Home Assistant · demo</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta http-equiv="refresh" content="0; url=app/?demo=standalone">
+            <script>location.replace("app/?demo=standalone" + location.hash);</script>
+          </head>
+          <body><a href="app/?demo=standalone">Open the demo</a></body>
+          </html>
+          EOF
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4

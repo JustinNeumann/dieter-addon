@@ -9,17 +9,29 @@ import com.getdieter.core.schedules.SchedulePresentations
 import com.getdieter.mobile.store.MobileCore
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
- * A stand-in for the core: answers every observed slice from [DemoData] and handles the few
- * commands that change what the demo shows (binding a board, sending, moving a card).
- * No gateway, daemon or network is involved.
+ * A stand-in for the core: answers every observed slice from [DemoData] and handles the
+ * commands that change what the demo shows (binding a board, creating or starting a task,
+ * sending, moving or finishing a card). No gateway, daemon or network is involved.
  */
-class DemoCore(private val data: DemoData = DemoData(), private val extras: DemoMailFiles = DemoMailFiles()) : MobileCore {
+class DemoCore(
+    private val data: DemoData = DemoData(),
+    private val extras: DemoMailFiles = DemoMailFiles(),
+    private val scope: CoroutineScope = MainScope(),
+) : MobileCore {
     private var sequence = 0L
     /** The project last used on this "device" (the real core keeps it in its creation memory). */
     private var project = ""
+    private var previewScope = ""
+    private var lastPreview: CreationPreview? = null
     private val observers = mutableMapOf<Pair<Slice, String>, MutableList<(Update) -> Unit>>()
+    private val activeRuns = mutableMapOf<String, Job>()
     /** What Tools → Schedules shows: one project's schedules or every project's. */
     private var schedulesShown: ScheduleProject? = null
     /** The schedule whose run history is open ("" none). */
@@ -30,14 +42,63 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
             view.bind?.let { data.bindBoard(it.board_id) }
             publish(Slice.SLICE_BOARD_VIEW, view.scope)
         }
+        command.creation_preview?.let { req ->
+            req.intent?.project_id?.takeIf { it.isNotEmpty() }?.let { project = it }
+            val preview = data.preview(req, project)
+            previewScope = req.scope
+            lastPreview = preview
+            publish(Slice.SLICE_CREATION_PREVIEW, req.scope)
+            return Result(creation_preview = preview)
+        }
+        command.create_conversation?.let { create ->
+            val intent = create.intent ?: CreationIntent()
+            intent.project_id.takeIf { it.isNotEmpty() }?.let { project = it }
+            val card = data.create(intent, create.chat, project)
+            publishCards(card.id)
+            if (!create.chat && card.lane == "running") scheduleRun(card.id)
+            return Result(card = card)
+        }
+        command.start_card?.let { start ->
+            if (data.start(start.card_id)) {
+                publishCards(start.card_id)
+                scheduleRun(start.card_id)
+            }
+        }
+        command.finish_card?.let { finish ->
+            activeRuns.remove(finish.card_id)?.cancel()
+            data.move(finish.card_id, "done")
+            publishCards(finish.card_id)
+        }
+        command.cancel_card?.let { cancel ->
+            activeRuns.remove(cancel.card_id)?.cancel()
+            data.move(cancel.card_id, "review")
+            publishCards(cancel.card_id)
+        }
         command.send_message?.let { message ->
             data.send(message.card_id, message.text)
             publish(Slice.SLICE_CONVERSATION, message.card_id)
         }
         command.move_card?.let { move ->
+            if (move.lane != "running") activeRuns.remove(move.card_id)?.cancel()
             data.move(move.card_id, move.lane)
-            observers.keys.filter { it.first == Slice.SLICE_BOARD_VIEW || it.first == Slice.SLICE_WORKSPACE }
-                .forEach { publish(it.first, it.second) }
+            publishCards(move.card_id)
+        }
+        command.rename_card?.let { rename ->
+            data.rename(rename.card_id, rename.title)
+            publishCards(rename.card_id)
+        }
+        command.update_card_draft?.let { draft ->
+            data.rename(draft.card_id, draft.title, draft.prompt)
+            publishCards(draft.card_id)
+        }
+        command.set_card_labels?.let { labels ->
+            data.setLabels(labels.card_id, labels.label_ids)
+            publishCards(labels.card_id)
+        }
+        command.archive_card?.let { archive ->
+            activeRuns.remove(archive.card_id)?.cancel()
+            data.archive(archive.card_id)
+            publishCards(archive.card_id)
         }
         command.mail?.let { mail ->
             extras.mailCommand(mail)
@@ -91,11 +152,33 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
         return ClientSubscription { observers[key]?.remove(receive) }
     }
 
+    private fun scheduleRun(cardId: String) {
+        activeRuns.remove(cardId)?.cancel()
+        activeRuns[cardId] =
+            scope.launch {
+                val delays = listOf(900L, 1100L, 1000L)
+                for ((i, ms) in delays.withIndex()) {
+                    delay(ms)
+                    if (!data.advanceRun(cardId, i + 1)) return@launch
+                    publishCards(cardId)
+                }
+            }
+    }
+
+    private fun publishCards(cardId: String) {
+        val slices = setOf(Slice.SLICE_BOARD_VIEW, Slice.SLICE_WORKSPACE, Slice.SLICE_ACTIVITY, Slice.SLICE_CHATS)
+        observers.keys.filter { it.first in slices || (it.first == Slice.SLICE_CONVERSATION && it.second == cardId) }
+            .forEach { publish(it.first, it.second) }
+    }
+
     private fun update(slice: Slice, scope: String): Update? =
         when (slice) {
             Slice.SLICE_MAIL -> Update(slice = slice, scope = scope, mail = extras.mail())
             Slice.SLICE_FILES -> Update(slice = slice, scope = scope, files = extras.files())
             Slice.SLICE_CREATION -> Update(slice = slice, scope = scope, creation = CreationSlice(project_id = project))
+            Slice.SLICE_CREATION_PREVIEW ->
+                (if (scope == previewScope && lastPreview != null) lastPreview else data.preview(CreationPreviewCommand(scope = scope), project))
+                    ?.let { Update(slice = slice, scope = scope, creation_preview = it) }
             Slice.SLICE_SCHEDULES -> Update(slice = slice, scope = scope, schedules = schedulesSlice())
             else -> data.update(slice, scope)
         }
@@ -141,4 +224,3 @@ class DemoCore(private val data: DemoData = DemoData(), private val extras: Demo
         )
     }
 }
-

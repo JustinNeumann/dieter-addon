@@ -25,7 +25,7 @@ test("an empty board is archived from its menu, listed on its project's page and
 });
 
 test("a board with open cards is not archived, and the page says why", async ({ page }) => {
-  await open(page, "board Upstream");
+  await open(page, "board Release 2.4");
   await tap(page, page.getByRole("button", { name: "Board options", exact: true }));
   await settle(page, 500);
   await tap(page, page.getByRole("button", { name: "Archive board…", exact: true }));
