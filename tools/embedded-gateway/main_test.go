@@ -417,3 +417,137 @@ func TestAdoptStoreBetweenExternalAndEmbeddedModes(t *testing.T) {
 		}
 	}
 }
+
+func TestReconcileTargetProjectsAndCheckoutsDeduplicatesProjectsAndCheckouts(t *testing.T) {
+	root := t.TempDir()
+	storeDir := filepath.Join(root, "dieter")
+	repoPath := filepath.Join(root, "projects", "sem2_ha")
+	initGitRepo(t, repoPath)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	writeTestDaemonCredential(t, storeDir, "d_emb", "http://127.0.0.1:4243")
+	s := store.New(storeDir)
+	defer s.Close()
+	if err := s.Ensure(); err != nil {
+		t.Fatalf("ensure store: %v", err)
+	}
+	embPeer, err := s.Replica.BindPeerAccount("acc_embedded", "github:1", "d_emb", "gw-emb")
+	if err != nil {
+		t.Fatalf("bind embedded account: %v", err)
+	}
+
+	realProj, err := s.Kanban.CreateProject(kanban.CreateProjectInput{
+		Name:             "sem2_ha",
+		Path:             repoPath,
+		InitialBoardName: "Main",
+	})
+	if err != nil {
+		t.Fatalf("create realProj: %v", err)
+	}
+	realBoard, err := s.Kanban.InitialBoard(realProj.ID)
+	if err != nil {
+		t.Fatalf("initial board: %v", err)
+	}
+	card, err := s.Kanban.CreateCard(kanban.CreateCardInput{
+		Project: realProj.ID,
+		Board:   realBoard.ID,
+		Title:   "Real card",
+		Prompt:  "Real prompt",
+	})
+	if err != nil {
+		t.Fatalf("create card: %v", err)
+	}
+
+	// Inject a second non-detached checkout on realProj (simulating co_f01b976f2c48) AND an empty duplicate project on the same repoPath (simulating p_f982a8d78850).
+	view, err := s.Replica.OpenPeerView(embPeer.Account)
+	if err != nil {
+		t.Fatalf("open view: %v", err)
+	}
+	view.State = replica.ClonePeerState(view.State)
+	dupCoID := "co_dup_extra"
+	if err := setDominantField(&view, embPeer.Actor, "checkout", dupCoID+".registration", replica.RawValue(map[string]any{
+		"id": dupCoID, "projectId": realProj.ID, "daemonId": "d_emb", "name": "sem2_ha", "detached": false,
+	})); err != nil {
+		t.Fatalf("set dup checkout: %v", err)
+	}
+	_ = home.WriteJSON(filepath.Join(storeDir, "checkouts", dupCoID+".json"), model.Checkout{
+		ID: dupCoID, ProjectID: realProj.ID, DaemonID: "d_emb", Name: "sem2_ha", Path: repoPath,
+	})
+
+	dupProjID := "p_dup_empty"
+	dupBoardID := "b_dup_empty"
+	dupProjCoID := "co_dup_proj"
+	now := home.Timestamp()
+	for k, v := range map[string]any{
+		"project/" + dupProjID + ".identity":  map[string]any{"id": dupProjID, "createdAt": now},
+		"project/" + dupProjID + ".name":      "sem2_ha",
+		"project/" + dupProjID + ".archived":  false,
+		"project/" + dupProjID + ".updatedAt": now,
+		"board/" + dupBoardID + ".identity":   map[string]any{"id": dupBoardID, "projectId": dupProjID, "createdAt": now},
+		"board/" + dupBoardID + ".name":       "Main",
+		"board/" + dupBoardID + ".workflow":   realBoard.Workflow,
+		"checkout/" + dupProjCoID + ".registration": map[string]any{
+			"id": dupProjCoID, "projectId": dupProjID, "daemonId": "d_emb", "name": "sem2_ha", "detached": false,
+		},
+	} {
+		parts := filepath.SplitList(k)
+		_ = parts
+		var kind, id string
+		for idx := 0; idx < len(k); idx++ {
+			if k[idx] == '/' {
+				kind = k[:idx]
+				id = k[idx+1:]
+				break
+			}
+		}
+		if err := setDominantField(&view, embPeer.Actor, kind, id, replica.RawValue(v)); err != nil {
+			t.Fatalf("set %s: %v", k, err)
+		}
+	}
+	_ = home.WriteJSON(filepath.Join(storeDir, "checkouts", dupProjCoID+".json"), model.Checkout{
+		ID: dupProjCoID, ProjectID: dupProjID, DaemonID: "d_emb", Name: "sem2_ha", Path: repoPath,
+	})
+	if err := s.Replica.SavePeerData(embPeer.Account, view); err != nil {
+		t.Fatalf("save view: %v", err)
+	}
+
+	// Before adoptStore, realProj has 2 active local checkouts so its Path is empty, and ListProjects returns 2 projects!
+	beforeProjects, err := s.Kanban.ListProjects()
+	if err != nil {
+		t.Fatalf("ListProjects before: %v", err)
+	}
+	if len(beforeProjects) != 2 {
+		t.Fatalf("expected 2 projects before reconciliation, got %d", len(beforeProjects))
+	}
+
+	// Run adoptStore!
+	if err := adoptStore(s, storeDir, embPeer, true, logger); err != nil {
+		t.Fatalf("adoptStore: %v", err)
+	}
+
+	afterProjects, err := s.Kanban.ListProjects()
+	if err != nil {
+		t.Fatalf("ListProjects after: %v", err)
+	}
+	if len(afterProjects) != 1 || afterProjects[0].ID != realProj.ID || afterProjects[0].Path != repoPath {
+		t.Fatalf("expected only realProj (%s) with path %s, got %+v", realProj.ID, repoPath, afterProjects)
+	}
+	ownedCheckouts, err := s.Kanban.OwnedCheckouts()
+	if err != nil || len(ownedCheckouts) != 1 {
+		t.Fatalf("expected 1 owned checkout after reconciliation, got %+v (err=%v)", ownedCheckouts, err)
+	}
+	detail, err := s.Kanban.ReadCardDetail(card.ID)
+	if err != nil || detail.Project.Path != repoPath {
+		t.Fatalf("ReadCardDetail(%s): detail=%+v err=%v", card.ID, detail, err)
+	}
+
+	// Verify idempotence on second run.
+	v1, _ := s.Replica.OpenPeerView(embPeer.Account)
+	if err := adoptStore(s, storeDir, embPeer, true, logger); err != nil {
+		t.Fatalf("second adoptStore: %v", err)
+	}
+	v2, _ := s.Replica.OpenPeerView(embPeer.Account)
+	if v1.Sequence != v2.Sequence {
+		t.Fatalf("expected idempotent sequence %d, got %d", v1.Sequence, v2.Sequence)
+	}
+}
