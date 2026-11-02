@@ -42,7 +42,8 @@ import kotlinx.coroutines.launch
  * add-on's own features. `?demo` uses [DemoCore] for Dieter's data instead (no account); the add-on's
  * features still come from the web host. `?demo=standalone` needs no web host at all: the add-on core runs in
  * the page over sample data too ([DemoAddon]). `?script=tab projects; board Main`
- * replays the debug navigation script used for screenshots.
+ * replays the debug navigation script used for screenshots. Without either, the page opens where it was
+ * last on this browser ([LastPlace]).
  */
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
@@ -67,6 +68,7 @@ fun main() {
     val script = queryParameter("script").orEmpty()
     onFindShortcut { FindRequests.request() }
     val route = queryParameter("route").orEmpty()
+    LastPlace.follow(store, if (demo != null) "dieter.place.demo" else "dieter.place", restore = route.isBlank() && script.isBlank())
     PanelRoutes.start(route, focus = demo == null && route.isBlank() && script.isBlank())
     MainScope().launch {
         browserMonospace =
