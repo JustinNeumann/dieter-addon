@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.43 (2026-11-02)
+
+- **Fix: Usage shows when a limit resets as a local day and time to the minute.**
+  - The Claude and OpenAI windows printed the daemon's raw timestamp (`resets 2026-11-08T19:59:59.664282+00:00`),
+    which also squeezed the window name into one letter per line. They now read `resets Sun 8 Nov 21:00`, in the
+    browser's time zone. The page build patches the fork's `UsageScreen.kt` for this (`AddonRules.resetClock`).
+
 ## 0.6.431.42 (2026-11-01)
 
 - **Fix: Ollama task titles now rename standalone chats, keep the task's language, and recover when Ollama fails.**
