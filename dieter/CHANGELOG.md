@@ -2,6 +2,14 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.44 (2026-11-02)
+
+- **Fix: Exclude staged runtimes, card worktrees, and build caches from Home Assistant backups.**
+  - `backup_exclude` previously only excluded `dieter/runtime/harness/**` and `projects/**`, leaving
+    `dieter/worktrees/**` (~7.3 GB), `dieter/harness-staged/**` (~2.1 GB), `dieter/runtime/**`, and agent tool/build
+    caches (`.cache/**`, `.gradle/**`, `.npm/**`, `.kotlin/**`, `.codex/.tmp/**`, `.ai-sdk-harness/.agent-runs/**`) in
+    the add-on archive and pushing automatic Home Assistant backups past the 5 GB Home Assistant Cloud upload limit.
+
 ## 0.6.431.43 (2026-11-02)
 
 - **Fix: Usage shows when a limit resets as a local day and time to the minute.**

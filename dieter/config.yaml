@@ -4,7 +4,7 @@
 # installs (the Supervisor pulls image:<version> built by .github/workflows/builder.yaml). For a local
 # build on the device (docs/maintaining.md) drop the image: line, otherwise the Supervisor pulls instead of building.
 name: Dieter
-version: "0.6.431.43"
+version: "0.6.431.44"
 slug: dieter
 description: Dieter coding agents (daemon + page) behind Home Assistant Ingress
 url: https://github.com/JustinNeumann/dieter-addon
@@ -61,5 +61,13 @@ schema:
       branch: str?
   log_level: list(debug|info|warning)?
 backup_exclude:
-  - "dieter/runtime/harness/**"
+  - "dieter/runtime/**"
+  - "dieter/harness-staged/**"
+  - "dieter/worktrees/**"
   - "projects/**"
+  - ".cache/**"
+  - ".gradle/**"
+  - ".npm/**"
+  - ".kotlin/**"
+  - ".codex/.tmp/**"
+  - ".ai-sdk-harness/.agent-runs/**"
