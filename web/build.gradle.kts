@@ -1,3 +1,4 @@
+import java.security.MessageDigest
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 
 plugins {
@@ -16,11 +17,30 @@ val apps = dieter.resolve("apps/kotlin")
 // :ui's sources as they are, except that the Material type scale takes its monospace family from
 // platformMonospace() (the browser has no system monospace font; the web actual bundles one).
 // Upstream this is a two-line change in MobileTheme.kt.
+// Files in src/uiOverrides replace the fork's file of the same path. Each override records the sha256 of the
+// fork's file it was made from: when the fork changes it, the build fails until the override has its changes.
+val uiOverrides = layout.projectDirectory.dir("src/uiOverrides")
+val overriddenUiFiles =
+    mapOf(
+        // New project: failures in the sheet, relative paths from /data/projects
+        "com/getdieter/mobile/admin/ProjectEditor.kt" to "b15b3a7e370f49aa6e8e3942190b69aca0f76d29853a832a65cef40dbd051740",
+    )
 val uiSources =
     tasks.register<Sync>("prepareUiSources") {
-        from(apps.resolve("ui/src/commonMain/kotlin"))
+        val forkUi = apps.resolve("ui/src/commonMain/kotlin")
+        doFirst {
+            overriddenUiFiles.forEach { (file, recorded) ->
+                val digest = MessageDigest.getInstance("SHA-256").digest(forkUi.resolve(file).readBytes())
+                val actual = digest.joinToString("") { "%02x".format(it) }
+                check(actual == recorded) {
+                    "fork changed $file (sha256 $actual): merge it into web/src/uiOverrides/$file, then record the hash in web/build.gradle.kts"
+                }
+            }
+        }
+        from(forkUi) { exclude(overriddenUiFiles.keys) }
+        from(uiOverrides)
         into(layout.buildDirectory.dir("ui-src"))
-        inputs.property("patches", 3) // bump when the filters below change (Gradle cannot see into them)
+        inputs.property("patches", 4) // bump when the filters below change (Gradle cannot see into them)
         filesMatching("**/design/MobileTheme.kt") {
             filter { line ->
                 line.replace("fontFamily = FontFamily.Monospace", "fontFamily = platformMonospace()")

@@ -449,4 +449,17 @@ class AddonRulesTest {
         assertEquals(null, AddonRules.repositoryProblem("ssh://git@host:22/team/repo", "", "main"))
         assertTrue(AddonRules.repositoryProblem("https://github.com/o/r", "", "bad branch") != null)
     }
+
+    @Test
+    fun projectPathTakesARelativePathFromTheProjectsFolder() {
+        assertEquals("/data/projects/talk-tv-factory", AddonRules.projectPath(" talk-tv-factory/ ", local = true))
+        assertEquals("/data/projects/a/b", AddonRules.projectPath("a/b", local = true))
+        assertEquals("/srv/work", AddonRules.projectPath("/srv/work/", local = false))
+        assertEquals(null, AddonRules.projectPathProblem("/srv/work", local = false))
+        assertTrue(AddonRules.projectPathProblem("talk-tv-factory", local = false) != null)
+        assertEquals("", AddonRules.projectPath("talk-tv-factory", local = false))
+        assertTrue(AddonRules.projectPathProblem("../etc", local = true) != null)
+        assertTrue(AddonRules.projectPathProblem("~/work", local = true) != null)
+        assertTrue(AddonRules.projectPathProblem("  ", local = true) != null)
+    }
 }
