@@ -85,6 +85,19 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (a scheduled task).
 
+- **2026-11-02**, screened through upstream **v0.6.436** (`2d0a8d85`) and main (`d748c049`), from v0.6.431
+  (`7f2afded`, the base of the pinned `0.6.431-antigravity.11`): 13 commits, all app-side (Android, iOS, Mac apps,
+  Maestro e2e, CI timeouts, release notes). Nothing changed in `internal/` (CLI, daemon, harness runtime, registry),
+  `cmd/` or `api/proto`. The release assets of v0.6.432 and v0.6.433 have the same names as before (v0.6.434–436 are
+  tags without a GitHub release). Nothing to adapt. The fork has no release newer than `antigravity.11`, and
+  `fork-release` does not need a rebase for the daemon (it would only change the version string). The pinned
+  runtime sources still match `RUNTIME_SOURCES_SHA`, and `patch_runtime.py` applies to them. For the page (the `fork`
+  submodule, at `b1ce51fb`, which contains upstream v0.6.432): 0.6.433 put Mail beside Inbox in the bar and made the fold's
+  panes draggable away, 0.6.434–435 added Android's desktop shell (DeX: sidebar, every lane side by side, Ctrl+K/N/B/W,
+  Settings → Appearance → Interface). v0.6.432's navigation-edit delivery (`22701f9c`) and terminal routing fix
+  (`1c9a4fe6`) are already in the submodule. Moving the submodule past `d748c049` breaks `web/`: `MobileApp`
+  (with the desktop shell) moved to `jvmSharedMain`, and `commonMain` keeps only `MaterialShell`/`RouteContent`, so
+  `web/src/wasmJsMain/.../Main.kt` would need a host of its own.
 - **2026-10-31**, fork release **`0.6.431-antigravity.11`** (`23f605ef`): `antigravity.10` plus Antigravity parity with
   Claude Code (MCP host tools proxy `antigravity-host-tools.mjs`, per-step usage, `/compact`, lost-conversation
   recovery, `agy models` discovery, model `contextWindow` / `defaultEffort` / `efforts`, `invoke_subagent` lifecycle,
