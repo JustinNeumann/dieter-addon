@@ -115,6 +115,10 @@ class DemoCore(
             publish(Slice.SLICE_CREATION, "")
         }
         command.load_tool_output?.let { return Result(tool_output = data.toolOutput(it)) }
+        // New project fails like the daemon when the path is no Git working tree and none is to be created
+        command.admin?.create_project?.let { create ->
+            if (!create.create) error("project path must be an existing Git working tree")
+        }
         command.admin?.set_board_retired?.let { retire ->
             data.setRetired(retire.board_id, retire.retired)
             observers.keys.filter { it.first == Slice.SLICE_BOARD_VIEW || it.first == Slice.SLICE_WORKSPACE }

@@ -121,6 +121,33 @@ object AddonRules {
         }
     }
 
+    /** Where the add-on keeps its projects; New project takes a relative path from here. */
+    const val PROJECTS_DIR = "/data/projects"
+
+    /**
+     * The absolute path New project registers for [path]: on the add-on's own machine ([local]) a
+     * relative path is a folder in [PROJECTS_DIR] (the daemon would take it from its working
+     * directory, /). Empty while [path] is not usable ([projectPathProblem]).
+     */
+    fun projectPath(path: String, local: Boolean): String {
+        if (projectPathProblem(path, local) != null) return ""
+        val value = path.trim().trimEnd('/')
+        return if (value.startsWith("/")) value else "$PROJECTS_DIR/$value"
+    }
+
+    /** Why New project cannot use [path] on a machine that is ([local]) or is not the add-on's own, or null. */
+    fun projectPathProblem(path: String, local: Boolean): String? {
+        val value = path.trim().trimEnd('/')
+        return when {
+            value.isEmpty() -> "Type the project's path."
+            value.startsWith("~") -> "Type the path without ~ (the machine does not expand it)."
+            value.startsWith("/") -> null
+            !local -> "Type an absolute path on that machine, starting with /."
+            value.split('/').any { it == ".." } -> "A relative path stays in $PROJECTS_DIR (no ..)."
+            else -> null
+        }
+    }
+
     /** Whether [answer] answers [item]: an option chosen, or own text where the item takes it. */
     fun answers(item: QuestionItem, answer: Answer?): Boolean =
         answer != null && (answer.option_ids.isNotEmpty() || (item.free_form && answer.freeform.isNotBlank()))

@@ -2,6 +2,19 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.46 (2026-11-02)
+
+- **Fix: New project (Projects → Add) could not create a project and did not say why.**
+  - A failed Create now shows the daemon's reason in the sheet; before it went to the snackbar behind the sheet's
+    scrim, so the button looked dead.
+  - A relative path on the add-on's machine is a folder in `/data/projects` (the daemon took it from its working
+    directory, `/`, e.g. `/talk-tv-factory`); the sheet shows the path it creates or opens. Other machines need an
+    absolute path, and `~` or `..` are refused with a hint.
+  - The add-on's machine is picked when the sheet opens, and the sheet says that a project is a Git working tree:
+    *Create a new Git repository* starts a local one without a remote.
+  - The page builds the sheet from the add-on's copy (`web/src/uiOverrides`); the build fails when the fork changes
+    its `ProjectEditor.kt` until the copy has the change.
+
 ## 0.6.431.45 (2026-11-02)
 
 - **Fix: Prevent OOM kills and orphaned agent processes from interrupting active turns.**
