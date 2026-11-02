@@ -2,6 +2,29 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.45 (2026-11-02)
+
+- **Fix: Prevent OOM kills and orphaned agent processes from interrupting active turns.**
+  - **Concurrency and available-memory gate (`patches/turn-resilience.mjs`, `runner.mjs`):** bounds concurrent active
+    agent turns across the host (`defaultMaxSlots` based on system RAM, e.g. 4 on an 8 GB Raspberry Pi) and waits for
+    `MemAvailable` headroom on slots `1..N-1` while keeping slot `0` unconditionally open, preventing bursts of
+    simultaneously started cards from exhausting RAM and swap.
+  - **Prioritize add-on infrastructure over expendable agent subprocesses under OOM (`raiseOomScoreAdj`):** harness
+    workers (`runner.mjs`) raise their `/proc/self/oom_score_adj` to `500` and agent CLI children (`agy`, `claude`,
+    `codex`, `bridge.mjs`) to `600`, so the Linux kernel OOM killer never kills the web host, operator, or `dieter`
+    daemon (`oom_score_adj: 200`) ahead of an agent worker.
+  - **Clean worker and provider-bridge teardown on daemon crash (`runner.mjs`, `local-sandbox.mjs`,
+    `antigravity-runtime.mjs`, `Supervisor.kt`):**
+    - `runner.mjs` guards `process.stdout` against unhandled `EPIPE` errors and detects parent daemon death
+      (`process.ppid`), unwinding the active session and stopping sandbox child processes instead of crashing and
+      stranding children.
+    - `local-sandbox.mjs` prefixes `exec` when launching `--bridge-state-dir` provider bridges under `/bin/sh -lc` so
+      `node bridge.mjs` is the process-group leader (`PID == PGID`) recorded in `bridge-meta.json`.
+    - `antigravity-runtime.mjs` awaits `agy` termination in `doStop()` and `doDestroy()`, escalating from `SIGTERM` to
+      `SIGKILL` if `agy` does not exit within the grace window.
+    - `DaemonSupervisor` reaps any lingering worker process groups (`.dieter-worker-*.pid`), provider bridges
+      (`bridge-meta.json`), and orphaned headless agent CLIs whenever the daemon exits or on operator startup.
+
 ## 0.6.431.44 (2026-11-02)
 
 - **Fix: Exclude staged runtimes, card worktrees, and build caches from Home Assistant backups.**

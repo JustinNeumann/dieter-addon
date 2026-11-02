@@ -157,6 +157,8 @@ class Supervision(
             setup.writeEnvFile()
             GatewayMode.prepareDaemon(home, optionsProvider() ?: options, env)
         },
+        store = home,
+        userHome = userHome,
     )
 
     fun run() {
