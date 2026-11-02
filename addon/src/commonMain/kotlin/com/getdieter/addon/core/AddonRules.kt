@@ -6,6 +6,12 @@ import com.getdieter.addon.v1.Answer
 import com.getdieter.addon.v1.DreamfallSettings
 import com.getdieter.addon.v1.InstructionsKind
 import com.getdieter.addon.v1.Question
+import com.getdieter.core.mail.LocalDay
+import com.getdieter.core.mail.MailDates
+import com.getdieter.core.runtime.Timestamps
+import com.getdieter.core.runtime.localUtcOffsetSeconds
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlinx.serialization.json.JsonObject
 import com.getdieter.addon.v1.QuestionItem
 
@@ -44,6 +50,23 @@ object AddonRules {
             val models = mine.first().strings("models").takeUnless { it == listOf(name) }.orEmpty()
             AntigravityGroup(name, models, shown.minOf { it.remaining }, shown)
         }
+
+    /**
+     * When a quota window resets, in the device's zone to the nearest minute: "Sun 8 Nov 21:00", with the year when it
+     * is not [now]'s. The daemon's own RFC 3339 text (microseconds, offset) when it cannot be read.
+     */
+    fun resetClock(
+        resetsAt: String,
+        now: Instant = Clock.System.now(),
+        offset: (Instant) -> Int = ::localUtcOffsetSeconds,
+    ): String {
+        val at = Timestamps.parse(resetsAt) ?: return resetsAt
+        val rounded = Instant.fromEpochSeconds((at.epochSeconds + 30).floorDiv(60) * 60)
+        val zone = offset(rounded)
+        val day = LocalDay.of(rounded, zone)
+        val year = if (day.year == LocalDay.of(now, offset(now)).year) "" else " ${day.year}"
+        return "${MailDates.weekday(day)} ${MailDates.dayMonth(day)}$year ${MailDates.clock(rounded, zone)}"
+    }
 
     /** [items] (boards, by [id]) in [order]; the ones not in it follow in their own order, as the bridge sorts them. */
     fun <T> inBoardOrder(items: List<T>, order: List<String>, id: (T) -> String): List<T> {

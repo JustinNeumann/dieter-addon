@@ -20,12 +20,21 @@ val uiSources =
     tasks.register<Sync>("prepareUiSources") {
         from(apps.resolve("ui/src/commonMain/kotlin"))
         into(layout.buildDirectory.dir("ui-src"))
-        inputs.property("patches", 2) // bump when the filters below change (Gradle cannot see into them)
+        inputs.property("patches", 3) // bump when the filters below change (Gradle cannot see into them)
         filesMatching("**/design/MobileTheme.kt") {
             filter { line ->
                 line.replace("fontFamily = FontFamily.Monospace", "fontFamily = platformMonospace()")
                     // the entry point gives the loader the colour Compose draws (no flash on the next load)
                     .replace("private fun materialScheme(", "internal fun materialScheme(")
+            }
+        }
+        // Usage shows a window's reset as a local day and time to the minute, not the daemon's raw timestamp
+        filesMatching("**/tools/UsageScreen.kt") {
+            filter { line ->
+                line.replace(
+                    "?.let { \"resets \$it\" },",
+                    "?.let { \"resets \" + com.getdieter.addon.core.AddonRules.resetClock(it) },",
+                )
             }
         }
         // "Dynamic color" follows Home Assistant's theme on the web, not a wallpaper
