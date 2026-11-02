@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { HarnessCapabilityUnsupportedError } from "@ai-sdk/harness";
+import { raiseOomScoreAdj } from "./turn-resilience.mjs";
 
 // Google Antigravity CLI (`agy`) as a HarnessV1 adapter.
 //
@@ -100,6 +101,56 @@ function turnError(message) {
   const error = new Error(message);
   error.stack = message;
   return error;
+}
+
+// Terminate an `agy` child process and wait for it to exit, escalating from SIGTERM to SIGKILL
+// after `graceMs` so `doStop()` / `doDestroy()` never return while `agy` is still alive.
+function terminateChild(child, { signal = "SIGTERM", graceMs = 1_500 } = {}) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let killTimer;
+    let hardTimer;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killTimer);
+      clearTimeout(hardTimer);
+      child.removeListener("exit", finish);
+      child.removeListener("close", finish);
+      child.removeListener("error", finish);
+      resolve();
+    };
+    child.once("exit", finish);
+    child.once("close", finish);
+    child.once("error", finish);
+    const forceKill = () => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already exited
+      }
+      child.stdin?.destroy?.();
+      child.stdout?.destroy?.();
+      child.stderr?.destroy?.();
+      hardTimer = setTimeout(finish, 1_000);
+      hardTimer.unref?.();
+    };
+    if (signal === "SIGKILL" || graceMs <= 0) {
+      forceKill();
+      return;
+    }
+    try {
+      child.kill(signal);
+    } catch {
+      finish();
+      return;
+    }
+    killTimer = setTimeout(forceKill, graceMs);
+    killTimer.unref?.();
+  });
 }
 
 export function createAntigravity(settings = {}) {
@@ -270,15 +321,17 @@ export function createAntigravity(settings = {}) {
           return lifecycleState();
         },
         async doStop() {
-          if (current.child) {
-            current.child.kill("SIGTERM");
-          }
+          const child = current.child;
+          current.child = undefined;
           closeHostTools();
+          await terminateChild(child, { signal: "SIGTERM", graceMs: 1_500 });
           return lifecycleState();
         },
         async doDestroy() {
-          if (current.child) current.child.kill("SIGKILL");
+          const child = current.child;
+          current.child = undefined;
           closeHostTools();
+          await terminateChild(child, { signal: "SIGKILL", graceMs: 0 });
         },
       };
       return session;
@@ -491,6 +544,7 @@ function runTurn({
   expectConversation,
 }) {
   const child = spawn(command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+  if (child.pid) raiseOomScoreAdj(600, child.pid);
   current.child = child;
   const stderr = [];
   let result;
@@ -631,8 +685,8 @@ function runTurn({
     };
     const onAbort = () => {
       aborted = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 5_000).unref?.();
+      hostTurn?.close();
+      void terminateChild(child, { signal: "SIGTERM", graceMs: 1_500 });
     };
     if (abortSignal?.aborted) onAbort();
     else abortSignal?.addEventListener("abort", onAbort, { once: true });
@@ -724,6 +778,7 @@ function runCompaction({ command, cwd, conversationId, current }) {
       ["--output-format", "stream-json", "--conversation", conversationId],
       { cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] },
     );
+    if (child.pid) raiseOomScoreAdj(600, child.pid);
     current.child = child;
     const stderr = [];
     let result;

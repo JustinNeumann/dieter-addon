@@ -24,7 +24,7 @@ if (argv[0] === "mcp") {
   process.exit(0);
 }
 const prompt = readFileSync(0, "utf8");
-log({ argv, prompt, cwd: process.cwd(), tools: !!process.env.DIETER_AGY_TOOLS_URL });
+log({ pid: process.pid, argv, prompt, cwd: process.cwd(), tools: !!process.env.DIETER_AGY_TOOLS_URL });
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 const arg = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : undefined);
 const usage = (input, output, thinking = 0, cached = 0) => ({ input_tokens: input, output_tokens: output, thinking_tokens: thinking, cache_read_tokens: cached, total_tokens: input + output });
@@ -41,7 +41,8 @@ if (mode === "lost" && resume) {
   process.stderr.write('warning: conversation "' + resume + '" not found\\n');
   out({ event: "init", conversation_id: "conv-fresh", init: { cwd: process.cwd() } });
   setTimeout(() => {}, 60_000); // the adapter stops this run
-} else if (mode === "hang") {
+} else if (mode === "hang" || mode === "stubborn") {
+  if (mode === "stubborn") process.on("SIGTERM", () => {});
   out({ event: "init", conversation_id: "conv-hang", init: { cwd: process.cwd() } });
   step({ step_index: 1, state: "ACTIVE", step_type: "agent_response", text_delta: "working" });
   setTimeout(() => {}, 60_000);
@@ -423,6 +424,31 @@ test("Antigravity: aborting a turn stops the agy process", async (t) => {
     events.some((e) => e.type === "text-end"),
     "open parts are closed",
   );
+});
+
+test("Antigravity: doStop waits for a stubborn agy process that ignores SIGTERM to exit via SIGKILL", async (t) => {
+  const { root, command, calls } = await fixture(t);
+  process.env.AGY_FIXTURE = "stubborn";
+  const harness = createAntigravity({ command });
+  const session = await harness.doStart({
+    sessionId: "s7b",
+    sessionWorkDir: root,
+    permissionMode: "allow-all",
+  });
+  let stopped = false;
+  const { error } = await runTurn(session, {
+    prompt: "stubborn",
+    onEvent: (e) => {
+      if (e.type === "text-delta" && !stopped) {
+        stopped = true;
+        void session.doStop();
+      }
+    },
+  });
+  assert.ok(error);
+  const [entry] = await calls();
+  assert.ok(entry.pid > 0);
+  assert.throws(() => process.kill(entry.pid, 0), { code: "ESRCH" });
 });
 
 test("Antigravity: compaction runs agy's /compact on the stored conversation", async (t) => {

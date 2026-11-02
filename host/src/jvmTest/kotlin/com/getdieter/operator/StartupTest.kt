@@ -196,4 +196,59 @@ class StartupTest {
         assertFalse(DaemonSupervisor.isDaemonStart(listOf("--store", "/data/dieter", "daemon", "status")))
         assertFalse(DaemonSupervisor.isDaemonStart(listOf("status", "start")))
     }
+
+    @Test
+    fun `the supervisor reaps orphaned worker process groups and provider bridges when the daemon exits`() {
+        val store = File(home, "dieter").apply { mkdirs() }
+        val sessionDir = File(store, "runtime/sessions/p_test").apply { mkdirs() }
+        val bridgeDir = File(home, ".ai-sdk-harness/.agent-runs/c_bridge/bridge").apply { mkdirs() }
+        val orphanPidFile = File(home, "orphan-agy.pid")
+
+        // 1. Simulate a worker process group where the leader (runner.mjs) spawns a child (agy) and then exits (e.g. EPIPE)
+        val leader = ProcessBuilder(
+            "node",
+            "-e",
+            """
+            const { spawn } = require("node:child_process");
+            const fs = require("node:fs");
+            const leader = spawn(process.execPath, ["-e", `
+              const { spawn } = require("node:child_process");
+              const fs = require("node:fs");
+              const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: false });
+              fs.writeFileSync(${Json.encodeToString(kotlinx.serialization.serializer(), orphanPidFile.path)}, String(child.pid));
+              process.exit(0);
+            `], { detached: true, stdio: "ignore" });
+            fs.writeFileSync(${Json.encodeToString(kotlinx.serialization.serializer(), File(sessionDir, ".dieter-worker-c_agy.pid").path)}, JSON.stringify({ pid: leader.pid, ownerPid: 1, token: "t" }) + "\n");
+            """.trimIndent(),
+        ).start()
+        assertEquals(0, leader.waitFor())
+        val end = System.currentTimeMillis() + 5_000
+        while (!orphanPidFile.exists() && System.currentTimeMillis() < end) Thread.sleep(25)
+        val orphanAgyPid = orphanPidFile.readText().trim().toLong()
+        assertTrue(ProcessHandle.of(orphanAgyPid).map { it.isAlive }.orElse(false), "orphan child in dead leader's process group is alive")
+
+        // 2. Simulate an orphaned provider bridge process with bridge-meta.json
+        val bridgeProc = ProcessBuilder("node", "-e", "setInterval(() => {}, 1000)", "--bridge-state-dir", bridgeDir.path).start()
+        File(bridgeDir, "bridge-meta.json").writeText("""{"pid":${bridgeProc.pid()}}""")
+        assertTrue(bridgeProc.isAlive)
+
+        try {
+            val supervisor = DaemonSupervisor(
+                "/bin/sh",
+                command = { listOf("/bin/sh", "-c", "exit 137") },
+                environment = { emptyMap() },
+                sleep = {},
+                store = store,
+                userHome = home,
+            )
+            supervisor.loop(rounds = 1)
+
+            assertFalse(ProcessHandle.of(orphanAgyPid).map { it.isAlive }.orElse(false), "orphan in worker PGID was reaped")
+            assertFalse(bridgeProc.isAlive, "orphan bridge process was reaped")
+            assertFalse(File(bridgeDir, "bridge-meta.json").exists(), "stale bridge-meta.json was cleaned up")
+        } finally {
+            ProcessHandle.of(orphanAgyPid).ifPresent { it.destroyForcibly() }
+            if (bridgeProc.isAlive) bridgeProc.destroyForcibly()
+        }
+    }
 }
