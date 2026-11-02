@@ -2,6 +2,17 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.47 (2026-11-02)
+
+- **The page opens where you left it.** Home Assistant loads the add-on's frame afresh each time you come back to it
+  from another panel or dashboard (the add-on's panel, or a dashboard view that embeds it), and the page started over
+  at the Inbox. It now keeps its place (the open tab and each tab's screens: a conversation and its pane, a board,
+  Mail, a Dreamfall board, a tool page) in the browser's storage and goes back there on a load without a deep link.
+  - Per browser and per address: the Companion app, a desktop browser, local and Nabu Casa each keep their own.
+  - A deep link (a push, `?route=`) still opens its target; a conversation that is gone since leaves the place.
+  - Sheets (New task, Share) and terminals, screens and open files are not kept: the page opens on the screen
+    below them.
+
 ## 0.6.431.46 (2026-11-02)
 
 - **Fix: New project (Projects → Add) could not create a project and did not say why.**

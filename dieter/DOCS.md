@@ -421,6 +421,10 @@ repository with the add-on. The add-on's root forwards to it at `next/`.
   `card/<id>` opens a conversation, `tab/<name>` a tab, `dreamfall/<id>` a Dreamfall board (`…/settings` its
   settings) and `idea/<id>` an idea. While the page is open, Dieter's push notifications open their card in it;
   the address then goes back to `…/next`, so a reload stays on the page.
+- **Where you left it:** Home Assistant loads the page afresh each time you come back to it from another panel or
+  dashboard. Without a deep link it opens where it was last (the tab, the conversation and its pane, the board,
+  Mail, Dreamfall), kept in the browser's storage: each browser, the Companion app and each address (local or Nabu
+  Casa) keep their own. Sheets, terminals, screens and open files are not kept.
 
 ### Signing in the page
 
