@@ -11,8 +11,11 @@ test("New project takes a relative path from /data/projects and shows a failure 
   await expect.poll(() => aria(page)).toContain("New Project");
   // the add-on's machine is picked
   expect(await aria(page)).toContain("Home Assistant");
+  // the sheet slides up: a tap before it stops misses the field (the accessibility tree does not move with it)
+  await page.waitForTimeout(1500);
   await tap(page, page.locator("#project-name"));
   await page.keyboard.type("Talk TV Factory");
+  await settle(page, 300);
   await tap(page, page.locator("#project-path"));
   await page.keyboard.type("talk-tv-factory");
   // the field's "Opens /data/projects/talk-tv-factory" is not in the accessibility tree (AddonRulesTest covers the path)
