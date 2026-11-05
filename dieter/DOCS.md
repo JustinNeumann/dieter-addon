@@ -58,7 +58,7 @@ The add-on's Supervisor token is an administrator's in Home Assistant (its Super
 cannot narrow it to some services. So only the web host gets it: it relays the operator's few calls (the events
 `dieter_turn_finished`, `dieter_card_review` and `dieter_question`, the lookup of the Ollama ai_task entity and the
 title of a new task) on `127.0.0.1:8097` and refuses anything else. That relay is on loopback, so an agent can send
-these events too, with made-up text: each must name a card id (`c_` and hex) in `id` or `card_id`, from which the
+these events too, with made-up text: each must name a card id (`c_` or `c_sched_` and hex) in `id` or `card_id`, from which the
 package builds the notification's link and tag, so a forged one opens a card's page at most. For agents it relays on `127.0.0.1:8098`: a
 conversation created with **Allow Home Assistant access** signs in there with its turn's token, which the web host
 checks with the daemon (through the operator, `dieter card caller`), and gets all of core's API; any other caller gets

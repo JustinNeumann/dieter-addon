@@ -55,9 +55,12 @@ class HomeAssistantRelayTest {
         assertTrue(HomeAssistantRelay.allowed("events/dieter_question", json("""{"card_id":"c_0123456789abcdef01234567","title":"x"}""")))
         assertTrue(HomeAssistantRelay.allowed("events/dieter_turn_finished", json("""{"id":"c_4f2a9b0c1d3e","title":"x"}""")))
         assertTrue(HomeAssistantRelay.allowed("events/dieter_card_review", json("""{"id":"c_4f2a9b0c1d3e"}""")))
+        // a schedule's run (schedules.go occurrenceIDs)
+        assertTrue(HomeAssistantRelay.allowed("events/dieter_turn_finished", json("""{"id":"c_sched_0123456789abcdef01234567","title":"x"}""")))
+        assertTrue(HomeAssistantRelay.allowed("events/dieter_question", json("""{"card_id":"c_sched_0123456789abcdef01234567"}""")))
         // the notification's link and tag come from the id: anything but a card's id is refused
         for (bad in listOf("{}", """{"id":"c_1"}""", """{"id":"../../config/users"}""", """{"id":"c_4f2a9b0c1d3e/../../x"}""",
-            """{"id":"C_4F2A9B0C1D3E"}""", """{"id":12}""", """{"card_id":"c_4f2a9b0c1d3e"}"""))
+            """{"id":"C_4F2A9B0C1D3E"}""", """{"id":"c_sched_"}""", """{"id":"c_sched_1"}""", """{"id":"c_other_4f2a9b0c1d3e"}""", """{"id":12}""", """{"card_id":"c_4f2a9b0c1d3e"}"""))
             assertFalse(HomeAssistantRelay.allowed("events/dieter_turn_finished", json(bad)), bad)
         assertFalse(HomeAssistantRelay.allowed("events/dieter_question", json("""{"id":"c_4f2a9b0c1d3e"}""")), "a question names its card in card_id")
         assertTrue(HomeAssistantRelay.allowed("template", buildJsonObject { put("template", OllamaEntity.TEMPLATE) }))
