@@ -74,8 +74,11 @@ class HomeAssistantRelay(
         /** The operator's events and the field that names their card. */
         private val EVENTS = mapOf("dieter_turn_finished" to "id", "dieter_card_review" to "id", "dieter_question" to "card_id")
 
-        /** The daemon's card and chat ids: `c_` and hex (12 random, 24 deterministic, up to 16 on its fallback). */
-        private val CARD_ID = Regex("^c_[0-9a-f]{12,32}$")
+        /**
+         * The daemon's card and chat ids: `c_` and hex (12 random, 24 deterministic, up to 16 on its fallback); a
+         * schedule's run is `c_sched_` and 24 hex.
+         */
+        private val CARD_ID = Regex("^c_(sched_)?[0-9a-f]{12,32}$")
         private val AI_TASK = Regex("^ai_task\\.[a-z0-9_]{1,100}$")
 
         /** Whether the operator does this in Home Assistant (see the class). */

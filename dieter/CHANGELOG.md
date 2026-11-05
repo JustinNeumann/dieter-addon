@@ -2,6 +2,13 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.48 (2026-11-05)
+
+- **Fix: scheduled runs sent no push.** A schedule's run has the card id `c_sched_<hex>`, and the web host's Home
+  Assistant relay let only `c_<hex>` through, so its `dieter_turn_finished`, `dieter_card_review` and
+  `dieter_question` were refused (`home assistant relay: refused POST events/…`, 403 in the operator's log). They
+  now reach Home Assistant like any other card's.
+
 ## 0.6.431.47 (2026-11-02)
 
 - **The page opens where you left it.** Home Assistant loads the add-on's frame afresh each time you come back to it
