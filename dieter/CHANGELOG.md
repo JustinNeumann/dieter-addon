@@ -2,6 +2,17 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.49 (2026-11-07)
+
+- **The page opens on live data.** The web host disconnected Dieter's core from the gateway and the daemon two
+  minutes after the last tab was hidden, and Home Assistant loads the panel's frame afresh each time it is opened, so
+  almost every open reconnected from scratch first (session, machines, devices, then the machine streams): 2–5 s on
+  "connecting" or on old data after the page itself had started in under a second. The core now connects when the
+  add-on starts and stays connected. With the embedded gateway (the default) the gateway and the daemon are on the
+  same machine, so this costs next to nothing; with an external gateway it is one more device that stays online.
+  - The web host's `DIETER_WEB_HOST_IDLE_MS` (milliseconds, not an add-on option) still sets a grace instead.
+  - The log says how long connecting took (`core connecting (took … ms)`).
+
 ## 0.6.431.48 (2026-11-05)
 
 - **Fix: scheduled runs sent no push.** A schedule's run has the card id `c_sched_<hex>`, and the web host's Home
