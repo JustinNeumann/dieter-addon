@@ -52,7 +52,8 @@ features over one group at a time.
   address into the gateway field also completes. The session belongs to the add-on, so every browser and the
   Companion app share one sign-in and one pairing.
 - Foreground: the core keeps its streams open only while "the app" is shown. Each tab reports its visibility;
-  the host runs the core while any tab is shown and stops two minutes after the last one hides.
+  the host runs the core while any tab is shown, and by default keeps it running after the last one hides (a page
+  then opens on live data; DIETER_WEB_HOST_IDLE_MS sets a grace instead).
 - RAM: about 100 MB RSS idle and about 200 MB with the showcase workspace on x86 (JVM flags in `run.sh`
   cap heap 160 MB, metaspace 96 MB, code cache 48 MB). The Pi has 8 GB and the add-on uses about 1 GB today;
   measure the host there after deploy.

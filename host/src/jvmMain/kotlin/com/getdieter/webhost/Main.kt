@@ -36,6 +36,7 @@ import okio.Path.Companion.toOkioPath
  *   DIETER_WEB_SIGN_IN_CALLBACK  pins the sign-in callback (https://<HA>/app/<slug>/next/signin); else the page tells it
  *   DIETER_WEB_BRIDGE_URL    the API the add-on core calls, default the operator's (…/api/)
  *   DIETER_WEB_DEVICE_NAME   how this device appears in the account's device list
+ *   DIETER_WEB_HOST_IDLE_MS  disconnect the core this long after the last tab hides; default: stay connected
  *   DIETER_WEB_HOST_VERBOSE=1    core debug logs
  */
 fun main() {
@@ -127,7 +128,7 @@ class WebHostServer(
             },
             timezone = { java.util.TimeZone.getDefault().id },
         )
-        foreground = Foreground(api, commands, env["DIETER_WEB_HOST_IDLE_MS"]?.toLongOrNull() ?: 120_000)
+        foreground = Foreground(api, commands, env["DIETER_WEB_HOST_IDLE_MS"]?.toLongOrNull() ?: Foreground.ALWAYS)
         embedded =
             if (env["DIETER_GATEWAY_MODE"] == "embedded" || !env["DIETER_EMBEDDED_BOOTSTRAP"].isNullOrBlank()) {
                 EmbeddedGatewaySession(
@@ -163,6 +164,7 @@ class WebHostServer(
     fun start(): Int {
         runtime.start()
         addon.start()
+        foreground.start()
         embedded?.start()
         return server.start()
     }
