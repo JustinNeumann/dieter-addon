@@ -85,6 +85,46 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (a scheduled task).
 
+- **2026-11-09**, screened through upstream **v0.6.442** (`0b2bac3a`) and main (`e93d4f37`), from main `d748c049` (the
+  screen of 2026-11-02): 40 commits. Relevant ones:
+  - Agent channels are on for every project and card (`ebf8330c`). `dieter channel settings` and the
+    `GetChannelSettings`/`SetChannelSetting` RPCs are gone, `enabled` is reserved in `channels.proto`, `channel list` drops its
+    ENABLED column, the `experimental` KV namespace is no longer validated, and every card's prompt carries the channel
+    instructions.
+  - Opt-in cleanup of archived worktrees (#194): `project update --delete-worktrees-on-archive=true|false`,
+    `Project.delete_worktrees_on_archive`, a cleanup loop in the scheduler (every minute), longer `card archive` help.
+  - Peer sync goes on past records whose owner proof does not verify (#196); `peer status` lists them as `held`.
+  - The change stream sends at most one data frame per 250 ms.
+  - Harness runtime: dependency bumps (`@ai-sdk/harness` 1.0.173, `claude-agent-sdk` 0.3.317, `@openai/codex` 0.166.0,
+    omp 18.16.0, …), a new `acp-runtime.mjs` wrapper for `createACP`, prettier reformatting of `capabilities.mjs`, and
+    managed Bun 1.4.4.
+  - Release assets of v0.6.437–442 have the same names as before (19 assets, `SHA256SUMS` + sigstore bundle). The
+    gateway changes only in `deploy/gateway` base images.
+  - Apps (Kotlin): channel settings removed from the core and the UI (`ChannelSettings.kt`, `SLICE_CHANNEL_SETTINGS`),
+    sidebar projects ordered by activity with manual rearrangement (`ProjectOrdering`, navigation KV), the mobile Inbox leads
+    with running work and swipeable cards, queued sends pinned above the input (`QueuedMessageState`), an "Archive storage"
+    switch in project settings, workspace hyperlinks and image previews; Wire 7.1.2, serialization 1.12.0, Gradle 9.8.2,
+    `-Xmx5g`. iOS, Mac and Android: screen sharing fixes, Mac CPU fix, dSYMs, Maestro flows (noted only).
+
+  Nothing to adapt with what is pinned. The add-on calls none of the removed commands, RPCs or fields (no `channel` CLI, no
+  `experimental` KV). `Harness.kt` reads the Bun version from the archive's manifest. The `ProjectEditor.kt` override is
+  unchanged upstream. The fork has no release newer than `antigravity.11`. The pinned runtime sources still match
+  `RUNTIME_SOURCES_SHA`, and `patch_runtime.py` applies to them. Follow-ups:
+  - `fork-release` needs upstream v0.6.442 (or main) merged, then tag `v0.6.442-antigravity.12`. Expect conflicts in
+    `capabilities.mjs` (upstream's reformatting and Codex provider overrides vs the fork's task plans and channel write
+    scope), `internal/engine/channels.go` and `internal/prompt/prompt.go` (channels always on vs the fork's write-scope
+    enforcement), `internal/cli/rpc_cards.go` and `help_contract_test.go`. All of `patch_runtime.py`'s anchors except the
+    fork-only `host-questions.mjs` import still match upstream main's `runner.mjs` and `local-sandbox.mjs`. The adapter imports only
+    `HarnessCapabilityUnsupportedError`, which `@ai-sdk/harness` 1.0.173 still exports. On the bump, record
+    `RUNTIME_SOURCES_SHA`, the archive checksums in `Harness.kt`, and the adapter hash if the fork's adapter changes.
+  - Bump the daemon and move the submodule together. With the submodule at `b1ce51fb`, a v0.6.442 daemon no longer sends
+    `enabled`, so the page shows every channel as "Off" and its channel switches in Settings fail (RPCs gone). A moved
+    submodule against `antigravity.11` has no switch left, while that daemon keeps channels off until switched on.
+  - The submodule (`web-addon`) needs upstream `e93d4f37` merged, on top of its own Changes line counts and
+    `WorkspaceReview` commits. It is still blocked by `MobileApp` living in `jvmSharedMain` (`MaterialShell` is internal to
+    `commonMain`), so `web/.../Main.kt` needs a host of its own first.
+  - Decide after the bump whether DOCS.md should describe archive cleanup. It is off by default, and when switched on it
+    permanently deletes ignored files and build output of archived worktrees under `/data/projects`.
 - **2026-11-02**, screened through upstream **v0.6.436** (`2d0a8d85`) and main (`d748c049`), from v0.6.431
   (`7f2afded`, the base of the pinned `0.6.431-antigravity.11`): 13 commits, all app-side (Android, iOS, Mac apps,
   Maestro e2e, CI timeouts, release notes). Nothing changed in `internal/` (CLI, daemon, harness runtime, registry),
