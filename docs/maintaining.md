@@ -85,6 +85,84 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (a scheduled task).
 
+- **2026-11-16**, screened through upstream **v0.7.450** (`f2f27576`, = main; latest GitHub releases **v0.7.448**
+  `76442c3e` and pre-release **v0.7.449** `9dcd1707`), from main `e93d4f37` (the screen of 2026-11-09): 20 commits.
+  Relevant ones:
+  - Provider accounts (`b425c255`, v0.7.447): replaces the gateway-scoped quota store (`internal/providerquota` and the
+    gateway's quota RPCs/tables) with replicated provider accounts and per-machine logins (`internal/engine/accounts`,
+    `api/proto/dieter/v1/provider_accounts.proto`, `DIETER_HOME/provider-accounts/<id>/`, shared Codex home
+    `DIETER_HOME/codex`). `dieter quota` (`list`, `watch`, `refresh`, `include`, `exclude`, `reset`) is replaced by
+    `dieter provider list|add|rename|include|exclude|default|remove|login|logout|check|usage|reset|token`, and
+    `card create|send|update`, `chat create|send` and `schedule create|update` gain `--account ID|LABEL`. In
+    `internal/harness/runtime`, `quota-claude.mjs` and `quota-openai.mjs` are replaced by `usage-claude.mjs` (SDK
+    prompt-less session, `{loggedIn, identity, usage}` output), `smol-toml` is dropped from `package.json`, and
+    `runner.mjs` forwards `providerAuth(request)`, `provider-usage` and `auth-failure` frames.
+    `DIETER_CODEX_ACCOUNT_HOMES` and `DIETER_CLAUDE_ACCOUNT_HOMES` are removed from `config.Daemon`.
+  - Live conversation Changes (`9dcd1707`, v0.7.449): project-directory conversations and mobile chats get Changes in
+    place ("Shared checkout"), `dieter workspace watch-changes` streams live changesets (`WatchChangeset` RPC in
+    `git.proto`), `workspace run` pins per-file revisions (`--expect PATH=REVISION`), `workspace diff` and
+    `workspace comment` drop their changeset revision flag, and worktree Changes list branch commits and per-file line
+    counts.
+  - Synced folders (`d2f86612`, v0.6.446): `dieter folder` (`list`, `show`, `create`, `update`, `archive`, `attach`,
+    `member`, `pause`, `resume`, `detach`, `status`, `rescan`, `deletions`, `trash`, `index`, `blocks`, `apply`,
+    `client`), `dieter file cp --folder`, `internal/folders` + `internal/host/folders` + `internal/store/folders`,
+    `api/proto/dieter/v1/folders.proto`, and linked-folder prompt instructions.
+  - Strix security-scan harness (`d5bae373` v0.6.444, `fa229f66`): new `strix` adapter in `harnesses.yaml`,
+    `internal/harness/strix.go` (downloads pinned Strix 1.7.1 into `DIETER_HOME/runtime/tools/strix`),
+    `strix-runtime.mjs`, `runner.mjs` dispatch (`DIETER_STRIX_BIN`), `capabilities.mjs` `upsertSubagent`/`replaceTasks`,
+    and `DOCKER_HOST`/`DOCKER_CONFIG`/`DOCKER_CONTEXT`/`DOCKER_TLS_VERIFY`/`DOCKER_CERT_PATH` worker pass-through env
+    vars.
+  - Fast file transfers over WebRTC and the relay (`93b8822e`, v0.6.443), gateway session extension on use (`f5eeb246`)
+    and mobile re-sign-in after expiry (`0b757997`), iOS attention badges and APNs push (`8732ae0d`, disabled until App
+    Store profile in `082f6e80` v0.6.445), and Go 1.26.11 / 1.27.4 toolchain bump (`0669f6aa`).
+  - Release assets and gateway compatibility: v0.6.445–446 and v0.7.447–449 keep the same 19 asset names (`SHA256SUMS` +
+    sigstore bundle; v0.6.443–444 and v0.7.450 are tags without a GitHub release). `deploy/gateway/compatibility-policy.json`
+    raises `minimumClientVersion` and `minimumDaemonVersion` to `0.7.449` (after `0.7.0-dev.0` in v0.7.447).
+  - Apps (Kotlin): `UsageScreen.kt` and `core/quotas/*` are replaced by `mobile/providers/*` (`ProvidersScreen.kt`,
+    `ProviderAccountScreen.kt`, `AddAccountSheet.kt`, `SignInSheet.kt`, `UsageMeters.kt`) and `core/providers/*`;
+    `InboxScreen.kt` (`76442c3e`, v0.7.448) drops the count tiles and usage strip in favour of dense two-line rows
+    (`Needs you`, `Running`, `Pinned`, `Recent`), and `f2f27576` (v0.7.450) applies that list style across mobile list
+    pages (`Lists.kt`); `Platform` gains optional `attentionNotifications` and `folders` parameters; `core/folders/Nfc.kt`
+    adds `internal expect fun nfc(value: String): String` (with `.jvm.kt` and `.apple.kt` actuals); `NativeSurfaces.kt`
+    adds `expect` functions `rememberFolderFileOpener`, `rememberFolderLocationPicker` and
+    `rememberNotificationPermission`.
+
+  Nothing to adapt with what is pinned (`0.6.431-antigravity.11`, submodule `b1ce51fb`). The fork has no release newer
+  than `antigravity.11` and `web-addon` has not moved. The `ProjectEditor.kt` override is unchanged upstream. The pinned
+  runtime sources still match `RUNTIME_SOURCES_SHA`, and `patch_runtime.py` applies to them. Follow-ups:
+  - `fork-release` needs upstream **v0.7.450** (`f2f27576`) merged, then tag `v0.7.450-antigravity.12`. Besides the
+    v0.6.442 conflicts noted below, expect conflicts in `api/proto/dieter/v1/{cards,common,schedules}.proto` (and
+    generated `.pb.go`/Swift files), `internal/api/{conversation_snapshots,convert}.go`,
+    `internal/cli/{rpc_schedules,help_contract_test}.go`, `internal/engine/conversation_creation.go`,
+    `internal/engine/scheduler/scheduler.go`, `internal/harness/catalog/harnesses.yaml`,
+    `internal/harness/harness_test.go`, `internal/harness/runtime/capabilities{.mjs,.test.mjs}`, `internal/model/model.go`,
+    `internal/prompt/prompt.go`, `internal/replication/peersync/peer.go`, `internal/store/kanban/{cards,shared_test}.go`,
+    `internal/store/schedules/schedules.go` and `site/content/docs/harnesses.md`. All of `patch_runtime.py`'s anchors in
+    `local-sandbox.mjs` and `runner.mjs` (except the fork-only `host-questions.mjs` import) still match `f2f27576` once.
+  - Provider accounts and `claude_code_oauth_token` on the bump: in v0.7.447+, `accounts.Service`
+    (`internal/daemon/services.go`, `internal/engine/accounts/turns.go`) resolves every `claude-code` and `codex` turn
+    through provider accounts, masks `CLAUDE_CODE_OAUTH_TOKEN` on `host`/`claude-code` logins, and only adopts
+    `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` from the environment (ignoring `CLAUDE_CODE_OAUTH_TOKEN`). Either teach
+     the fork's `accounts` engine to adopt `CLAUDE_CODE_OAUTH_TOKEN` as an environment account, or map
+    `claude_code_oauth_token` in `Setup.kt`. Update `Board.kt`, `Usage.kt` and `dieter/operator/quota_claude_token.mjs`
+    together with the daemon bump: `dieter quota list` is replaced by `dieter provider list --format json` (and
+    `provider usage`), and `quota-claude.mjs` is replaced by `usage-claude.mjs` (`{loggedIn, identity, usage}` output).
+    Also check whether `dieter/codex/**` should join `backup_exclude` in `dieter/config.yaml`.
+  - Moving the submodule (`web-addon` <- `f2f27576`, together with the daemon bump) needs:
+    1. `MobileApp` in `jvmSharedMain` resolved (as noted below);
+    2. `web/build.gradle.kts` updated where it filters `UsageScreen.kt` (deleted in `b425c255`, replaced by
+       `com/getdieter/mobile/providers/UsageMeters.kt` calling `ProviderExports.resetText`), and `Antigravity.kt` /
+       `Extensions.kt` adapted from `core.quotas.Quotas`, `ToolPage.USAGE` and `usageBars` to `ProviderExports.resetText`
+       and `ToolPage.PROVIDERS`;
+    3. `web/src/wasmJsMain` actuals for `com.getdieter.core.folders.nfc(value: String): String` (`value.normalize("NFC")`)
+       and for `NativeSurfaces.kt`'s `rememberFolderFileOpener`, `rememberFolderLocationPicker` and
+       `rememberNotificationPermission`;
+    4. `web-addon`'s own `WorkspaceReview.kt` and `ProjectChanges.kt` commits (`8eb7fae3`, `5d4f75e6`) reconciled with
+       upstream's live conversation Changes (`9dcd1707`), which now implements project-directory Changes and per-file
+       line counts upstream.
+  - External gateways running 0.7.447+ enforce `minimumClientVersion` / `minimumDaemonVersion` (`0.7.449` at `f2f27576`)
+    and refuse 0.6 daemons and web hosts until the add-on bumps (embedded gateway mode sets `0.0.0-dev.0` in
+    `tools/embedded-gateway/main.go` and is unaffected).
 - **2026-11-09**, screened through upstream **v0.6.442** (`0b2bac3a`) and main (`e93d4f37`), from main `d748c049` (the
   screen of 2026-11-02): 40 commits. Relevant ones:
   - Agent channels are on for every project and card (`ebf8330c`). `dieter channel settings` and the
