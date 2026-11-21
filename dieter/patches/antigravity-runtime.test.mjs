@@ -236,9 +236,12 @@ test("Antigravity: a model id with its own level is run without --effort", async
     permissionMode: "allow-all",
   });
   await runTurn(session, { prompt: "hi", model: "gemini-3.8-flash-high" });
-  const [call] = await calls();
-  assert.ok(!call.argv.includes("--effort"));
-  assert.ok(call.argv.includes("gemini-3.8-flash-high"));
+  await runTurn(session, { prompt: "hi", model: "gemini-4-hydrogen-xhigh", effort: "high" });
+  const [first, second] = await calls();
+  assert.ok(!first.argv.includes("--effort"));
+  assert.ok(first.argv.includes("gemini-3.8-flash-high"));
+  assert.ok(!second.argv.includes("--effort"));
+  assert.ok(second.argv.includes("gemini-4-hydrogen-xhigh"));
 });
 
 test("Antigravity: permission prompts are skipped only in allow-all mode", async (t) => {

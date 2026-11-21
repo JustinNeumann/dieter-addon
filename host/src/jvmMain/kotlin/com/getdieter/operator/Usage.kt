@@ -170,7 +170,7 @@ class Usage(
 
     /**
      * Antigravity's quota groups: within a group the models share a weekly and a 5-hour window. A group names its model
-     * families in the description ("Models within this group: Gemini Flash, Gemini Pro"), Argon only itself.
+     * families in the description ("Models within this group: Gemini 4 Neon, Gemini 4 Carbon, Gemini 4 Argon, Gemini 4 Hydrogen, Gemini 3.8 Flash").
      */
     private fun antigravity(): JsonObject? {
         try {

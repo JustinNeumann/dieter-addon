@@ -2,6 +2,19 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.50 (2026-11-21)
+
+- **Antigravity models: Gemini 4 Neon, Carbon, Argon, Hydrogen.**
+  - The model catalog (`$DIETER_HOME/harnesses.yaml`, written by the operator before the daemon starts and merged with
+    any further models from `agy models`) now includes `gemini-4-neon-{xhigh,high,medium,low}`,
+    `gemini-4-carbon-{high,medium,low}`, `gemini-4-argon-{high,medium,low}` and
+    `gemini-4-hydrogen-{xhigh,high,medium,low}` alongside `gemini-3.8-flash-{high,medium,low}`,
+    `claude-opus-5-5-{high,medium,low}`, `claude-sonnet-5-5-{high,medium,low}` and `gpt-oss-120b-medium`, each with its
+    context window (`1048576` tokens for Gemini 4) and effort tier.
+  - The Antigravity runtime adapter (`patches/antigravity-runtime.mjs`) omits `--effort` for `-xhigh` and `-max` model
+    IDs (`gemini-4-neon-xhigh`, `gemini-4-hydrogen-xhigh`) as it does for `-low`, `-medium` and `-high`, so `agy` never
+    fails with `--model … conflicts with --effort=…`.
+
 ## 0.6.431.49 (2026-11-07)
 
 - **The page opens on live data.** The web host disconnected Dieter's core from the gateway and the daemon two
