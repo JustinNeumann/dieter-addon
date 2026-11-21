@@ -155,6 +155,7 @@ class Supervision(
         environment = { daemonEnvironment(env, harness?.runtimeDir, setup.envFileVariables()) },
         beforeStart = {
             setup.writeEnvFile()
+            Harness.writeCatalog(home, userHome = userHome)
             GatewayMode.prepareDaemon(home, optionsProvider() ?: options, env)
         },
         store = home,

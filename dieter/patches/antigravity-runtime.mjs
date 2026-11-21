@@ -249,9 +249,9 @@ export function createAntigravity(settings = {}) {
           const run = (resumeConversation) => {
             const args = ["--output-format", "stream-json"];
             if (turn.model) args.push("--model", turn.model);
-            // agy model ids carry their reasoning level (gemini-3.8-flash-high, claude-opus-5-5-low, …) and agy
-            // rejects every --effort that differs from it; such a model is run at its own level.
-            if (effort && !/-(low|medium|high)$/.test(turn.model || ""))
+            // agy model ids carry their reasoning level (gemini-4-neon-xhigh, gemini-3.8-flash-high, claude-opus-5-5-low, …)
+            // and agy rejects every --effort that differs from it; such a model is run at its own level.
+            if (effort && !/-(low|medium|high|xhigh|max)$/.test(turn.model || ""))
               args.push("--effort", effort);
             if (resumeConversation) args.push("--conversation", resumeConversation);
             if (allowAll) args.push("--dangerously-skip-permissions"); // Dieter's allow-all permission mode; headless agy denies tools otherwise

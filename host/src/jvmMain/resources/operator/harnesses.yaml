@@ -1,0 +1,377 @@
+version: 1
+
+# This is the release default embedded in the Dieter binary, with the updated
+# Antigravity model catalog. The operator writes it to $DIETER_HOME/harnesses.yaml
+# before starting the daemon.
+harnesses:
+  - id: codex
+    name: Codex
+    adapter: codex
+    capabilities:
+      - id: model-selection
+        level: between-turns
+      - id: effort-selection
+        level: between-turns
+      - id: task-plan
+        level: snapshots
+    options:
+      - id: fast_mode
+        name: Fast mode
+        description: Run supported Codex models faster at a higher usage rate.
+        type: boolean
+        default: "false"
+        mutable: true
+        models:
+          - gpt-6.1-sol
+          - gpt-6-astra
+          - gpt-5.6-sol
+          - gpt-5.6-terra
+          - gpt-5.6-luna
+          - gpt-5.5
+          - gpt-5.4
+    defaultModel: gpt-5.6-sol
+    effort:
+      label: Reasoning
+      # Union of the model-specific levels advertised by the bundled Codex CLI.
+      options:
+        - id: low
+          name: Low
+        - id: medium
+          name: Medium
+        - id: high
+          name: High
+        - id: xhigh
+          name: Extra high
+        - id: max
+          name: Max
+        - id: ultra
+          name: Ultra
+    # Fallback for unavailable discovery; live models come from Codex's model cache.
+    models:
+      - id: gpt-6.1-sol
+        name: GPT-6.1 Sol
+        defaultEffort: low
+        efforts: [low, medium, high, xhigh, max, ultra]
+      - id: gpt-6-astra
+        name: GPT-6 Astra
+        defaultEffort: medium
+        efforts: [low, medium, high, xhigh, max, ultra]
+      - id: gpt-5.6-sol
+        name: GPT-5.6 Sol
+        defaultEffort: xhigh
+        efforts: [low, medium, high, xhigh, max, ultra]
+      - id: gpt-5.6-terra
+        name: GPT-5.6 Terra
+        defaultEffort: medium
+        efforts: [low, medium, high, xhigh, max, ultra]
+      - id: gpt-5.6-luna
+        name: GPT-5.6 Luna
+        defaultEffort: medium
+        efforts: [low, medium, high, xhigh, max]
+      - id: gpt-5.5
+        name: GPT-5.5
+        defaultEffort: medium
+        efforts: [low, medium, high, xhigh]
+      - id: gpt-5.4
+        name: GPT-5.4
+        defaultEffort: medium
+        efforts: [low, medium, high, xhigh]
+      - id: gpt-5.3-codex
+        name: GPT-5.3 Codex
+        defaultEffort: medium
+        efforts: [low, medium, high, xhigh]
+      - id: gpt-5.3-codex-spark
+        name: GPT-5.3 Codex Spark
+        defaultEffort: high
+        efforts: [low, medium, high, xhigh]
+
+  - id: claude-code
+    name: Claude Code
+    adapter: claude-code
+    capabilities:
+      - id: model-selection
+        level: between-turns
+      - id: effort-selection
+        level: between-turns
+      - id: subagents
+        level: lifecycle
+      - id: task-plan
+        level: snapshots
+    defaultModel: sonnet
+    effort:
+      label: Thinking
+      options:
+        - id: low
+          name: Low
+        - id: medium
+          name: Medium
+        - id: high
+          name: High
+        - id: xhigh
+          name: Extra high
+        - id: max
+          name: Max
+    models:
+      # Stable aliases follow the model selected by the installed adapter.
+      - id: sonnet
+        name: Sonnet
+      - id: opus
+        name: Opus
+      - id: haiku
+        name: Haiku
+      # Keep existing Dieter conversations resumable after a registry upgrade.
+      - id: claude-sonnet-4-5
+        name: Claude Sonnet 4.5
+      - id: claude-opus-4-1
+        name: Claude Opus 4.1
+
+  - id: pi
+    name: Pi
+    adapter: pi
+    capabilities:
+      - id: model-selection
+        level: between-turns
+      - id: effort-selection
+        level: between-turns
+      - id: task-plan
+        level: host-tool
+    defaultModel: default
+    effort:
+      label: Thinking
+      options:
+        - id: "off"
+          name: "Off"
+        - id: minimal
+          name: Minimal
+        - id: low
+          name: Low
+        - id: medium
+          name: Medium
+        - id: high
+          name: High
+        - id: xhigh
+          name: Extra high
+    models:
+      - id: default
+        name: Configured default
+        runtimeModel: ""
+
+  - id: omp
+    name: Oh My Pi
+    adapter: omp-acp
+    capabilities:
+      - id: model-selection
+        level: between-turns
+      - id: subagents
+        level: progress
+      - id: task-plan
+        level: phases
+    options:
+      - id: advisor
+        name: Advisor
+        description: Ask OMP's advisor for an independent review during the turn.
+        type: boolean
+        default: "false"
+    defaultModel: openai-codex/gpt-6-sol
+    effort:
+      label: Thinking
+      options:
+        - id: "off"
+          name: "Off"
+        - id: minimal
+          name: Minimal
+        - id: low
+          name: Low
+        - id: medium
+          name: Medium
+        - id: high
+          name: High
+        - id: xhigh
+          name: Extra high
+        - id: max
+          name: Max
+        - id: auto
+          name: Auto
+    models:
+      # Keep OMP's UI intentionally small. OMP still owns credentials and
+      # provider routing for these exact selectors on each daemon host.
+      - id: openai-codex/gpt-6-luna
+        name: GPT-6 Luna · Codex
+        contextWindow: 272000
+        defaultEffort: high
+        efforts: [low, medium, high, xhigh, max]
+      - id: openai-codex/gpt-6-sol
+        name: GPT-6 Sol · Codex
+        contextWindow: 272000
+        defaultEffort: high
+        efforts: [low, medium, high, xhigh, max]
+      - id: openai-codex/gpt-6-astra
+        name: GPT-6 Astra · Codex
+        contextWindow: 272000
+        defaultEffort: high
+        efforts: [low, medium, high, xhigh, max]
+
+  - id: dsh
+    name: DeepSeek Harness
+    adapter: dsh-acp
+    capabilities:
+      - id: model-selection
+        level: between-turns
+      - id: task-plan
+        level: snapshots
+    defaultModel: default
+    models:
+      - id: default
+        name: Configured default
+        runtimeModel: ""
+
+  # Google Antigravity CLI (agy): one headless `agy` run per turn, continued with
+  # --conversation. Models and efforts are discovered from `agy models` and
+  # `agy --help`, with this static catalog as the offline fallback.
+  - id: antigravity
+    name: Antigravity
+    adapter: antigravity
+    capabilities:
+      - id: model-selection
+        level: between-turns
+      - id: effort-selection
+        level: between-turns
+      - id: subagents
+        level: lifecycle
+      - id: task-plan
+        level: host-tool
+    defaultModel: gemini-3.8-flash-high
+    effort:
+      label: Effort
+      options:
+        - id: low
+          name: Low
+        - id: medium
+          name: Medium
+        - id: high
+          name: High
+        - id: xhigh
+          name: Extra high
+        - id: max
+          name: Max
+    models:
+      - id: gemini-4-neon-xhigh
+        name: Gemini 4 Neon (XHigh)
+        contextWindow: 1048576
+        defaultEffort: xhigh
+        efforts: [xhigh]
+      - id: gemini-4-neon-high
+        name: Gemini 4 Neon (High)
+        contextWindow: 1048576
+        defaultEffort: high
+        efforts: [high]
+      - id: gemini-4-neon-medium
+        name: Gemini 4 Neon (Medium)
+        contextWindow: 1048576
+        defaultEffort: medium
+        efforts: [medium]
+      - id: gemini-4-neon-low
+        name: Gemini 4 Neon (Low)
+        contextWindow: 1048576
+        defaultEffort: low
+        efforts: [low]
+      - id: gemini-4-carbon-high
+        name: Gemini 4 Carbon (High)
+        contextWindow: 1048576
+        defaultEffort: high
+        efforts: [high]
+      - id: gemini-4-carbon-medium
+        name: Gemini 4 Carbon (Medium)
+        contextWindow: 1048576
+        defaultEffort: medium
+        efforts: [medium]
+      - id: gemini-4-carbon-low
+        name: Gemini 4 Carbon (Low)
+        contextWindow: 1048576
+        defaultEffort: low
+        efforts: [low]
+      - id: gemini-4-argon-high
+        name: Gemini 4 Argon (High)
+        contextWindow: 1048576
+        defaultEffort: high
+        efforts: [high]
+      - id: gemini-4-argon-medium
+        name: Gemini 4 Argon (Medium)
+        contextWindow: 1048576
+        defaultEffort: medium
+        efforts: [medium]
+      - id: gemini-4-argon-low
+        name: Gemini 4 Argon (Low)
+        contextWindow: 1048576
+        defaultEffort: low
+        efforts: [low]
+      - id: gemini-4-hydrogen-xhigh
+        name: Gemini 4 Hydrogen (XHigh)
+        contextWindow: 1048576
+        defaultEffort: xhigh
+        efforts: [xhigh]
+      - id: gemini-4-hydrogen-high
+        name: Gemini 4 Hydrogen (High)
+        contextWindow: 1048576
+        defaultEffort: high
+        efforts: [high]
+      - id: gemini-4-hydrogen-medium
+        name: Gemini 4 Hydrogen (Medium)
+        contextWindow: 1048576
+        defaultEffort: medium
+        efforts: [medium]
+      - id: gemini-4-hydrogen-low
+        name: Gemini 4 Hydrogen (Low)
+        contextWindow: 1048576
+        defaultEffort: low
+        efforts: [low]
+      - id: gemini-3.8-flash-high
+        name: Gemini 3.8 Flash (High)
+        contextWindow: 1048576
+        defaultEffort: high
+        efforts: [high]
+      - id: gemini-3.8-flash-medium
+        name: Gemini 3.8 Flash (Medium)
+        contextWindow: 1048576
+        defaultEffort: medium
+        efforts: [medium]
+      - id: gemini-3.8-flash-low
+        name: Gemini 3.8 Flash (Low)
+        contextWindow: 1048576
+        defaultEffort: low
+        efforts: [low]
+      - id: claude-opus-5-5-high
+        name: Claude Opus 5.5 (High)
+        contextWindow: 200000
+        defaultEffort: high
+        efforts: [high]
+      - id: claude-opus-5-5-medium
+        name: Claude Opus 5.5 (Medium)
+        contextWindow: 200000
+        defaultEffort: medium
+        efforts: [medium]
+      - id: claude-opus-5-5-low
+        name: Claude Opus 5.5 (Low)
+        contextWindow: 200000
+        defaultEffort: low
+        efforts: [low]
+      - id: claude-sonnet-5-5-high
+        name: Claude Sonnet 5.5 (High)
+        contextWindow: 200000
+        defaultEffort: high
+        efforts: [high]
+      - id: claude-sonnet-5-5-medium
+        name: Claude Sonnet 5.5 (Medium)
+        contextWindow: 200000
+        defaultEffort: medium
+        efforts: [medium]
+      - id: claude-sonnet-5-5-low
+        name: Claude Sonnet 5.5 (Low)
+        contextWindow: 200000
+        defaultEffort: low
+        efforts: [low]
+      - id: gpt-oss-120b-medium
+        name: GPT-OSS 120B (Medium)
+        contextWindow: 131072
+        defaultEffort: medium
+        efforts: [medium]

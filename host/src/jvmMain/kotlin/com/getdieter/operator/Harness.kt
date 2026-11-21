@@ -71,13 +71,9 @@ class Harness(
     }
 
     /** Lays the build's runtime sources over the archive's node_modules, again whenever the shipped sources change
-     *  (their digest is kept next to the directory). */
+     *  (their digest is kept next to the directory), and writes the harness catalog ($DIETER_HOME/harnesses.yaml). */
     fun buildRuntimeDir() {
-        val stale = File(home, "harnesses.yaml")   // catalog override of the pre-fork builds
-        if (stale.exists()) {
-            stale.delete()
-            Log.line("harness: removed the old catalog override (the daemon's own catalog has Antigravity)")
-        }
+        writeCatalog(home)
         if (!sources.isDirectory || !staged) return
         val names = sources.list().orEmpty().filter { it.endsWith(".mjs") || it.endsWith(".json") }.sorted()
         val digest = MessageDigest.getInstance("SHA-256").run {
@@ -153,6 +149,61 @@ class Harness(
             "x86_64" to "1a9899c23c987371660cb81c6deae2aa26bc365c3f7a9453868f3e9df5a04746",
         )
         val ASSET = mapOf("aarch64" to "dieter-harness-runtime-linux-arm64.tar.gz", "x86_64" to "dieter-harness-runtime-linux-amd64.tar.gz")
+        val CATALOG_YAML: String by lazy {
+            Harness::class.java.getResource("/operator/harnesses.yaml")!!.readText()
+        }
+        private val AGY_MODEL_LINE = Regex("""^([a-z0-9][a-z0-9._-]*)(?:\t|\s{2,})(.+)$""")
+        private val EFFORT_SUFFIX = Regex("""-(low|medium|high|xhigh|max)$""")
+
+        /**
+         * The daemon's harness catalog (`$DIETER_HOME/harnesses.yaml`), with the bundled Antigravity model list plus any
+         * new models discovered from `agy models` (whose non-TTY output uses a single tab between ID and name, which the
+         * pinned daemon's `\s{2,}` pattern does not match).
+         */
+        fun catalogYaml(agyModels: String? = null): String {
+            val base = CATALOG_YAML.trimEnd() + "\n"
+            if (agyModels.isNullOrBlank()) return base
+            val known = Regex("""^\s*-\s+id:\s+(\S+)\s*$""", RegexOption.MULTILINE)
+                .findAll(base).map { it.groupValues[1] }.toMutableSet()
+            val extra = StringBuilder()
+            for (raw in agyModels.lineSequence()) {
+                val line = raw.substringAfterLast('\r').trim()
+                val match = AGY_MODEL_LINE.matchEntire(line) ?: continue
+                val id = match.groupValues[1].trim()
+                val name = match.groupValues[2].trim().replace("\"", "\\\"")
+                if (id.isEmpty() || name.isEmpty() || !known.add(id)) continue
+                val ctx = when {
+                    id.startsWith("gemini-") -> 1048576
+                    id.startsWith("claude-") -> 200000
+                    id.startsWith("gpt-oss-") -> 131072
+                    else -> 0
+                }
+                val effort = EFFORT_SUFFIX.find(id)?.groupValues?.get(1)
+                extra.append("      - id: $id\n")
+                extra.append("        name: \"$name\"\n")
+                if (ctx > 0) extra.append("        contextWindow: $ctx\n")
+                if (effort != null) {
+                    extra.append("        defaultEffort: $effort\n")
+                    extra.append("        efforts: [$effort]\n")
+                }
+            }
+            return if (extra.isEmpty()) base else base + extra.toString()
+        }
+
+        fun writeCatalog(home: File, agyModels: String? = null, userHome: File? = null) {
+            home.mkdirs()
+            val discovered = agyModels ?: userHome?.let { u ->
+                File(u, ".gemini/antigravity-cli/antigravity-oauth-token").takeIf { it.exists() }?.let {
+                    Command.run(listOf("agy", "models"), cwd = u, timeout = 15.seconds, env = mapOf("HOME" to u.path))
+                        ?.takeIf { it.exit == 0 }?.stdout
+                }
+            }
+            val file = File(home, "harnesses.yaml")
+            val content = catalogYaml(discovered)
+            if (!file.exists() || file.readText() != content) {
+                file.writeText(content)
+            }
+        }
 
         /** Python's platform.machine() names, which the archives go by. */
         fun machine(osArch: String = System.getProperty("os.arch")) = if (osArch == "amd64") "x86_64" else osArch

@@ -119,6 +119,13 @@ class StartupTest {
         assertEquals(setOf("node_modules", "runner.mjs", "package.json"), harness.runtimeDir.list()!!.toSet())
         // the digest the Python bridge wrote (sha256 over name NUL content NUL, sorted): an update does not lay them again
         assertEquals("eedc0958607a54911310c8c36001463b5630cbf1ecfd0407341914d67e146fdf", File(harness.dir, ".runtime-sources").readText())
+        val catalog = File(home, "dieter/harnesses.yaml").readText()
+        for (model in listOf("gemini-4-neon-xhigh", "gemini-4-carbon-high", "gemini-4-argon-high", "gemini-4-hydrogen-xhigh", "gemini-3.8-flash-high")) {
+            assertTrue("id: $model" in catalog, "harnesses.yaml includes $model")
+        }
+        val merged = Harness.catalogYaml("Fetching available models...\rgemini-4-helium-xhigh\tGemini 4 Helium (XHigh)\ngemini-4-carbon-high\tGemini 4 Carbon (High)\n")
+        assertTrue("id: gemini-4-helium-xhigh" in merged && "defaultEffort: xhigh" in merged && "contextWindow: 1048576" in merged)
+        assertEquals(1, Regex("id: gemini-4-carbon-high\\b").findAll(merged).count())
     }
 
     @Test
