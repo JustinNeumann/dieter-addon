@@ -905,7 +905,33 @@ class DemoData {
         fun modelsFor(provider: String): List<AgentPickerItem> =
             when (provider) {
                 "codex" -> listOf(AgentPickerItem("gpt-5.5", "GPT-5.5"))
-                "antigravity" -> listOf(AgentPickerItem("gemini-3-pro", "Gemini 3 Pro"))
+                "antigravity" ->
+                    listOf(
+                        AgentPickerItem("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"),
+                        AgentPickerItem("gemini-4-neon-xhigh", "Gemini 4 Neon (XHigh)"),
+                        AgentPickerItem("gemini-4-neon-high", "Gemini 4 Neon (High)"),
+                        AgentPickerItem("gemini-4-neon-medium", "Gemini 4 Neon (Medium)"),
+                        AgentPickerItem("gemini-4-neon-low", "Gemini 4 Neon (Low)"),
+                        AgentPickerItem("gemini-4-carbon-high", "Gemini 4 Carbon (High)"),
+                        AgentPickerItem("gemini-4-carbon-medium", "Gemini 4 Carbon (Medium)"),
+                        AgentPickerItem("gemini-4-carbon-low", "Gemini 4 Carbon (Low)"),
+                        AgentPickerItem("gemini-4-argon-high", "Gemini 4 Argon (High)"),
+                        AgentPickerItem("gemini-4-argon-medium", "Gemini 4 Argon (Medium)"),
+                        AgentPickerItem("gemini-4-argon-low", "Gemini 4 Argon (Low)"),
+                        AgentPickerItem("gemini-4-hydrogen-xhigh", "Gemini 4 Hydrogen (XHigh)"),
+                        AgentPickerItem("gemini-4-hydrogen-high", "Gemini 4 Hydrogen (High)"),
+                        AgentPickerItem("gemini-4-hydrogen-medium", "Gemini 4 Hydrogen (Medium)"),
+                        AgentPickerItem("gemini-4-hydrogen-low", "Gemini 4 Hydrogen (Low)"),
+                        AgentPickerItem("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)"),
+                        AgentPickerItem("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"),
+                        AgentPickerItem("claude-opus-5-5-high", "Claude Opus 5.5 (High)"),
+                        AgentPickerItem("claude-opus-5-5-medium", "Claude Opus 5.5 (Medium)"),
+                        AgentPickerItem("claude-opus-5-5-low", "Claude Opus 5.5 (Low)"),
+                        AgentPickerItem("claude-sonnet-5-5-high", "Claude Sonnet 5.5 (High)"),
+                        AgentPickerItem("claude-sonnet-5-5-medium", "Claude Sonnet 5.5 (Medium)"),
+                        AgentPickerItem("claude-sonnet-5-5-low", "Claude Sonnet 5.5 (Low)"),
+                        AgentPickerItem("gpt-oss-120b-medium", "GPT-OSS 120B (Medium)"),
+                    )
                 else -> listOf(AgentPickerItem("opus", "Opus"), AgentPickerItem("sonnet", "Sonnet"))
             }
 

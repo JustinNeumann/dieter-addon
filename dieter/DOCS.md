@@ -179,15 +179,15 @@ The harnesses run inside the container, so they need their own credentials:
 
   The add-on installs it in its own home so `agy` finds it there. The Antigravity harness runs one headless
   `agy` per turn with `--dangerously-skip-permissions` (Dieter's allow-all mode), continued with
-  `--conversation`. Default model Gemini 3.8 Flash (High); Gemini 4 Argon, Claude Opus/Sonnet 5.5 and
-  GPT-OSS are selectable. Dieter's host tools (present_content, the background process tools) reach `agy`
+  `--conversation`. Default model Gemini 3.8 Flash (High); Gemini 4 Neon, Gemini 4 Carbon, Gemini 4 Argon,
+  Gemini 4 Hydrogen, Claude Opus/Sonnet 5.5 and GPT-OSS are selectable. Dieter's host tools (present_content, the background process tools) reach `agy`
   as the MCP server `dieter`, which the harness adapter registers in agy's config on the first turn that
   offers them (`agy mcp add dieter …`, kept in `/data/.gemini/config/mcp_config.json`): the stdio proxy
   `antigravity-host-tools.mjs` of the staged runtime forwards calls to the harness worker of the running
   turn and offers no tools outside one. Compaction
   runs agy's own `/compact`. Not available through the CLI: suspend/continue, messages into a running
   turn and image input (attachments are handed over as files). Its quota (`agy --print=/quota`) comes in groups whose models share a
-  weekly and a 5-hour window (Gemini Flash/Pro; Claude and GPT-OSS; Gemini 4 Argon): **More → Usage** shows
+  weekly and a 5-hour window (Gemini Models; Claude and GPT models): **More → Usage** shows
   each window with the models it covers, the model pickers show the share left for each model.
 
 Restart the add-on after changing tokens.

@@ -727,9 +727,9 @@ internal class DemoBridge(
                         "provider" to "antigravity",
                         "windows" to
                             listOf(
-                                mapOf("group" to "Gemini", "label" to "Gemini · 5h", "remaining" to 84, "resets_at" to (clock() + 3.hours).toString(), "models" to listOf("Gemini 3 Pro", "Gemini 3 Flash")),
-                                mapOf("group" to "Gemini", "label" to "Gemini · Week", "remaining" to 72, "resets_at" to (clock() + 4.days).toString(), "models" to listOf("Gemini 3 Pro", "Gemini 3 Flash")),
-                                mapOf("group" to "Claude", "label" to "Claude · 5h", "remaining" to 91, "resets_at" to (clock() + 2.hours).toString(), "models" to listOf("Claude Opus 4.6", "Claude Sonnet 4.6")),
+                                mapOf("group" to "Gemini Models", "label" to "Gemini Models · 5h", "remaining" to 84, "resets_at" to (clock() + 3.hours).toString(), "models" to listOf("Gemini 4 Neon", "Gemini 4 Carbon", "Gemini 4 Argon", "Gemini 4 Hydrogen", "Gemini 3.8 Flash")),
+                                mapOf("group" to "Gemini Models", "label" to "Gemini Models · Week", "remaining" to 72, "resets_at" to (clock() + 4.days).toString(), "models" to listOf("Gemini 4 Neon", "Gemini 4 Carbon", "Gemini 4 Argon", "Gemini 4 Hydrogen", "Gemini 3.8 Flash")),
+                                mapOf("group" to "Claude and GPT models", "label" to "Claude and GPT models · 5h", "remaining" to 91, "resets_at" to (clock() + 2.hours).toString(), "models" to listOf("Claude Opus 5.5", "Claude Sonnet 5.5", "GPT-OSS 120B")),
                             ),
                     )
                 ),
@@ -811,6 +811,36 @@ internal class DemoBridge(
                 mapOf(
                     "id" to "codex", "name" to "Codex", "default_model" to "gpt-5.5",
                     "models" to listOf(mapOf("id" to "gpt-5.5", "name" to "GPT-5.5", "efforts" to listOf("low", "medium", "high"))),
+                ),
+                mapOf(
+                    "id" to "antigravity", "name" to "Antigravity", "default_model" to "gemini-3.8-flash-high",
+                    "models" to
+                        listOf(
+                            mapOf("id" to "gemini-4-neon-xhigh", "name" to "Gemini 4 Neon (XHigh)", "efforts" to listOf("xhigh")),
+                            mapOf("id" to "gemini-4-neon-high", "name" to "Gemini 4 Neon (High)", "efforts" to listOf("high")),
+                            mapOf("id" to "gemini-4-neon-medium", "name" to "Gemini 4 Neon (Medium)", "efforts" to listOf("medium")),
+                            mapOf("id" to "gemini-4-neon-low", "name" to "Gemini 4 Neon (Low)", "efforts" to listOf("low")),
+                            mapOf("id" to "gemini-4-carbon-high", "name" to "Gemini 4 Carbon (High)", "efforts" to listOf("high")),
+                            mapOf("id" to "gemini-4-carbon-medium", "name" to "Gemini 4 Carbon (Medium)", "efforts" to listOf("medium")),
+                            mapOf("id" to "gemini-4-carbon-low", "name" to "Gemini 4 Carbon (Low)", "efforts" to listOf("low")),
+                            mapOf("id" to "gemini-4-argon-high", "name" to "Gemini 4 Argon (High)", "efforts" to listOf("high")),
+                            mapOf("id" to "gemini-4-argon-medium", "name" to "Gemini 4 Argon (Medium)", "efforts" to listOf("medium")),
+                            mapOf("id" to "gemini-4-argon-low", "name" to "Gemini 4 Argon (Low)", "efforts" to listOf("low")),
+                            mapOf("id" to "gemini-4-hydrogen-xhigh", "name" to "Gemini 4 Hydrogen (XHigh)", "efforts" to listOf("xhigh")),
+                            mapOf("id" to "gemini-4-hydrogen-high", "name" to "Gemini 4 Hydrogen (High)", "efforts" to listOf("high")),
+                            mapOf("id" to "gemini-4-hydrogen-medium", "name" to "Gemini 4 Hydrogen (Medium)", "efforts" to listOf("medium")),
+                            mapOf("id" to "gemini-4-hydrogen-low", "name" to "Gemini 4 Hydrogen (Low)", "efforts" to listOf("low")),
+                            mapOf("id" to "gemini-3.8-flash-high", "name" to "Gemini 3.8 Flash (High)", "efforts" to listOf("high")),
+                            mapOf("id" to "gemini-3.8-flash-medium", "name" to "Gemini 3.8 Flash (Medium)", "efforts" to listOf("medium")),
+                            mapOf("id" to "gemini-3.8-flash-low", "name" to "Gemini 3.8 Flash (Low)", "efforts" to listOf("low")),
+                            mapOf("id" to "claude-opus-5-5-high", "name" to "Claude Opus 5.5 (High)", "efforts" to listOf("high")),
+                            mapOf("id" to "claude-opus-5-5-medium", "name" to "Claude Opus 5.5 (Medium)", "efforts" to listOf("medium")),
+                            mapOf("id" to "claude-opus-5-5-low", "name" to "Claude Opus 5.5 (Low)", "efforts" to listOf("low")),
+                            mapOf("id" to "claude-sonnet-5-5-high", "name" to "Claude Sonnet 5.5 (High)", "efforts" to listOf("high")),
+                            mapOf("id" to "claude-sonnet-5-5-medium", "name" to "Claude Sonnet 5.5 (Medium)", "efforts" to listOf("medium")),
+                            mapOf("id" to "claude-sonnet-5-5-low", "name" to "Claude Sonnet 5.5 (Low)", "efforts" to listOf("low")),
+                            mapOf("id" to "gpt-oss-120b-medium", "name" to "GPT-OSS 120B (Medium)", "efforts" to listOf("medium")),
+                        ),
                 ),
             )
     }

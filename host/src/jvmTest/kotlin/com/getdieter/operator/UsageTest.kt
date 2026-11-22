@@ -46,15 +46,36 @@ class UsageTest {
 
     @Test
     fun eachAntigravityModelGetsItsTightestWindow() {
-        val quota = listOf(obj("""{"provider": "antigravity", "windows": ${Usage.agyWindows(groups)}}"""))
+        val currentGroups = listOf(
+            obj(
+                """{"name": "Gemini Models", "description": "Models within this group: Gemini 4 Neon, Gemini 4 Carbon, Gemini 4 Argon, Gemini 4 Hydrogen, Gemini 3.8 Flash", "buckets": [
+                    {"window": "5h", "remaining_fraction": 0.87, "reset_time": "2026-11-21T10:23:28Z"}, {"window": "weekly", "remaining_fraction": 0.85, "reset_time": "2026-11-25T04:00:18Z"}]}""",
+            ),
+        )
+        val quota = listOf(obj("""{"provider": "antigravity", "windows": ${Usage.agyWindows(groups + currentGroups)}}"""))
         val harnesses = listOf(
-            obj("""{"id": "antigravity", "models": [{"id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash (High)"}, {"id": "gpt-oss", "name": "GPT OSS"}]}"""),
+            obj(
+                """{"id": "antigravity", "models": [
+                    {"id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash (High)"},
+                    {"id": "gemini-4-neon-xhigh", "name": "Gemini 4 Neon (XHigh)"},
+                    {"id": "gemini-4-carbon-high", "name": "Gemini 4 Carbon (High)"},
+                    {"id": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)"},
+                    {"id": "gemini-4-hydrogen-xhigh", "name": "Gemini 4 Hydrogen (XHigh)"},
+                    {"id": "gpt-oss", "name": "GPT OSS"}
+                ]}""",
+            ),
             obj("""{"id": "claude-code", "models": [{"id": "opus"}]}"""),
         )
         val out = Usage.agyModelQuota(harnesses, quota)
-        val (flash, oss) = out[0].objs("models")
+        val models = out[0].objs("models")
+        val flash = models[0]
+        val oss = models.last()
         assertEquals("Gemini Flash · Week", flash.obj("quota")!!.field("label"))
         assertEquals("12", flash.obj("quota")!!.field("remaining"))
+        for (m in models.subList(1, 5)) {
+            assertEquals("Gemini Models · Week", m.obj("quota")!!.field("label"), m.field("id"))
+            assertEquals("85", m.obj("quota")!!.field("remaining"), m.field("id"))
+        }
         assertEquals(JsonNull, oss["quota"])
         assertEquals(harnesses[1], out[1], "other harnesses stay as they are")
         assertNull(Usage.agyModelQuota(harnesses, emptyList())[0].objs("models")[0].obj("quota"))
