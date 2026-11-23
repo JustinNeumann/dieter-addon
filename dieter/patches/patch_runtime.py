@@ -134,6 +134,23 @@ PATCHES = {
             "  }",
         ),
         (
+            "    new HarnessAgent({\n"
+            "      harness: observeHarnessCapabilities(candidateHarness, capabilityCollector),\n"
+            "      sandbox,\n"
+            "      model,",
+            "    new HarnessAgent({\n"
+            "      harness: observeHarnessCapabilities(candidateHarness, capabilityCollector),\n"
+            "      model,",
+        ),
+        (
+            "  const sessionOptions = { sessionId: request.sessionId, abortSignal: controller.signal };",
+            "  const sessionOptions = {\n"
+            "    sessionId: request.sessionId,\n"
+            "    sandboxSession,\n"
+            "    abortSignal: controller.signal,\n"
+            "  };",
+        ),
+        (
             "} finally {\n  processBridge?.dispose();",
             "} finally {\n  await releaseTurnSlot?.();\n  processBridge?.dispose();",
         ),

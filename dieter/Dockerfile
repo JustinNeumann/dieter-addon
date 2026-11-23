@@ -46,18 +46,18 @@ RUN set -eu; \
 # Codex (npm) and Google's Antigravity CLI (`agy`). HOME is /data at runtime, so their configs persist.
 # Antigravity is pinned to one release: URL and SHA512 are what the installer's manifests
 # (https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_{arm64,amd64}.json)
-# listed on 2026-10-27; the installer (antigravity.google/cli/install.sh) would always take the latest.
+# listed on 2026-11-23; the installer (antigravity.google/cli/install.sh) would always take the latest.
 # Its post-install step (`agy install`) only edits shell profiles for PATH and is not needed here.
 ARG CLAUDE_VERSION=2.1.311
 ARG CODEX_VERSION=0.163.0
-ARG AGY_VERSION=1.4.8
-ARG AGY_BUILD=5447777392656384
+ARG AGY_VERSION=1.5.15
+ARG AGY_BUILD=5514532022517760
 RUN set -eu; \
     case "${BUILD_ARCH}" in \
       aarch64) C=linux-arm64; CSHA=2e2496c9a8065df93acb0fca2d341f59a6b8777649b2e025ab8c9bcd5eef61f3; \
-               A=linux-arm/cli_linux_arm64; ASHA=783ee9edd0f73e853af977e2848294ffb97b67b31ee19dccafb001f03f34b033371a2bb3371b61b78843c61bd4817ef1d2863a2d371b26513ea17d921c584bee ;; \
+               A=linux-arm/cli_linux_arm64; ASHA=d64ad759781b50dfacfa7d9826c0ad469959d01bdf5a170acd4c83472eba31c677baf0052ac8ab48eef40f0d3f0e26057e752aabd24331c79f4c881d4b872125 ;; \
       amd64)   C=linux-x64;   CSHA=86dc1fcc69498159eaf15f446613e847010f9036bfbbdffd4c49350be8489ada; \
-               A=linux-x64/cli_linux_x64;   ASHA=b23683771438e72bffe0a2231168f65a16a0d73ed2c7a8460b311dc5fe0c3c9d9dfc6cbfb7d8755173340071aa4cc5c7a552fb5d1be3fdd31c2b7559d67e404a ;; \
+               A=linux-x64/cli_linux_x64;   ASHA=af3f0be58b8475940d79f9abea19e762ecc3d265ea9f56cff8dd805e27ba299b44a305a79504a7ffe6ebdfa29a294c56edc4caed1875990bfaf2fef1508ec8b0 ;; \
     esac; \
     curl -fsSL -o /usr/local/bin/claude "https://downloads.claude.ai/claude-code-releases/${CLAUDE_VERSION}/${C}/claude"; \
     echo "${CSHA}  /usr/local/bin/claude" | sha256sum -c -; chmod 755 /usr/local/bin/claude; \
