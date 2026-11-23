@@ -26,21 +26,23 @@ import { raiseOomScoreAdj } from "./turn-resilience.mjs";
 // Turn suspension, history reads, mid-turn messages and image input are not available
 // through the CLI (images reach the agent as files, see local-attachments.mjs).
 //
-// Observed stream (agy 1.4.8):
+// Observed stream (agy 1.5.15):
 //   {"event":"init","conversation_id":…,"init":{"cwd":…,"model":…,"tools":[…],"permission_mode":…}}
 //   {"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"…"}}
 //   {"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{…}}}
 //   {"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE|DONE|ERROR","step_type":"tool","tool_name":"run_command","tool_info":{"name":…,"parameters":{…},"output":…,"error":{…}}}}
-//   {"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"system_message"|"checkpoint"|"user_input"}}
+//   {"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"system_message"|"checkpoint"|"user_input"|"error_message"}}
 //   {"event":"result","result":{"status":"SUCCESS|ERROR","response":…,"error":…,"usage":{"input_tokens":…,"output_tokens":…,"thinking_tokens":…,"cache_read_tokens":…,"total_tokens":…}}}
-// A step's usage is that model request (input_tokens = the context it saw); the result's usage is
-// the sum over the turn. Thinking is not streamed, only counted (thinking_tokens).
+// A step's usage is that model request (input_tokens = uncached input, cache_read_tokens = cached
+// input; their sum is the context the model saw); the result's usage is the sum over the turn.
+// Thinking is not streamed, only counted (thinking_tokens).
 // MCP calls appear as the tool "call_mcp_tool" with parameters {ServerName, ToolName, Arguments}.
 const HARNESS_ID = "antigravity";
 // Name of the MCP server through which agy reaches the host tools (antigravity-host-tools.mjs).
 export const HOST_TOOLS_SERVER = "dieter";
 const HOST_TOOLS_PROXY = fileURLToPath(new URL("./antigravity-host-tools.mjs", import.meta.url));
 const CONVERSATION_LOST = Symbol("conversation-lost");
+const CONVERSATION_CORRUPTED = Symbol("conversation-corrupted");
 const hostSchemaPath = new RegExp(`/antigravity-cli/mcp/${HOST_TOOLS_SERVER}/[^/]+\\.json$`);
 
 // `agy mcp add` of the proxy, once per process; resolves with a problem description when it failed.
@@ -67,9 +69,7 @@ function registerHostTools(command) {
   return hostToolsRegistration;
 }
 
-// agy prints a structured `AGY_ERROR: {...}` line on stderr when a run fails. Turn it into one
-// sentence for the conversation; the raw diagnostics stay out of the user-visible text.
-function describeFailure(resultError, stderrText) {
+function parseAgyError(stderrText) {
   let info;
   for (const line of stderrText.split("\n")) {
     const i = line.indexOf("AGY_ERROR:");
@@ -80,7 +80,31 @@ function describeFailure(resultError, stderrText) {
       // not JSON: ignore
     }
   }
+  return info;
+}
+
+// Stored-conversation errors that cannot succeed on retry because the saved history itself contains
+// corrupted or malformed media/input (e.g. a corrupt image recorded by an older agy CLI).
+function isCorruptedConversationError(resultError, info) {
   const text = (resultError || info?.short_error || "").trim();
+  const status = info?.status || "";
+  if (status === "INVALID_MEDIA" || /\bINVALID_MEDIA\b/i.test(text)) return true;
+  if (
+    (status === "INVALID_ARGUMENT" || /\bINVALID_ARGUMENT\b/i.test(text)) &&
+    /file or media data is empty, corrupted, or malformed|unable to process input|invalid.*media/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+// agy prints a structured `AGY_ERROR: {...}` line on stderr when a run fails. Turn it into one
+// sentence for the conversation; the raw diagnostics stay out of the user-visible text.
+function describeFailure(resultError, stderrText, fallback = "") {
+  const info = parseAgyError(stderrText);
+  const text = (resultError || info?.short_error || fallback || "").trim();
   const resets = text.match(/Resets in ([0-9hms]+)/)?.[1];
   const status = info?.status || "";
   if (status === "RESOURCE_EXHAUSTED" || /quota reached/i.test(text)) {
@@ -250,8 +274,12 @@ export function createAntigravity(settings = {}) {
             const args = ["--output-format", "stream-json"];
             if (turn.model) args.push("--model", turn.model);
             // agy model ids carry their reasoning level (gemini-4-neon-xhigh, gemini-3.8-flash-high, claude-opus-5-5-low, …)
-            // and agy rejects every --effort that differs from it; such a model is run at its own level.
-            if (effort && !/-(low|medium|high|xhigh|max)$/.test(turn.model || ""))
+            // or are orchestrator models (gemini-pro-orchestrator-neon, …), and agy rejects --effort for both.
+            if (
+              effort &&
+              !/-(low|medium|high|xhigh|max)$/.test(turn.model || "") &&
+              !/(?:^|-)orchestrator(?:$|-)/i.test(turn.model || "")
+            )
               args.push("--effort", effort);
             if (resumeConversation) args.push("--conversation", resumeConversation);
             if (allowAll) args.push("--dangerously-skip-permissions"); // Dieter's allow-all permission mode; headless agy denies tools otherwise
@@ -275,19 +303,21 @@ export function createAntigravity(settings = {}) {
           const done = (async () => {
             try {
               const outcome = await run(state.conversationId);
-              if (outcome !== CONVERSATION_LOST) return;
-              // agy no longer has the stored conversation (it warned and would start a fresh one without
-              // Dieter's instructions): say so and start the fresh one with the instructions.
+              if (outcome !== CONVERSATION_LOST && outcome !== CONVERSATION_CORRUPTED) return;
+              // agy no longer has the stored conversation (or rejected its stored history as corrupted):
+              // say so and start a fresh one with Dieter's instructions.
               state.conversationId = null;
               state.instructionsApplied = false;
-              const id = "antigravity-conversation-lost";
+              const id =
+                outcome === CONVERSATION_CORRUPTED
+                  ? "antigravity-conversation-corrupted"
+                  : "antigravity-conversation-lost";
+              const note =
+                outcome === CONVERSATION_CORRUPTED
+                  ? "_Antigravity could not resume the stored conversation of this chat because its saved history contains corrupted or malformed media; a new one starts here without the earlier history._\n\n"
+                  : "_Antigravity no longer has the stored conversation of this chat; a new one starts here without the earlier history._\n\n";
               turn.emit({ type: "text-start", id });
-              turn.emit({
-                type: "text-delta",
-                id,
-                delta:
-                  "_Antigravity no longer has the stored conversation of this chat; a new one starts here without the earlier history._\n\n",
-              });
+              turn.emit({ type: "text-delta", id, delta: note });
               turn.emit({ type: "text-end", id });
               await run(null);
             } finally {
@@ -359,20 +389,23 @@ function promptToText(prompt) {
 
 function usageOf(u) {
   const n = (v) => (typeof v === "number" ? v : undefined);
-  const input = n(u?.input_tokens);
+  const noCache = n(u?.input_tokens);
   const cacheRead = n(u?.cache_read_tokens);
+  const inputTotal =
+    noCache !== undefined || cacheRead !== undefined ? (noCache ?? 0) + (cacheRead ?? 0) : undefined;
   const output = n(u?.output_tokens);
   const reasoning = n(u?.thinking_tokens);
   return {
     inputTokens: {
-      total: input,
-      noCache: input !== undefined && cacheRead !== undefined ? input - cacheRead : input,
+      total: inputTotal,
+      noCache,
       cacheRead,
       cacheWrite: undefined,
     },
     outputTokens: {
       total: output,
-      text: output !== undefined && reasoning !== undefined ? output - reasoning : output,
+      text:
+        output !== undefined && reasoning !== undefined ? Math.max(0, output - reasoning) : output,
       reasoning,
     },
     raw: u && typeof u === "object" ? u : undefined,
@@ -605,6 +638,7 @@ function runTurn({
             openReasoning.set(idx, id);
             emit({ type: "reasoning-start", id });
           }
+          emitted = true;
           emit({ type: "reasoning-delta", id, delta });
         }
         if (su.state === "DONE" || su.state === "ERROR") {
@@ -667,6 +701,7 @@ function runTurn({
       case "user_input":
       case "system_message":
       case "checkpoint":
+      case "error_message":
         return;
       default:
         emit({ type: "raw", rawValue: su });
@@ -736,16 +771,27 @@ function runTurn({
     child.on("close", (code, signal) => {
       abortSignal?.removeEventListener?.("abort", onAbort);
       const stderrText = stderr.join("");
+      const agyError = parseAgyError(stderrText);
       if (aborted) return fail(turnError("agent turn interrupted"));
       if (conversationLost) {
         state.conversationId = null;
         return resolve(CONVERSATION_LOST);
       }
+      if (
+        expectConversation &&
+        !emitted &&
+        (!result || result.status !== "SUCCESS") &&
+        isCorruptedConversationError(result?.error, agyError)
+      ) {
+        closeParts();
+        state.conversationId = null;
+        return resolve(CONVERSATION_CORRUPTED);
+      }
       closeParts();
       if (!result) {
         return fail(
           turnError(
-            describeFailure(`${command} exited (${signal || code}) without a result`, stderrText),
+            describeFailure("", stderrText, `${command} exited (${signal || code}) without a result`),
           ),
         );
       }
@@ -757,8 +803,9 @@ function runTurn({
         return reject(
           turnError(
             describeFailure(
-              result.error || `turn failed (${result.status || "unknown"})`,
+              result.error,
               stderrText,
+              `turn failed (${result.status || "unknown"})`,
             ),
           ),
         );
@@ -802,11 +849,11 @@ function runCompaction({ command, cwd, conversationId, current }) {
       if (!result)
         return reject(
           turnError(
-            describeFailure(`${command} exited (${signal || code}) without a result`, stderrText),
+            describeFailure("", stderrText, `${command} exited (${signal || code}) without a result`),
           ),
         );
       if (result.status !== "SUCCESS")
-        return reject(turnError(describeFailure(result.error || "compaction failed", stderrText)));
+        return reject(turnError(describeFailure(result.error, stderrText, "compaction failed")));
       resolve();
     });
     child.stdin.on("error", () => {});

@@ -2,6 +2,25 @@
 
 Version = bundled Dieter release + add-on revision (`0.6.429.1` = Dieter 0.6.429, add-on revision 1).
 
+## 0.6.431.51 (2026-11-23)
+
+- **Fix: Antigravity harness corrupted-media recovery, CLI 1.5.15, and HarnessAgent sandbox deprecation.**
+  - **Antigravity CLI updated from 1.4.8 to 1.5.15** (SHA512-verified for arm64 and amd64): includes the upstream
+    fixes where viewing a corrupt or oversized image via `read_file` returns a tool error instead of permanently
+    poisoning every subsequent turn with `INVALID_ARGUMENT (code 400): Unable to process input: the file or media data
+    is empty, corrupted, or malformed.`, plus retried stream-json turns reporting `SUCCESS` correctly.
+  - **Corrupted stored-conversation recovery (`patches/antigravity-runtime.mjs`):** if resuming an existing Antigravity
+    conversation fails before producing output with `INVALID_ARGUMENT` / `INVALID_MEDIA` (including chats already
+    poisoned under `agy` 1.4.8), the adapter now recovers automatically by starting a fresh conversation with Dieter's
+    instructions and a note instead of looping forever on Retry.
+  - **Eliminated `HarnessAgent: sandbox is deprecated` stderr noise (`patches/patch_runtime.py`):** patches `runner.mjs`
+    to pass the already-created `sandboxSession` to `agent.createSession()` instead of the deprecated `sandbox` option on
+    `new HarnessAgent()`.
+  - **Antigravity runtime polish (`patches/antigravity-runtime.mjs`):** omits `--effort` for `agy` 1.5.15 orchestrator
+    models (`gemini-pro-orchestrator*`), accounts for `agy`'s uncached `input_tokens` + `cache_read_tokens` without
+    producing negative `noCacheTokens`, suppresses housekeeping `error_message` steps, and surfaces `AGY_ERROR` details
+    when `agy` exits without a `result` event.
+
 ## 0.6.431.50 (2026-11-21)
 
 - **Antigravity models: Gemini 4 Neon, Carbon, Argon, Hydrogen.**

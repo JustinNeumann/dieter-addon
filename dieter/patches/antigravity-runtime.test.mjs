@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,7 +10,7 @@ import { createAntigravity } from "./antigravity-runtime.mjs";
 const PROXY = fileURLToPath(new URL("./antigravity-host-tools.mjs", import.meta.url));
 
 // A stand-in for `agy` that records its arguments and stdin and replays the stream-json events
-// observed from agy 1.4.8. Its behaviour is chosen with AGY_FIXTURE. No network, no credentials.
+// observed from agy 1.5.15. Its behaviour is chosen with AGY_FIXTURE. No network, no credentials.
 // `agy mcp add …` (the host tools registration) is recorded and succeeds; in the "host-tool"
 // fixture it drives the stdio MCP proxy like agy does and reports the call as a call_mcp_tool step.
 const fakeAgy = `
@@ -36,6 +36,38 @@ if (mode === "quota") {
   process.stderr.write('AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","short_error":"error: quota reached for gemini-4-argon. Resets in 3h12m"}\\n');
   out({ event: "result", result: { status: "ERROR", error: "quota reached for gemini-4-argon. Resets in 3h12m" } });
   process.exit(1);
+}
+if (mode === "stderr-only-error") {
+  process.stderr.write('AGY_ERROR: {"status":"INVALID_ARGUMENT","short_error":"INVALID_ARGUMENT (code 400): bad request from stderr"}\\n');
+  process.exit(3);
+}
+if (mode === "corrupt-resume" && resume) {
+  out({ event: "init", conversation_id: resume, init: { cwd: process.cwd() } });
+  step({ step_index: 4, state: "DONE", step_type: "user_input" });
+  step({ step_index: 5, state: "DONE", step_type: "system_message" });
+  step({ step_index: 6, state: "DONE", step_type: "error_message" });
+  process.stderr.write('AGY_ERROR: {"short_error":"INVALID_ARGUMENT (code 400): Unable to process input: the file or media data is empty, corrupted, or malformed.","status":"INVALID_ARGUMENT","error_code":400,"retryable":false}\\n');
+  out({ event: "result", result: { conversation_id: resume, status: "ERROR", response: "", error: "INVALID_ARGUMENT (code 400): Unable to process input: the file or media data is empty, corrupted, or malformed.", usage: usage(0, 0) } });
+  process.exit(3);
+}
+if (mode === "corrupt-midturn" && !resume) {
+  out({ event: "init", conversation_id: "conv-poisoned", init: { cwd: process.cwd() } });
+  step({ step_index: 0, state: "DONE", step_type: "user_input" });
+  step({ step_index: 1, state: "DONE", step_type: "agent_response", usage: usage(5348, 843, 407, 206700) });
+  step({ step_index: 2, state: "ACTIVE", step_type: "tool", tool_name: "read_file", tool_info: { name: "read_file", parameters: { Path: "/tmp/ha_proxy.jpg" } } });
+  step({ step_index: 2, state: "DONE", step_type: "tool", tool_name: "read_file", tool_info: { name: "read_file", parameters: { Path: "/tmp/ha_proxy.jpg" }, output: "" } });
+  step({ step_index: 3, state: "DONE", step_type: "error_message" });
+  process.stderr.write('AGY_ERROR: {"short_error":"INVALID_ARGUMENT (code 400): Unable to process input: the file or media data is empty, corrupted, or malformed.","status":"INVALID_ARGUMENT","error_code":400,"retryable":false}\\n');
+  out({ event: "result", result: { conversation_id: "conv-poisoned", status: "ERROR", response: "", error: "INVALID_ARGUMENT (code 400): Unable to process input: the file or media data is empty, corrupted, or malformed.", usage: usage(5348, 843, 407, 206700) } });
+  process.exit(3);
+}
+if (mode === "corrupt-midturn" && resume === "conv-poisoned") {
+  out({ event: "init", conversation_id: resume, init: { cwd: process.cwd() } });
+  step({ step_index: 4, state: "DONE", step_type: "user_input" });
+  step({ step_index: 5, state: "DONE", step_type: "error_message" });
+  process.stderr.write('AGY_ERROR: {"short_error":"INVALID_ARGUMENT (code 400): Unable to process input: the file or media data is empty, corrupted, or malformed.","status":"INVALID_ARGUMENT","error_code":400,"retryable":false}\\n');
+  out({ event: "result", result: { conversation_id: resume, status: "ERROR", response: "", error: "INVALID_ARGUMENT (code 400): Unable to process input: the file or media data is empty, corrupted, or malformed.", usage: usage(0, 0) } });
+  process.exit(3);
 }
 if (mode === "lost" && resume) {
   process.stderr.write('warning: conversation "' + resume + '" not found\\n');
@@ -163,11 +195,12 @@ test("Antigravity: a turn streams text, provider-executed tools and usage, and k
   const result = events.find((e) => e.type === "tool-result");
   assert.equal(result.toolCallId, call.toolCallId);
   assert.equal(result.isError, false);
-  // each model request closes a step with its own usage (the context it saw); the turn total is agy's sum
+  // each model request closes a step with its own usage (input_tokens is uncached, cache_read_tokens is cached)
   const steps = events.filter((e) => e.type === "finish-step");
   assert.equal(steps.length, 2);
   assert.deepEqual(steps[0].finishReason, { unified: "tool-calls", raw: "tool-calls" });
-  assert.equal(steps[0].usage.inputTokens.total, 100);
+  assert.equal(steps[0].usage.inputTokens.total, 102);
+  assert.equal(steps[0].usage.inputTokens.noCache, 100);
   assert.equal(steps[0].usage.inputTokens.cacheRead, 2);
   assert.equal(steps[0].usage.outputTokens.reasoning, 1);
   assert.deepEqual(steps[1].finishReason, { unified: "stop", raw: "SUCCESS" });
@@ -175,7 +208,8 @@ test("Antigravity: a turn streams text, provider-executed tools and usage, and k
   assert.ok(types(events).indexOf("finish-step") < types(events).indexOf("text-start", 2));
   const finish = events.find((e) => e.type === "finish");
   assert.equal(finish.finishReason.unified, "stop");
-  assert.equal(finish.totalUsage.inputTokens.total, 10);
+  assert.equal(finish.totalUsage.inputTokens.total, 12);
+  assert.equal(finish.totalUsage.inputTokens.noCache, 10);
   assert.equal(finish.totalUsage.inputTokens.cacheRead, 2);
   assert.equal(finish.totalUsage.outputTokens.reasoning, 1);
   assert.ok(
@@ -226,7 +260,7 @@ test("Antigravity: a turn streams text, provider-executed tools and usage, and k
   assert.equal(third.prompt, "Still there?\n");
 });
 
-test("Antigravity: a model id with its own level is run without --effort", async (t) => {
+test("Antigravity: a model id with its own level or orchestrator is run without --effort", async (t) => {
   const { root, command, calls } = await fixture(t);
   process.env.AGY_FIXTURE = "ok";
   const harness = createAntigravity({ command, effort: "xhigh" });
@@ -237,11 +271,14 @@ test("Antigravity: a model id with its own level is run without --effort", async
   });
   await runTurn(session, { prompt: "hi", model: "gemini-3.8-flash-high" });
   await runTurn(session, { prompt: "hi", model: "gemini-4-hydrogen-xhigh", effort: "high" });
-  const [first, second] = await calls();
+  await runTurn(session, { prompt: "hi", model: "gemini-pro-orchestrator-neon" });
+  const [first, second, third] = await calls();
   assert.ok(!first.argv.includes("--effort"));
   assert.ok(first.argv.includes("gemini-3.8-flash-high"));
   assert.ok(!second.argv.includes("--effort"));
   assert.ok(second.argv.includes("gemini-4-hydrogen-xhigh"));
+  assert.ok(!third.argv.includes("--effort"));
+  assert.ok(third.argv.includes("gemini-pro-orchestrator-neon"));
 });
 
 test("Antigravity: permission prompts are skipped only in allow-all mode", async (t) => {
@@ -493,5 +530,130 @@ test("Antigravity: unsupported capabilities are reported as such", async (t) => 
       resumeFrom: { harnessId: "codex", data: {} },
     }),
     /belongs to harness 'codex'/,
+  );
+});
+
+test("Antigravity: a resumed conversation rejected for corrupted media restarts fresh with instructions and a note", async (t) => {
+  const { root, command, calls } = await fixture(t);
+  process.env.AGY_FIXTURE = "corrupt-resume";
+  const harness = createAntigravity({ command });
+  const session = await harness.doStart({
+    sessionId: "s12",
+    sessionWorkDir: root,
+    permissionMode: "allow-all",
+    resumeFrom: {
+      type: "resume-session",
+      harnessId: "antigravity",
+      data: { conversationId: "conv-poisoned", instructionsApplied: true },
+    },
+  });
+  const { events, error } = await runTurn(session, { prompt: "retry", instructions: "Be brief." });
+  assert.equal(error, undefined);
+  const [first, second] = await calls();
+  assert.ok(first.argv.includes("conv-poisoned"));
+  assert.equal(first.prompt, "retry\n");
+  assert.ok(!second.argv.includes("--conversation"));
+  assert.match(second.prompt, /^<instructions>\nBe brief\.\n<\/instructions>\n\nretry\n$/);
+  assert.ok(
+    events.some(
+      (e) =>
+        e.type === "text-delta" &&
+        /could not resume the stored conversation.*corrupted or malformed media/.test(e.delta),
+    ),
+  );
+  assert.ok(!events.some((e) => e.type === "raw"), "error_message housekeeping step is suppressed");
+  assert.equal(types(events).filter((type) => type === "stream-start").length, 1);
+  assert.equal(types(events).filter((type) => type === "finish").length, 1);
+  assert.equal(types(events).at(-1), "finish");
+  const state = await session.doDetach();
+  assert.deepEqual(state.data, { conversationId: "conv-1", instructionsApplied: true });
+});
+
+test("Antigravity: mid-turn corrupted media fails without restarting, keeps usage non-negative, and recovers on retry", async (t) => {
+  const { root, command, calls } = await fixture(t);
+  process.env.AGY_FIXTURE = "corrupt-midturn";
+  const harness = createAntigravity({ command });
+  const session = await harness.doStart({
+    sessionId: "s13",
+    sessionWorkDir: root,
+    permissionMode: "allow-all",
+  });
+  const firstTurn = await runTurn(session, { prompt: "check image", instructions: "Be brief." });
+  assert.ok(firstTurn.error);
+  assert.match(firstTurn.error.message, /INVALID_ARGUMENT \(code 400\)/);
+  assert.ok(!firstTurn.events.some((e) => e.type === "raw"));
+  const finish = firstTurn.events.find((e) => e.type === "finish");
+  assert.equal(finish.finishReason.unified, "error");
+  assert.equal(finish.totalUsage.inputTokens.noCache, 5348);
+  assert.equal(finish.totalUsage.inputTokens.cacheRead, 206700);
+  assert.equal(finish.totalUsage.inputTokens.total, 212048);
+  assert.equal((await calls()).length, 1, "does not silently restart mid-turn");
+  // Next turn (Retry) tries the stored conversation, gets immediate 400 before output, and recovers cleanly
+  process.env.AGY_FIXTURE = "corrupt-resume";
+  const retry = await runTurn(session, { prompt: "check again", instructions: "Be brief." });
+  assert.equal(retry.error, undefined);
+  const [, failedResume, fresh] = await calls();
+  assert.ok(failedResume.argv.includes("conv-poisoned"));
+  assert.ok(!fresh.argv.includes("--conversation"));
+  assert.match(fresh.prompt, /^<instructions>\nBe brief\.\n<\/instructions>\n\ncheck again\n$/);
+});
+
+test("Antigravity: AGY_ERROR on stderr is surfaced when agy exits without a result event", async (t) => {
+  const { root, command } = await fixture(t);
+  process.env.AGY_FIXTURE = "stderr-only-error";
+  const harness = createAntigravity({ command });
+  const session = await harness.doStart({
+    sessionId: "s14",
+    sessionWorkDir: root,
+    permissionMode: "allow-all",
+  });
+  const { error } = await runTurn(session, { prompt: "hi" });
+  assert.ok(error);
+  assert.equal(error.message, "Antigravity: INVALID_ARGUMENT (code 400): bad request from stderr");
+});
+
+test("Antigravity: HarnessAgent with sandboxSession in createSession emits no sandbox deprecation warning", async (t) => {
+  const { HarnessAgent } = await import("@ai-sdk/harness/agent");
+  const { root, command } = await fixture(t);
+  await mkdir(join(root, "repo"), { recursive: true });
+  process.env.AGY_FIXTURE = "ok";
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(" "));
+  t.after(() => {
+    console.warn = originalWarn;
+  });
+  const sandboxSession = {
+    id: "test-local",
+    description: "test local sandbox",
+    defaultWorkingDirectory: root,
+    readFile: async () => null,
+    readBinaryFile: async () => null,
+    readTextFile: async () => null,
+    writeFile: async () => {},
+    writeBinaryFile: async () => {},
+    writeTextFile: async () => {},
+    spawn: async () => {
+      throw new Error("unused");
+    },
+    run: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+  };
+  const agent = new HarnessAgent({
+    harness: createAntigravity({ command }),
+    model: "gemini-4-argon",
+    permissionMode: "allow-all",
+    sandboxConfig: { workDir: "repo" },
+  });
+  const session = await agent.createSession({ sessionId: "s15", sandboxSession });
+  const result = await agent.stream({ session, prompt: "hi" });
+  let text = "";
+  for await (const chunk of result.stream) {
+    if (chunk.type === "text-delta") text += chunk.text;
+  }
+  await session.stop();
+  assert.equal(text, "Hello thereDone.");
+  assert.deepEqual(
+    warnings.filter((w) => /sandbox.*deprecated/i.test(w)),
+    [],
   );
 });
