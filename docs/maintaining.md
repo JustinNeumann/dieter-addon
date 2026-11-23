@@ -85,6 +85,41 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json SHA256SUMS --certificate-oi
 Weekly check of upstream `dbpprt/dieter` for changes to the daemon CLI, daemon API/env, harness runtime
 and release artifacts that affect the add-on (a scheduled task).
 
+- **2026-11-23**, screened through upstream **v0.7.452** (`e02a287d`, latest GitHub release; also **v0.7.451**
+  `1ff325b9`) and main (`526f3387`), from v0.7.450 (`f2f27576`, the screen of 2026-11-16): 7 commits. Relevant ones:
+  - Worktree lifecycle in empty repositories (`526f3387`, #227): `internal/git/unborn.go` detects unborn `HEAD` in
+    repositories with no commits yet; `internal/git/workspace/manager.go` creates orphan branches (`git worktree add
+    --orphan -b <branch> <path>`) when provisioning worktrees from an empty repository; `internal/git/changeset/service.go`
+    diffs against the empty tree and reports no target conflicts when the base branch is unborn; and
+    `internal/git/operations/manager.go` fast-forwards or initializes the unborn base branch on `merge_local` and skips
+    `origin/<base>` fetch when that remote branch does not exist yet. No CLI flags or proto schemas change.
+  - Missing Codex rollout recovery and sandbox session migration (`071f756f`, #226): in `internal/harness/runtime/runner.mjs`,
+    `HarnessAgent` no longer takes `sandbox` directly (`sessionOptions` passes `sandboxSession` to
+    `agent.createSession`), and a Codex turn whose `thread/resume` fails with `no rollout found for thread id …` (for
+    example after provider accounts moved `CODEX_HOME` into `DIETER_HOME/codex`) buffers early chunks, destroys the
+    stale resume session, starts a fresh Codex thread with a missing-context notice prepended to the user prompt, and
+    guards `suspend()` with `sessionReplacement` so `SIGUSR1` never checkpoints the gap between destroying the stale
+    session and starting the replacement turn.
+  - Apps (Kotlin, `1ff325b9` v0.7.451, `e02a287d` v0.7.452, #224/#225): floating liquid-glass navigation bar and
+    elevated card/glass composer in `apps/kotlin/ui` (`FloatingNavigation.kt`, `Composer.kt`, `Glass.kt`,
+    `GlassEffects.kt`, `LayoutModel.kt`, `SettingsScreen.kt` Appearance → Navigation / Composer), plus a new `internal
+    expect fun createGlassEffects(): GlassEffects` in `com.getdieter.mobile.platform` (`GlassEffects.kt`, with
+    `.android.kt`, `.ios.kt` and `.jvm.kt` actuals; `GlassEffects.jvm.kt` uses `org.jetbrains.skia.RuntimeEffect` /
+    `ImageFilter.makeRuntimeShader` on `GLASS_LENS_SHADER`).
+  - Release assets and gateway compatibility: v0.7.451 and v0.7.452 keep the same 19 asset names (`SHA256SUMS` +
+    sigstore bundle). `deploy/gateway/compatibility-policy.json` remains at `0.7.449`.
+
+  Nothing to adapt with what is pinned (`0.6.431-antigravity.11`, submodule `b1ce51fb`). The fork has no release newer
+  than `antigravity.11` and `web-addon` has not moved. The `ProjectEditor.kt` override is unchanged upstream. The pinned
+  runtime sources still match `RUNTIME_SOURCES_SHA`, and `patch_runtime.py` applies to them. Follow-ups:
+  - `fork-release` needs upstream **v0.7.452** (`e02a287d`) or main (`526f3387`) merged, then tag
+    `v0.7.452-antigravity.12`. All of `patch_runtime.py`'s anchors in `local-sandbox.mjs` and `runner.mjs` (except the
+    fork-only `host-questions.mjs` import) still match `526f3387` once, and the merge conflicts and provider-account
+    follow-ups noted on 2026-11-16 still apply.
+  - Moving the submodule (`web-addon` <- `526f3387`, together with the daemon bump) needs, in addition to the items
+    listed on 2026-11-16, a `web/src/wasmJsMain` actual for
+    `com.getdieter.mobile.platform.createGlassEffects(): GlassEffects` (either compiling `GlassEffects.jvm.kt`'s Skia
+    `RuntimeEffect`/`ImageFilter` shader implementation on Kotlin/Wasm or providing a `GlassEffects` actual).
 - **2026-11-16**, screened through upstream **v0.7.450** (`f2f27576`, = main; latest GitHub releases **v0.7.448**
   `76442c3e` and pre-release **v0.7.449** `9dcd1707`), from main `e93d4f37` (the screen of 2026-11-09): 20 commits.
   Relevant ones:
